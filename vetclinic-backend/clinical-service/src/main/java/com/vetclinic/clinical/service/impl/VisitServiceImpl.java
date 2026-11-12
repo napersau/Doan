@@ -122,6 +122,8 @@ public class VisitServiceImpl implements VisitService {
         Long petId = request.petId();
         Long appointmentId = request.appointmentId();
         String symptoms = blankToNull(request.initialSymptoms());
+        // Bác sĩ chọn ngay khi tiếp nhận (tùy chọn): kiểm tra qua Feign NGOÀI transaction
+        Long doctorId = request.doctorId() == null ? null : fetchActiveDoctor(request.doctorId()).id();
 
         if (appointmentId != null) {
             if (visitRepository.existsByAppointmentId(appointmentId)) {
@@ -151,11 +153,11 @@ public class VisitServiceImpl implements VisitService {
         String finalSymptoms = symptoms;
         return lockService.runLocked(List.of("vetclinic:visit-pet:" + petId), () -> transactionTemplate.execute(
                 tx -> createVisit(actor.id(), finalPetId, appointmentId, finalSymptoms,
-                        Boolean.TRUE.equals(request.emergency()))));
+                        Boolean.TRUE.equals(request.emergency()), doctorId)));
     }
 
     private VisitResponse createVisit(Long receptionistId, Long petId, Long appointmentId, String symptoms,
-                                      boolean emergency) {
+                                      boolean emergency, Long doctorId) {
         Pet pet = petRepository.findWithSpeciesById(petId)
                 .orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
         if (visitRepository.existsByPetIdAndStatusIn(petId, VisitStatus.ACTIVE)) {
@@ -171,6 +173,7 @@ public class VisitServiceImpl implements VisitService {
                 .visitCode("TMP-" + UUID.randomUUID())
                 .pet(pet)
                 .appointmentId(appointmentId)
+                .doctorId(doctorId)
                 .receptionistId(receptionistId)
                 .emergency(emergency)
                 .initialSymptoms(symptoms)
@@ -184,17 +187,12 @@ public class VisitServiceImpl implements VisitService {
 
         support.record(visit.getId(), null, VisitStatus.WAITING, receptionistId,
                 (appointmentId == null ? "Tiếp nhận khách vãng lai" : "Tiếp nhận khách có lịch hẹn #" + appointmentId)
-                        + (emergency ? " (CẤP CỨU)" : ""));
+                        + (emergency ? " (CẤP CỨU)" : "")
+                        + (doctorId == null ? "" : ", xếp vào hàng đợi Bác sĩ #" + doctorId));
         // Chỉ được gửi sang RabbitMQ SAU KHI commit (DomainEventRabbitPublisher): appointment-service sẽ chuyển lịch hẹn sang CHECKED_IN
         eventPublisher.publishEvent(new VisitCheckedInEvent(UUID.randomUUID(), now, receptionistId, visit.getId(),
-                visit.getVisitCode(), pet.getId(), appointmentId, emergency));
+                visit.getVisitCode(), pet.getId(), appointmentId, emergency, doctorId));
         return assembler.summary(visit);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<VisitResponse> waitingQueue() {
-        return assembler.summaries(visitRepository.findQueueByStatus(VisitStatus.WAITING));
     }
 
     @Override
@@ -255,35 +253,37 @@ public class VisitServiceImpl implements VisitService {
 
     // ================================================================== phân công Bác sĩ (UC-21)
 
-    /** KHÔNG @Transactional (Feign ngoài transaction, khóa tên theo Bác sĩ phải còn giữ sau commit). */
+    /** KHÔNG @Transactional: kiểm tra Bác sĩ qua Feign NGOÀI transaction; việc ghi chạy trong transactionTemplate. */
     @Override
     public VisitResponse assignDoctor(Long id, AssignDoctorRequest request) {
         Actor actor = currentActor();
         UserSummaryResponse doctor = fetchActiveDoctor(request.doctorId());
-        return lockService.runLocked(List.of("vetclinic:doctor:" + doctor.id()),
-                () -> transactionTemplate.execute(tx -> applyAssignment(actor.id(), id, doctor)));
+        return transactionTemplate.execute(tx -> applyAssignment(id, doctor));
     }
 
-    private VisitResponse applyAssignment(Long receptionistId, Long visitId, UserSummaryResponse doctor) {
-        PetVisit visit = support.lock(visitId);
-        support.assertStatus(visit, VisitStatus.WAITING, "Chỉ phân công được ca đang chờ khám (WAITING)");
+    private VisitResponse applyAssignment(Long visitId, UserSummaryResponse doctor) {
+        PetVisit visit = support.lock(visitId);   // khóa dòng + @Version: người đến sau thấy trạng thái mới nhất (FR-25)
+        support.assertStatus(visit, VisitStatus.WAITING, "Chỉ xếp / chuyển được ca đang chờ khám (WAITING)");
         if (doctor.id().equals(visit.getDoctorId())) {
-            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Ca này đã được phân công cho bác sĩ này");
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Ca này đã được xếp vào hàng đợi của bác sĩ này");
         }
-
-        // FR-25: kiểm tra lại trạng thái Bác sĩ NGAY TRONG giao dịch và dưới khóa của Bác sĩ đó
-        DoctorStatus status = doctorStatusService.statusOf(doctor.id());
-        if (status == DoctorStatus.BUSY) {
-            throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE);
-        }
-
-        boolean reassigned = visit.getDoctorId() != null;
+        // KHÔNG kiểm tra Bác sĩ rảnh/bận (v3.0). Giữ nguyên queue_order: ca đến trước vẫn đứng trước trong hàng đợi mới.
+        // Trạng thái không đổi nên không ghi pet_visit_status_histories.
         visit.setDoctorId(doctor.id());
         visitRepository.save(visit);
-        // Phân công không đổi trạng thái: from = to, chi tiết ở notes
-        support.record(visit.getId(), VisitStatus.WAITING, VisitStatus.WAITING, receptionistId,
-                (reassigned ? "Đổi sang bác sĩ " : "Phân công bác sĩ ") + doctor.fullName()
-                        + (doctor.roomNumber() == null ? "" : " (phòng " + doctor.roomNumber() + ")"));
+        return assembler.summary(visit).withAssignedRoom(doctor.roomNumber());
+    }
+
+    @Override
+    @Transactional
+    public VisitResponse unassignDoctor(Long id) {
+        PetVisit visit = support.lock(id);
+        support.assertStatus(visit, VisitStatus.WAITING, "Chỉ gỡ phân công được ca đang chờ khám (WAITING)");
+        if (visit.getDoctorId() == null) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Ca này chưa được xếp vào hàng đợi của bác sĩ nào");
+        }
+        visit.setDoctorId(null);
+        visitRepository.save(visit);
         return assembler.summary(visit);
     }
 

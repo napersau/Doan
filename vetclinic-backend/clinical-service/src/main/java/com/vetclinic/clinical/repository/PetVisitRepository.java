@@ -37,11 +37,25 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
      * Thứ tự MỌI hàng đợi (v3.0): cấp cứu chưa bị đẩy lùi lên đầu, còn lại theo queue_order tăng dần (số nhỏ gọi trước), cùng
      * giá trị thì theo id. Không còn tầng "có hẹn đúng giờ" và không còn cột scheduled_at. Chỉ mục idx_visits_queue
      * (doctor_id, status, is_emergency, queue_order).
+     * <p>Danh sách chờ phân công: ca WAITING chưa có Bác sĩ (doctor_id IS NULL).
      */
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    @Query("select v from PetVisit v where v.status = :status "
+    @Query("select v from PetVisit v where v.status = com.vetclinic.clinical.constant.VisitStatus.WAITING and v.doctorId is null "
             + "order by case when (v.emergency = true and v.skipCount = 0) then 0 else 1 end asc, v.queueOrder asc, v.id asc")
-    List<PetVisit> findQueueByStatus(@Param("status") VisitStatus status);
+    List<PetVisit> findUnassignedWaiting();
+
+    /** Hàng đợi riêng của nhiều Bác sĩ (ca WAITING và RESULTS_READY), theo thứ tự hàng đợi; nhóm theo doctorId ở tầng ứng dụng. */
+    @EntityGraph(attributePaths = {"pet", "pet.species"})
+    @Query("select v from PetVisit v where v.doctorId in :doctorIds "
+            + "and v.status in (com.vetclinic.clinical.constant.VisitStatus.WAITING, com.vetclinic.clinical.constant.VisitStatus.RESULTS_READY) "
+            + "order by case when (v.emergency = true and v.skipCount = 0) then 0 else 1 end asc, v.queueOrder asc, v.id asc")
+    List<PetVisit> findQueueOfDoctors(@Param("doctorIds") Collection<Long> doctorIds);
+
+    /** Số ca đang chờ (WAITING, RESULTS_READY) của từng Bác sĩ: các dòng [doctorId, count]. */
+    @Query("select v.doctorId, count(v) from PetVisit v where v.doctorId is not null "
+            + "and v.status in (com.vetclinic.clinical.constant.VisitStatus.WAITING, com.vetclinic.clinical.constant.VisitStatus.RESULTS_READY) "
+            + "group by v.doctorId")
+    List<Object[]> countWaitingByDoctor();
 
     /** Các ca của một Bác sĩ (hàng đợi riêng + ca đang khám), cùng thứ tự hàng đợi như findQueueByStatus. */
     @EntityGraph(attributePaths = {"pet", "pet.species"})

@@ -1,0 +1,19 @@
+package com.vetclinic.clinical.service;
+
+import com.vetclinic.clinical.dto.response.QueueBoardResponse;
+import com.vetclinic.clinical.dto.response.VisitResponse;
+
+import java.util.List;
+
+/**
+ * Hàng đợi riêng của từng Bác sĩ (v3.0, thay hàng đợi sảnh chung + "Khóa ưu tiên"). Thứ tự mọi hàng đợi:
+ * {@code ORDER BY (is_emergency AND skip_count = 0) DESC, queue_order ASC}.
+ */
+public interface DoctorQueueService {
+
+    /** UC-20, FR-21: bảng điều phối của Lễ tân: danh sách chờ phân công + hàng đợi từng Bác sĩ + Bác sĩ được gợi ý. */
+    QueueBoardResponse board();
+
+    /** Hàng đợi của chính Bác sĩ đang đăng nhập (ca WAITING và RESULTS_READY), theo thứ tự gọi. */
+    List<VisitResponse> myQueue();
+}

@@ -20,9 +20,6 @@ public interface VisitService {
     /** UC-19: tiếp nhận khách có hẹn (appointmentId) hoặc vãng lai (petId). Tạo đợt khám WAITING. */
     VisitResponse checkIn(CheckInRequest request);
 
-    /** UC-20: hàng đợi chung tại sảnh. Ca cấp cứu lên đầu, còn lại theo thứ tự check-in. */
-    List<VisitResponse> waitingQueue();
-
     /** Danh sách đợt khám có lọc (bảng điều phối): trạng thái, ngày check-in theo giờ phòng khám, bác sĩ, thú cưng, mã ca. Mới nhất trước. */
     com.vetclinic.common.dto.PageResponse<VisitResponse> search(com.vetclinic.clinical.constant.VisitStatus status,
             java.time.LocalDate date, Long doctorId, Long petId, String keyword, int page, int size);
@@ -31,8 +28,15 @@ public interface VisitService {
 
     List<VisitHistoryResponse> getHistory(Long id);
 
-    /** UC-21: Lễ tân phân công Bác sĩ. Ca vẫn WAITING cho tới khi Bác sĩ bấm bắt đầu. */
+    /**
+     * UC-21, FR-24: Lễ tân xếp ca WAITING vào hàng đợi của Bác sĩ ACTIVE BẤT KỲ, bất cứ lúc nào, KHÔNG cần Bác sĩ rảnh. Gọi lại với
+     * Bác sĩ khác = chuyển hàng đợi. Giữ nguyên queue_order (ca đến trước vẫn đứng trước), không đổi trạng thái nên không ghi lịch sử.
+     * Chống xung đột (FR-25): Bác sĩ vừa bấm "Bắt đầu khám" ca này thì ca không còn WAITING nên bị từ chối.
+     */
     VisitResponse assignDoctor(Long id, AssignDoctorRequest request);
+
+    /** UC-21 Luồng 5c: gỡ phân công (doctor_id = NULL), ca về danh sách chờ phân công; giữ nguyên queue_order. */
+    VisitResponse unassignDoctor(Long id);
 
     /** UC-22: Bác sĩ bắt đầu khám giai đoạn 1. WAITING -> IN_PROGRESS. */
     VisitResponse startExam(Long id, StartExamRequest request);

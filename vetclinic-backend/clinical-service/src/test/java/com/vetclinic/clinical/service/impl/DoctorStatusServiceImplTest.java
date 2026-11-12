@@ -20,6 +20,8 @@ import java.util.Set;
 
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,12 +42,12 @@ class DoctorStatusServiceImplTest {
     }
 
     @Test
-    void statusOf_isBusyWhenAPatientWasAssignedButNotStartedYet() {
-        // Vế bổ sung so với tài liệu: nếu không, hai Lễ tân có thể cùng phân công một bác sĩ
+    void statusOf_isNotBusyJustBecauseAPatientWasAssigned_FR22() {
+        // v3.0: ca WAITING đã gán KHÔNG làm Bác sĩ BUSY (chỉ "có ca IN_PROGRESS" mới BUSY); Lễ tân vẫn xếp thêm bất cứ lúc nào
         when(visitRepository.existsByDoctorIdAndStatus(1L, VisitStatus.IN_PROGRESS)).thenReturn(false);
-        when(visitRepository.existsByDoctorIdAndStatus(1L, VisitStatus.WAITING)).thenReturn(true);
 
-        assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.BUSY);
+        assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.AVAILABLE);
+        verify(visitRepository, never()).existsByDoctorIdAndStatus(1L, VisitStatus.WAITING);
     }
 
     @Test
@@ -70,13 +72,15 @@ class DoctorStatusServiceImplTest {
     void board_combinesActiveDoctorsFromAuthWithTheirComputedStatus() {
         when(authClient.getActiveDoctors()).thenReturn(ApiResponse.success(List.of(
                 doctor(1L, "BS A", "P01"), doctor(2L, "BS B", "P02"), doctor(3L, "BS C", "P03"))));
-        when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS, VisitStatus.WAITING))).thenReturn(Set.of(1L));
+        when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS))).thenReturn(Set.of(1L));
+        when(visitRepository.countWaitingByDoctor()).thenReturn(List.of(new Object[]{1L, 2L}, new Object[]{2L, 3L}));
 
         List<DoctorStatusResponse> board = service.board();
 
         assertThat(board).extracting(DoctorStatusResponse::status)
                 .containsExactly(DoctorStatus.BUSY, DoctorStatus.AVAILABLE, DoctorStatus.AVAILABLE);
         assertThat(board).extracting(DoctorStatusResponse::roomNumber).containsExactly("P01", "P02", "P03");
+        assertThat(board).extracting(DoctorStatusResponse::waitingCount).containsExactly(2, 3, 0);
     }
 
     @Test

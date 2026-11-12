@@ -6,6 +6,7 @@ public record DoctorStatusResponse(
         Long doctorId,
         String fullName,
         String roomNumber,
-        DoctorStatus status
+        DoctorStatus status,
+        int waitingCount
 ) {
 }

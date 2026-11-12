@@ -149,7 +149,7 @@ class VisitServiceImplTest {
         when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
         stubSaveVisit();
 
-        VisitResponse response = service.checkIn(new CheckInRequest(11L, null, "  Co giật  ", true));
+        VisitResponse response = service.checkIn(new CheckInRequest(11L, null, "  Co giật  ", true, null));
 
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING);
         assertThat(response.visitCode()).isEqualTo("VIS-2026-00100");
@@ -180,7 +180,7 @@ class VisitServiceImplTest {
         stubSaveVisit();
 
         // Không gửi petId và triệu chứng: lấy từ lịch hẹn
-        VisitResponse response = service.checkIn(new CheckInRequest(null, 7L, null, false));
+        VisitResponse response = service.checkIn(new CheckInRequest(null, 7L, null, false, null));
 
         assertThat(response.petId()).isEqualTo(11L);
         assertThat(response.appointmentId()).isEqualTo(7L);
@@ -197,7 +197,7 @@ class VisitServiceImplTest {
         when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
         stubSaveVisit();
 
-        service.checkIn(new CheckInRequest(null, 7L, null, false));
+        service.checkIn(new CheckInRequest(null, 7L, null, false, null));
 
         ArgumentCaptor<PetVisit> saved = ArgumentCaptor.forClass(PetVisit.class);
         verify(visitRepository).saveAndFlush(saved.capture());
@@ -231,7 +231,7 @@ class VisitServiceImplTest {
         when(appointmentClient.getAppointment(3L)).thenReturn(ApiResponse.success(appointment("NO_SHOW", LocalDate.of(2026, 10, 30), 11L)));
 
         for (long id : new long[]{1L, 2L, 3L}) {
-            assertError(ErrorCode.APPOINTMENT_NOT_CHECKABLE, () -> service.checkIn(new CheckInRequest(null, id, null, false)));
+            assertError(ErrorCode.APPOINTMENT_NOT_CHECKABLE, () -> service.checkIn(new CheckInRequest(null, id, null, false, null)));
         }
         verify(visitRepository, never()).saveAndFlush(any());
     }
@@ -241,7 +241,7 @@ class VisitServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         when(appointmentClient.getAppointment(7L)).thenReturn(ApiResponse.success(appointment("CONFIRMED", LocalDate.of(2026, 10, 30), 11L)));
 
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.checkIn(new CheckInRequest(99L, 7L, null, false)));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.checkIn(new CheckInRequest(99L, 7L, null, false, null)));
     }
 
     @Test
@@ -250,7 +250,7 @@ class VisitServiceImplTest {
         when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
         when(visitRepository.existsByPetIdAndStatusIn(11L, VisitStatus.ACTIVE)).thenReturn(true);
 
-        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(11L, null, null, false)));
+        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(11L, null, null, false, null)));
         verify(visitRepository, never()).saveAndFlush(any());
         verify(publisher, never()).publishEvent(any(Object.class));
     }
@@ -261,7 +261,7 @@ class VisitServiceImplTest {
         when(visitRepository.existsByAppointmentId(7L)).thenReturn(true);
 
         // Chặn ngay trước khi gọi sang appointment-service (lịch đã CHECKED_IN sẽ báo "chưa sẵn sàng" gây khó hiểu)
-        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(null, 7L, null, false)));
+        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(null, 7L, null, false, null)));
         verifyNoInteractions(appointmentClient);
     }
 
@@ -269,7 +269,7 @@ class VisitServiceImplTest {
     void checkIn_withNeitherPetNorAppointment_isRefused() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
 
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.checkIn(new CheckInRequest(null, null, null, false)));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.checkIn(new CheckInRequest(null, null, null, false, null)));
     }
 
     // ================================================================== phân công Bác sĩ (UC-21, EX-05)
@@ -280,31 +280,92 @@ class VisitServiceImplTest {
         stubDoctor(DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P01");
         PetVisit visit = visit(100L, VisitStatus.WAITING, null);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.AVAILABLE);
 
         VisitResponse response = service.assignDoctor(100L, new AssignDoctorRequest(DOCTOR));
 
         assertThat(response.doctorId()).isEqualTo(DOCTOR);
-        // Số phòng không còn cột assigned_room: VisitEnricher gắn từ auth-service ở tầng controller, ngoài transaction
-        assertThat(response.assignedRoom()).isNull();
+        // Số phòng không còn cột assigned_room: lấy từ Bác sĩ (users.room_number) vừa được kiểm tra qua auth-service
+        assertThat(response.assignedRoom()).isEqualTo("P01");
         assertThat(visit.getDoctorId()).isEqualTo(DOCTOR);
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING);
-        PetVisitStatusHistory history = lastHistory();
-        assertThat(history.getFromStatus()).isEqualTo(VisitStatus.WAITING);
-        assertThat(history.getToStatus()).isEqualTo(VisitStatus.WAITING);
-        assertThat(history.getNotes()).contains("Phân công").contains("P01");
+        // Trạng thái không đổi nên KHÔNG ghi pet_visit_status_histories (State Machine Q2)
+        verify(historyRepository, never()).save(any());
     }
 
     @Test
-    void assignDoctor_toBusyDoctor_isRefused() {
+    void assignDoctor_ignoresWhetherTheDoctorIsBusy_FR24() {
+        // v3.0: Lễ tân xếp ca vào hàng đợi của Bác sĩ BẤT KỲ, bất cứ lúc nào, không cần Bác sĩ rảnh (Bác sĩ đang khám ca khác vẫn nhận)
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubDoctor(DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P01");
         PetVisit visit = visit(100L, VisitStatus.WAITING, null);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.BUSY);
 
-        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.assignDoctor(100L, new AssignDoctorRequest(DOCTOR)));
+        service.assignDoctor(100L, new AssignDoctorRequest(DOCTOR));
+
+        assertThat(visit.getDoctorId()).isEqualTo(DOCTOR);
+        org.mockito.Mockito.verifyNoInteractions(doctorStatusService);
+    }
+
+    @Test
+    void assignDoctor_toAnotherDoctor_movesTheVisitButKeepsItsQueueOrder() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        stubDoctor(OTHER_DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P02");
+        PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
+        long before = visit.getQueueOrder();
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+
+        service.assignDoctor(100L, new AssignDoctorRequest(OTHER_DOCTOR));
+
+        assertThat(visit.getDoctorId()).isEqualTo(OTHER_DOCTOR);
+        assertThat(visit.getQueueOrder()).isEqualTo(before);   // ca đến trước vẫn đứng trước trong hàng đợi mới
+    }
+
+    @Test
+    void unassignDoctor_sendsTheVisitBackToTheUnassignedList_keepingQueueOrder() {
+        PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
+        long before = visit.getQueueOrder();
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+
+        service.unassignDoctor(100L);
+
         assertThat(visit.getDoctorId()).isNull();
+        assertThat(visit.getQueueOrder()).isEqualTo(before);
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);
+        verify(historyRepository, never()).save(any());
+    }
+
+    @Test
+    void unassignDoctor_refusedWhenNotWaiting_orWhenNobodyIsAssigned() {
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.IN_PROGRESS, DOCTOR)));
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.WAITING, null)));
+
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.unassignDoctor(100L));   // bác sĩ đã bắt đầu khám: FR-25
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.unassignDoctor(101L));
+    }
+
+    @Test
+    void checkIn_withADoctor_putsTheVisitInThatDoctorsQueueAndTellsTheEvent() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        stubDoctor(DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P01");
+        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        stubSaveVisit();
+
+        VisitResponse response = service.checkIn(new CheckInRequest(11L, null, null, false, DOCTOR));
+
+        assertThat(response.doctorId()).isEqualTo(DOCTOR);
+        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
+        verify(publisher).publishEvent(event.capture());
+        assertThat(((VisitCheckedInEvent) event.getValue()).doctorId()).isEqualTo(DOCTOR);
+        assertThat(lastHistory().getNotes()).contains("hàng đợi Bác sĩ #" + DOCTOR);
+    }
+
+    @Test
+    void checkIn_withAnInvalidDoctor_isRefusedBeforeAnythingIsSaved() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        stubDoctor(30L, RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
+
+        assertError(ErrorCode.INVALID_DOCTOR, () -> service.checkIn(new CheckInRequest(11L, null, null, false, 30L)));
+        verify(visitRepository, never()).saveAndFlush(any());
     }
 
     @Test

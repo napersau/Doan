@@ -208,7 +208,7 @@ class NotificationEventListenerTest {
     void checkedIn_emergencyAlertsReceptionAndDoctorsAndTellsTheOwner() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
 
-        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, null, true));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, null, true, null));
 
         NotificationMessage forReception = captureRole(RoleCode.RECEPTIONIST);
         assertThat(forReception.severity()).isEqualTo(Severity.CRITICAL);
@@ -221,7 +221,7 @@ class NotificationEventListenerTest {
     void checkedIn_normalVisitOnlyGoesToReception() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
 
-        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, 3L, false));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, 3L, false, null));
 
         assertThat(captureRole(RoleCode.RECEPTIONIST).severity()).isEqualTo(Severity.INFO);
         verify(dispatcher, never()).toRole(eq(RoleCode.VETERINARIAN), any());
@@ -231,7 +231,7 @@ class NotificationEventListenerTest {
     void checkedIn_clinicalDownStillNotifiesReceptionWithoutPetName() {
         when(people.findVisit(7L)).thenReturn(Optional.empty());
 
-        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, null, false));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, null, false, null));
 
         assertThat(captureRole(RoleCode.RECEPTIONIST).body()).contains("VIS-2026-7", "thú cưng");
         verify(dispatcher, never()).toUser(anyLong(), any());   // không biết chủ nuôi thì không báo chủ nuôi

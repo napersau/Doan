@@ -14,6 +14,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Set;
 
 /** Không @Transactional: board() gọi OpenFeign, các truy vấn đọc tự chạy trong transaction riêng của repository. */
@@ -26,11 +28,8 @@ public class DoctorStatusServiceImpl implements DoctorStatusService {
 
     @Override
     public DoctorStatus statusOf(Long doctorId) {
-        if (visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)
-                || visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.WAITING)) {
-            return DoctorStatus.BUSY;
-        }
-        return DoctorStatus.AVAILABLE;
+        return visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)
+                ? DoctorStatus.BUSY : DoctorStatus.AVAILABLE;
     }
 
     @Override
@@ -39,11 +38,15 @@ public class DoctorStatusServiceImpl implements DoctorStatusService {
         if (response == null || response.getData() == null) {
             throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
         }
-        Set<Long> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS, VisitStatus.WAITING));
+        Set<Long> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS));
+        Map<Long, Integer> waiting = new HashMap<>();
+        for (Object[] row : visitRepository.countWaitingByDoctor()) {
+            waiting.put((Long) row[0], ((Long) row[1]).intValue());
+        }
 
         return response.getData().stream().map(d -> {
             DoctorStatus status = busy.contains(d.id()) ? DoctorStatus.BUSY : DoctorStatus.AVAILABLE;
-            return new DoctorStatusResponse(d.id(), d.fullName(), d.roomNumber(), status);
+            return new DoctorStatusResponse(d.id(), d.fullName(), d.roomNumber(), status, waiting.getOrDefault(d.id(), 0));
         }).toList();
     }
 }

@@ -26,6 +26,7 @@ import java.util.List;
 public class VisitController {
 
     private final VisitService visitService;
+    private final com.vetclinic.clinical.service.DoctorQueueService doctorQueueService;
     /** Số phòng của Bác sĩ lấy từ auth-service SAU commit (pet_visits không còn cột assigned_room). */
     private final com.vetclinic.clinical.service.VisitEnricher enricher;
 
@@ -37,11 +38,21 @@ public class VisitController {
                 .body(ApiResponse.created("Tiếp nhận thành công", enricher.enrich(visitService.checkIn(request))));
     }
 
-    /** UC-20: hàng đợi chung tại sảnh (ca cấp cứu lên đầu, còn lại theo thứ tự check-in). */
+    /**
+     * UC-20, FR-21: bảng điều phối: danh sách chờ phân công + hàng đợi riêng từng Bác sĩ (kèm số người chờ, trạng thái, phòng) và
+     * Bác sĩ được gợi ý (ít người chờ nhất). Thứ tự: (cấp cứu chưa bị lùi) trước, rồi queue_order.
+     */
     @GetMapping("/queue")
-    @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<List<VisitResponse>>> queue() {
-        return ResponseEntity.ok(ApiResponse.success(enricher.enrichAll(visitService.waitingQueue())));
+    @PreAuthorize("hasAnyRole('RECEPTIONIST','ADMIN')")
+    public ResponseEntity<ApiResponse<com.vetclinic.clinical.dto.response.QueueBoardResponse>> queue() {
+        return ResponseEntity.ok(ApiResponse.success(doctorQueueService.board()));
+    }
+
+    /** Hàng đợi của chính Bác sĩ đang đăng nhập (ca WAITING và RESULTS_READY, ca có kết quả đứng đầu). */
+    @GetMapping("/my-queue")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<List<VisitResponse>>> myQueue() {
+        return ResponseEntity.ok(ApiResponse.success(enricher.enrichAll(doctorQueueService.myQueue())));
     }
 
     /** Danh sách đợt khám có lọc, phân trang, mới nhất trước (bảng điều phối của lễ tân, lịch sử ca của bác sĩ). */
@@ -73,12 +84,19 @@ public class VisitController {
         return ResponseEntity.ok(ApiResponse.success(visitService.getHistory(id)));
     }
 
-    /** UC-21: phân công Bác sĩ. */
-    @PostMapping("/{id}/assign")
+    /** UC-21, FR-24: xếp ca vào hàng đợi của Bác sĩ bất kỳ (không cần rảnh); gọi lại với Bác sĩ khác = chuyển hàng đợi. */
+    @PostMapping("/{id}/assign-doctor")
     @PreAuthorize("hasRole('RECEPTIONIST')")
     public ResponseEntity<ApiResponse<VisitResponse>> assign(@PathVariable Long id,
                                                              @Valid @RequestBody AssignDoctorRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Phân công bác sĩ thành công", enricher.enrich(visitService.assignDoctor(id, request))));
+    }
+
+    /** UC-21 Luồng 5c: gỡ phân công, ca về danh sách chờ phân công. */
+    @PostMapping("/{id}/unassign-doctor")
+    @PreAuthorize("hasRole('RECEPTIONIST')")
+    public ResponseEntity<ApiResponse<VisitResponse>> unassignDoctor(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã gỡ phân công", enricher.enrich(visitService.unassignDoctor(id))));
     }
 
     /** UC-22: Bác sĩ bắt đầu khám, tự đo cân nặng và thân nhiệt. */
