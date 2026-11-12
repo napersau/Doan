@@ -15,11 +15,19 @@ import java.time.LocalTime;
 
 /**
  * Quy tắc về khung giờ: hợp lệ hay không, đã qua chưa, và sức chứa.
- * Sức chứa mỗi khung = số Bác sĩ ACTIVE, lấy qua OpenFeign từ auth-service tại thời điểm cần (không lưu cố định).
+ * Sức chứa mỗi khung = N_active × 2 (FR-13), N_active = số Bác sĩ ACTIVE lấy qua OpenFeign từ auth-service tại thời điểm cần
+ * (không lưu cố định).
  */
 @Component
 @RequiredArgsConstructor
 public class SlotPolicy {
+
+    /**
+     * Hệ số k trong công thức Capacity = N_active × k (FR-13): mỗi Bác sĩ nhận tối đa 2 lịch hẹn trong một khung 30 phút, vì chu kỳ
+     * khám 2 pha cho phép Bác sĩ khám sơ bộ ca này rồi chuyển sang ca kế tiếp trong lúc ca trước chờ kết quả cận lâm sàng.
+     * Ví dụ 3 Bác sĩ ACTIVE => 6 chỗ mỗi khung.
+     */
+    public static final int APPOINTMENTS_PER_DOCTOR_PER_SLOT = 2;
 
     private final BookingProperties properties;
     private final Clock clock;
@@ -75,14 +83,15 @@ public class SlotPolicy {
     }
 
     /**
-     * Sức chứa tối đa của một khung giờ = COUNT(bác sĩ ACTIVE). Bằng 0 nghĩa là chưa có bác sĩ nào hoạt động,
-     * mọi khung giờ đều kín.
+     * Sức chứa tối đa của một khung giờ = COUNT(bác sĩ ACTIVE) × {@link #APPOINTMENTS_PER_DOCTOR_PER_SLOT}. Bằng 0 nghĩa là chưa có
+     * bác sĩ nào hoạt động, mọi khung giờ đều kín.
      */
     public int activeDoctorCapacity() {
         ApiResponse<Long> response = authClient.getActiveDoctorCount();
         if (response == null || response.getData() == null) {
             throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
         }
-        return (int) Math.min(Math.max(response.getData(), 0L), Integer.MAX_VALUE);
+        long doctors = Math.max(response.getData(), 0L);
+        return (int) Math.min(doctors * APPOINTMENTS_PER_DOCTOR_PER_SLOT, Integer.MAX_VALUE);
     }
 }

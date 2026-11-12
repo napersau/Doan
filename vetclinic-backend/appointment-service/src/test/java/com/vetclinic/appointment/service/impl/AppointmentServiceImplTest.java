@@ -169,9 +169,9 @@ class AppointmentServiceImplTest {
     @Test
     void create_whenSlotIsFull_throwsCapacityExceededAndSavesNothing() {
         loginAs(OWNER, RoleCode.PET_OWNER);
-        stubCapacity(2);
+        stubCapacity(2);   // 2 bác sĩ ACTIVE => 4 chỗ mỗi khung
         when(appointmentRepository.countByAppointmentDateAndStartTimeAndStatusIn(
-                TOMORROW, LocalTime.of(9, 0), AppointmentStatus.OCCUPYING)).thenReturn(2L);
+                TOMORROW, LocalTime.of(9, 0), AppointmentStatus.OCCUPYING)).thenReturn(4L);
 
         assertThatThrownBy(() -> service.create(
                 new CreateAppointmentRequest(PET, null, TOMORROW, LocalTime.of(9, 0), "Khám", null)))
@@ -180,6 +180,26 @@ class AppointmentServiceImplTest {
 
         verify(appointmentRepository, never()).saveAndFlush(any());
         verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void create_capacityIsTwoAppointmentsPerActiveDoctor() {
+        loginAs(OWNER, RoleCode.PET_OWNER);
+        stubCapacity(1);   // 1 bác sĩ ACTIVE => 2 chỗ mỗi khung (FR-13: N_active × 2)
+        stubSave();
+
+        when(appointmentRepository.countByAppointmentDateAndStartTimeAndStatusIn(
+                TOMORROW, LocalTime.of(9, 0), AppointmentStatus.OCCUPYING)).thenReturn(1L);
+        // Đã có 1 lịch: còn chỗ thứ 2 (trước v3.0 khung này đã kín vì sức chứa chỉ bằng số bác sĩ)
+        assertThat(service.create(new CreateAppointmentRequest(PET, null, TOMORROW, LocalTime.of(9, 0), "Khám", null)).status())
+                .isEqualTo(AppointmentStatus.PENDING);
+
+        when(appointmentRepository.countByAppointmentDateAndStartTimeAndStatusIn(
+                TOMORROW, LocalTime.of(9, 0), AppointmentStatus.OCCUPYING)).thenReturn(2L);
+        assertThatThrownBy(() -> service.create(
+                new CreateAppointmentRequest(PET, null, TOMORROW, LocalTime.of(9, 0), "Khám", null)))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.SLOT_CAPACITY_EXCEEDED);
     }
 
     @Test
@@ -522,9 +542,9 @@ class AppointmentServiceImplTest {
         when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
         lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
         lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
-        stubCapacity(2);
+        stubCapacity(2);   // 2 bác sĩ ACTIVE => 4 chỗ mỗi khung
         when(appointmentRepository.countByAppointmentDateAndStartTimeAndStatusIn(
-                TOMORROW, LocalTime.of(10, 0), AppointmentStatus.OCCUPYING)).thenReturn(2L);
+                TOMORROW, LocalTime.of(10, 0), AppointmentStatus.OCCUPYING)).thenReturn(4L);
 
         assertThatThrownBy(() -> service.reschedule(1L, new RescheduleAppointmentRequest(TOMORROW, LocalTime.of(10, 0), null)))
                 .isInstanceOf(AppException.class)

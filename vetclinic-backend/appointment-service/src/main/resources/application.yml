@@ -70,7 +70,7 @@ vetclinic:
   booking:
     zone: Asia/Ho_Chi_Minh
     slot-minutes: 30
-    # 14 khung giờ tiếp nhận chuẩn (TAI_LIEU_MO_TA_NGHIEP_VU §5.2). Sức chứa mỗi khung = số Bác sĩ ACTIVE (auth-service)
+    # 14 khung giờ tiếp nhận chuẩn (TAI_LIEU_MO_TA_NGHIEP_VU §5.2). Sức chứa mỗi khung = số Bác sĩ ACTIVE (auth-service) × 2 (FR-13, SlotPolicy.APPOINTMENTS_PER_DOCTOR_PER_SLOT)
     slot-start-times:
       - "08:00"
       - "08:30"
