@@ -24,6 +24,7 @@ import com.vetclinic.appointment.service.SlotLockService;
 import com.vetclinic.appointment.service.SlotPolicy;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
+import com.vetclinic.common.event.AppointmentBookedEvent;
 import com.vetclinic.common.event.AppointmentCreatedEvent;
 import com.vetclinic.common.event.AppointmentNoShowEvent;
 import com.vetclinic.common.event.AppointmentStatusChangedEvent;
@@ -184,6 +185,11 @@ public class AppointmentServiceImpl implements AppointmentService {
 
         // Chỉ được gửi sang RabbitMQ SAU KHI commit (DomainEventRabbitPublisher)
         eventPublisher.publishEvent(new AppointmentCreatedEvent(UUID.randomUUID(), now, actor.id(),
+                appointment.getId(), appointment.getAppointmentCode(), booking.ownerId(),
+                appointment.getPetId(), date, start, appointment.getStatus().name()));
+        // Danh mục sự kiện v3.0: appointment.booked thay appointment.created. TẠM phát song song cho tới khi notification-service nghe
+        // appointment.booked (LO_TRINH_SUA_CODE_V3.md bước 5.1); khi đó xóa AppointmentCreatedEvent (bước 7.1).
+        eventPublisher.publishEvent(new AppointmentBookedEvent(UUID.randomUUID(), now, actor.id(),
                 appointment.getId(), appointment.getAppointmentCode(), booking.ownerId(),
                 appointment.getPetId(), date, start, appointment.getStatus().name()));
         return appointment;
@@ -438,6 +444,9 @@ public class AppointmentServiceImpl implements AppointmentService {
             case CHECKED_IN -> log.debug("Lịch hẹn {} đã CHECKED_IN, bỏ qua sự kiện trùng", appointmentId);
             case CONFIRMED -> transition(appointment, AppointmentStatus.CHECKED_IN, actorUserId,
                     "Khách đã tiếp nhận tại quầy, đợt khám " + visitCode, null, null);
+            // FR-18: khách đến trễ sau khi đã bị NO_SHOW được tiếp nhận như khách vãng lai; lịch GIỮ NGUYÊN NO_SHOW (ghi nhận lịch sử uy tín)
+            case NO_SHOW -> log.warn("Lịch hẹn {} đã NO_SHOW nhưng khách vẫn được tiếp nhận (đợt khám {}): giữ nguyên NO_SHOW (FR-18)",
+                    appointmentId, visitCode);
             default -> log.warn("Bỏ qua sự kiện check-in của lịch hẹn {} đang ở trạng thái {} (đợt khám {})",
                     appointmentId, appointment.getStatus(), visitCode);
         }

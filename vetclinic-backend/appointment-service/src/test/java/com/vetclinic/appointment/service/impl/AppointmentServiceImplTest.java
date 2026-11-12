@@ -143,8 +143,17 @@ class AppointmentServiceImplTest {
         assertThat(history.getChangedByUserId()).isEqualTo(OWNER);
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher).publishEvent(event.capture());
-        AppointmentCreatedEvent created = (AppointmentCreatedEvent) event.getValue();
+        verify(eventPublisher, org.mockito.Mockito.times(2)).publishEvent(event.capture());
+        AppointmentCreatedEvent created = event.getAllValues().stream().filter(AppointmentCreatedEvent.class::isInstance)
+                .map(AppointmentCreatedEvent.class::cast).findFirst().orElseThrow();
+        // v3.0: appointment.booked (tạm phát song song với appointment.created tới bước 5.1)
+        com.vetclinic.common.event.AppointmentBookedEvent booked = event.getAllValues().stream()
+                .filter(com.vetclinic.common.event.AppointmentBookedEvent.class::isInstance)
+                .map(com.vetclinic.common.event.AppointmentBookedEvent.class::cast).findFirst().orElseThrow();
+        assertThat(booked.routingKey()).isEqualTo("appointment.booked");
+        assertThat(booked.appointmentId()).isEqualTo(100L);
+        assertThat(booked.ownerId()).isEqualTo(OWNER);
+        assertThat(booked.status()).isEqualTo("PENDING");
         assertThat(created.appointmentId()).isEqualTo(100L);
         assertThat(created.ownerId()).isEqualTo(OWNER);
         assertThat(created.status()).isEqualTo("PENDING");
@@ -783,6 +792,18 @@ class AppointmentServiceImplTest {
         assertThatThrownBy(() -> service.markCheckedIn(99L, RECEPTIONIST, "VIS-2026-0001"))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.APPOINTMENT_NOT_FOUND);
+    }
+
+    @Test
+    void markCheckedIn_afterNoShow_keepsNoShowAndDoesNotRecordAnything_FR18() {
+        Appointment a = appointment(1L, OWNER, AppointmentStatus.NO_SHOW, TODAY, LocalTime.of(8, 0));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+
+        service.markCheckedIn(1L, RECEPTIONIST, "VISIT-2026-0001");
+
+        assertThat(a.getStatus()).isEqualTo(AppointmentStatus.NO_SHOW);   // lịch giữ NO_SHOW, khách được tiếp nhận như vãng lai
+        verify(historyRepository, never()).save(any());
+        verify(appointmentRepository, never()).save(any());
     }
 
     // ================================================================== tra cứu

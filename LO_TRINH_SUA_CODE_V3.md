@@ -11,8 +11,8 @@
 |---|---|---|
 | **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
 | **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
-| Phase 2 `appointment-service` | 🟨 **ĐANG LÀM** — **Khối A ✅ xong (12/11)**, Khối B chưa | **Bước kế tiếp: 2.B1 (sức chứa `N_active × 2`)** |
-| Phase 3 `clinical-service` | ⬜ chưa làm | |
+| **Phase 2** `appointment-service` | ✅ **ĐÃ XONG** (12/11/2026) | Khối A + B xong; 68 test pass + chạy thật trên schema v3.0 |
+| Phase 3 `clinical-service` | ⬜ chưa làm | **Bước kế tiếp: 3.A1 (`Pet.weight`, `LabTestResult.evaluation`)** |
 | Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
 | Phase 5 `notification-service` | ⬜ chưa làm | |
 | Phase 6 Gateway + FE | ⬜ chưa làm | |
@@ -126,12 +126,12 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 - **Kết quả đo Khối A (12/11):** `mvn clean test`: appointment **63 test** (54 cũ + 9 mới), clinical **106** (103 + 3 mới), 0 lỗi. **Chạy thật** appointment-service (jar) trên MySQL schema v3.0 + auth-service thật + clinical *giả* (Python, đúng hợp đồng `/internal/clinical/pets…` vì clinical thật chưa boot được trên schema mới): đặt lịch `201` (ownerId 8 suy ra từ thú cưng, endTime 09:30, tên chủ từ auth) → lễ tân duyệt (`confirmedBy` 5 từ lịch sử) → "lịch của tôi" đúng 2 lịch → chủ nuôi khác thấy 0 lịch dù gửi `ownerId=8`, xem/hủy lịch người khác = `404 APPT_1202` → chủ nuôi hủy kèm lý do (`cancelReason`, `cancelledBy` từ lịch sử) → lịch sử đúng 3 dòng. Không có ERROR trong log. Dữ liệu thử đã xóa khỏi DB. *(Lưu ý kiểm thử: `curl` trên Git Bash/Windows làm hỏng byte tiếng Việt trong body → 400 `SYS_1001`; dùng ASCII khi test bằng `curl`.)*
 
 ### Khối B — nghiệp vụ mới
-- [ ] **2.B1 Sức chứa `N_active × 2`** (`SlotPolicy`/`SlotService`) — sửa 1 chỗ + test.
-- [ ] **2.B2 NO_SHOW = `appointment_date + start_time + 30'`** (`AppointmentServiceImpl.isNoShowDue`, `AppointmentNoShowScheduler`), cron `0 */5 7-21 * * *`, phát `AppointmentNoShowEvent`.
-- [ ] **2.B3** Đổi sự kiện tạo lịch sang `AppointmentBookedEvent` (`appointment.booked`). Thêm listener tương ứng ở notification (bước 5.1) rồi mới xóa `AppointmentCreatedEvent`.
-- [ ] **2.B4** `GET /appointments/slots` public ở service (`vetclinic.security.public-paths`) — Gateway làm ở 6.1.
-- [ ] **2.B5** Consumer `VisitCheckedInEvent`: giữ; thêm log cảnh báo nếu lịch đã `NO_SHOW`.
-- [ ] **2.B6** Chỉ để ý: `reschedule`, `expirePendingBySystem`, `reports/summary` giữ nguyên (CLAUDE.md §10 #8).
+- [x] **2.B1 Sức chứa `N_active × 2`** — `SlotPolicy.APPOINTMENTS_PER_DOCTOR_PER_SLOT = 2` (hằng có tên, kèm lý do k=2). 3 bác sĩ ACTIVE ⇒ 6 chỗ/khung (đã đo thật qua `/slots`). Có test riêng: 1 bác sĩ ⇒ nhận lịch thứ 2, từ chối lịch thứ 3.
+- [x] **2.B2 NO_SHOW = `appointment_date + start_time + 30 phút`** (trước là *giờ kết thúc khung + 30'*); cron mặc định `0 */5 7-21 * * *`; phát `AppointmentNoShowEvent` (`appointment.no_show`). Test phân biệt hai công thức (hẹn 08:00, bây giờ 09:00: v3 quá hạn, v2 chưa). Đã đo thật bằng scheduler cron 10 giây: lịch 08:00 ⇒ `NO_SHOW` (người thao tác `NULL`), lịch 11:30 vẫn `CONFIRMED`. **Lưu ý:** hiện phát SONG SONG với `appointment.status_changed` (NO_SHOW) — xem bước 5.2.
+- [x] **2.B3** Phát `AppointmentBookedEvent` (`appointment.booked`) **song song** với `AppointmentCreatedEvent` (notification vẫn đang nghe `appointment.created`). Đã đo thật: một lần đặt lịch phát đủ hai event. **Còn lại (làm ở 5.1 / 7.1):** notification nghe `appointment.booked`, rồi xóa `AppointmentCreatedEvent`.
+- [x] **2.B4** `GET /appointments/slots` công khai **ở phía appointment-service** (`vetclinic.security.public-paths` + `@PreAuthorize("permitAll()")`): đã đo thật `200` không cần header, trong khi `GET /appointments` không header vẫn `401`. **Chưa công khai qua Gateway** — làm ở 6.1.
+- [x] **2.B5** Consumer `VisitCheckedInEvent` giữ nguyên (idempotent); thêm nhánh `NO_SHOW`: log cảnh báo *giữ nguyên NO_SHOW, khách được tiếp nhận như vãng lai* (FR-18), không ghi gì; có test.
+- [x] **2.B6** `reschedule`, `expirePendingBySystem`, `reports/summary` giữ nguyên hành vi (CLAUDE.md §10 #8). `expirePendingBySystem` chạy đúng khi đo thật (PENDING quá hạn ⇒ `CANCELLED`, người thao tác `NULL`).
 
 ---
 
@@ -145,7 +145,7 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
   - Xóa: `QueueSchedule`, `QueueState`, `DoctorStatus.AVAILABLE_PRIORITY_CALLBACK`, `callBack()`/`postponeCallback()` và 2 endpoint tương ứng, `existsByDoctorIdAndStatusAndCallbackPostponedAtIsNull`, `PaymentCompletedListener`.
   - `findQueueByStatus` đổi thành `ORDER BY (emergency AND skipCount = 0) DESC, queueOrder ASC`.
 - [ ] **3.A4 `VisitServiceDetail`:** bỏ `unitPrice`, `subtotal`; thêm `queueOrder`, `skipCount` (gán ở `createDetail`). `ClinicService` thêm `vatRate`.
-- [ ] **3.A5 Entity `ServiceInvoice`** (+ repository, mã `SINV-YYYY-XXXX` từ id, `@Version`) và gắn vào `createDetail`: **tạo chỉ định ⇒ tạo hóa đơn `PENDING` trong cùng giao dịch** (snapshot `unit_price = services.price`, `vat_rate`). Thêm `GET /internal/clinical/pets?ownerId=` (cho 2.A4).
+- [ ] **3.A5 Entity `ServiceInvoice`** (+ repository, mã `SINV-YYYY-XXXX` từ id, `@Version`) và gắn vào `createDetail`: **tạo chỉ định ⇒ tạo hóa đơn `PENDING` trong cùng giao dịch** (snapshot `unit_price = services.price`, `vat_rate`). *(Endpoint `GET /internal/clinical/pets?ownerId=` đã làm sớm ở bước 2.A4.)*
 - [ ] **3.A6** `billableServices` (đang đọc `unitPrice`) tạm trả từ `services.price`; sẽ xóa ở 3.B13.
 - **Xong khi:** `mvn -pl clinical-service test` xanh (xóa/sửa test của hành vi đã bỏ), **service khởi động**, `POST /pet-visits/check-in` chạy (Task 3.2 bước 1).
 
@@ -191,8 +191,8 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ## PHASE 5 — `notification-service` (làm rải, mỗi lần một event)
 
-- [ ] **5.1** Thêm listener cho `appointment.booked` → (xóa `appointment.created` ở 7.1).
-- [ ] **5.2** `appointment.no_show`, `visit.patient_called` (gọi số: phòng + STT; báo bị đẩy lùi), `visit.results_ready`.
+- [ ] **5.1** Thêm listener cho `appointment.booked` → (xóa `appointment.created` ở 7.1). *(appointment-service đang phát song song `appointment.created` + `appointment.booked` từ 12/11; sau khi listener mới chạy, KHÔNG cần sửa gì thêm ở appointment — chỉ xóa event cũ ở 7.1.)*
+- [ ] **5.2** `appointment.no_show`, `visit.patient_called` (gọi số: phòng + STT; báo bị đẩy lùi), `visit.results_ready`. **BẮT BUỘC kèm theo:** khi listener `appointment.no_show` đã chạy, vào `AppointmentServiceImpl.transition()` (appointment-service) **bỏ việc phát `AppointmentStatusChangedEvent` cho `NO_SHOW`** (hiện phát song song với `AppointmentNoShowEvent`, comment ghi rõ tại chỗ) — nếu không chủ nuôi nhận hai thông báo; đồng thời bỏ nhánh `NO_SHOW` trong listener `status_changed` của notification.
 - [ ] **5.3** `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`.
 - [ ] **5.4** `POST /notifications/{id}/read`; **bỏ** `POST /notifications/send-email`.
 - [ ] **5.5** Cập nhật `NotificationType`; chưa làm `/topic/lobby` (CLAUDE.md §10 #6).
@@ -201,7 +201,7 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ## PHASE 6 — Gateway + Frontend (Linh, song song)
 
-- [ ] **6.1** Gateway: thêm `GET /api/v1/appointments/slots` vào `vetclinic.gateway.public-paths`.
+- [ ] **6.1** Gateway: thêm `GET /api/v1/appointments/slots` vào `vetclinic.gateway.public-paths`. *(Phía appointment-service đã công khai từ 2.B4; còn thiếu Gateway thì Portal vẫn bị 401 khi gọi qua :8080.)*
 - [ ] **6.2** FE theo thứ tự backend hoàn thành (không chờ hết): ① bảng mã lỗi (`lib/labels.js`) + `api/endpoints.js` → ② Lễ tân: hàng đợi/điều phối (sau 3.B1–2) → ③ Bác sĩ: hàng đợi riêng, Gọi số/Đẩy lùi (3.B3–4) → ④ chỉ định, dịch vụ tại phòng (3.B5) → ⑤ KTV Lab/CĐHA (3.B6–7) → ⑥ Thu ngân hóa đơn dịch vụ (3.B12) → ⑦ Bán thuốc (4.B3–5) → ⑧ báo cáo, kho.
 
 ---

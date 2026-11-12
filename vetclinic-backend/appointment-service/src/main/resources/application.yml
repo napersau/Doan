@@ -67,6 +67,10 @@ management:
         enabled: true
 
 vetclinic:
+  security:
+    public-paths:
+      # Portal công khai: tra cứu khung giờ trống không cần đăng nhập (FR-13). Gateway cũng phải cho qua (LO_TRINH 6.1).
+      - /api/v1/appointments/slots
   booking:
     zone: Asia/Ho_Chi_Minh
     slot-minutes: 30

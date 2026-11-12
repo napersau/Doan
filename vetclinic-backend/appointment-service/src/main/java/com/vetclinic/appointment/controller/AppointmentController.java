@@ -39,9 +39,9 @@ public class AppointmentController {
     private final com.vetclinic.appointment.service.AppointmentEnricher enricher;
     private final com.vetclinic.appointment.service.AppointmentReportService reportService;
 
-    /** Tình trạng 14 khung giờ của một ngày (Còn N chỗ / Đã kín lịch). */
+    /** Tình trạng 14 khung giờ của một ngày (Còn N chỗ / Đã kín lịch). CÔNG KHAI: không cần đăng nhập (Portal, FR-13). */
     @GetMapping("/slots")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("permitAll()")
     public ResponseEntity<ApiResponse<List<SlotAvailabilityResponse>>> slots(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return ResponseEntity.ok(ApiResponse.success(slotService.getSlots(date)));
