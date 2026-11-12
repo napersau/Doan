@@ -52,7 +52,7 @@ public class VisitSupport {
     /** Chỉ Bác sĩ được Lễ tân phân công mới thao tác chuyên môn trên ca này. */
     public void assertAssignedTo(PetVisit visit, Long doctorId) {
         if (visit.getDoctorId() == null || !visit.getDoctorId().equals(doctorId)) {
-            throw new AppException(ErrorCode.VISIT_NOT_ASSIGNED_TO_YOU);
+            throw new AppException(ErrorCode.NOT_ASSIGNED_DOCTOR);
         }
     }
 

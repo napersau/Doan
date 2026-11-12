@@ -5,7 +5,9 @@ import org.springframework.http.HttpStatus;
 
 /**
  * Danh mục mã lỗi dùng chung toàn hệ thống.
- * Không đổi mã chuỗi đã có (Frontend tham chiếu theo code); mã mới thêm vào cuối nhóm tương ứng.
+ * Nguồn chuẩn: QUY_CHUAN_THIET_KE_VA_LAP_TRINH_BACKEND_SPRINGBOOT.md v3.0, mục 5.1 (39 mã). Số trong docs được ưu tiên;
+ * mã chỉ có trong code thì nằm cuối nhóm, không đánh số lại. Đã đánh số lại ngày 12/11/2026 (LO_TRINH_SUA_CODE_V3.md, bước 1.1).
+ * Mã có ghi chú "[v2 – TẠM GIỮ]" sẽ bị xóa khi phase tương ứng viết lại nghiệp vụ.
  */
 @Getter
 public enum ErrorCode {
@@ -41,24 +43,27 @@ public enum ErrorCode {
     APPOINTMENT_NOT_FOUND("APPT_1202", "Không tìm thấy lịch hẹn", HttpStatus.NOT_FOUND),
     SLOT_CAPACITY_EXCEEDED("APPT_1203", "Khung giờ khám đã kín chỗ, vui lòng chọn khung giờ khác", HttpStatus.BAD_REQUEST),
     CANNOT_CANCEL_APPOINTMENT("APPT_1204", "Chỉ được phép hủy hẹn trước giờ khám tối thiểu 2 tiếng", HttpStatus.BAD_REQUEST),
-    SLOT_BUSY("APPT_1205", "Hệ thống đang xử lý một yêu cầu đặt lịch khác cho khung giờ này, vui lòng thử lại sau vài giây", HttpStatus.CONFLICT),
+    // APPT_1205 theo Quy chuẩn v3.0 §5.1 (trước đây là SLOT_BUSY, đã dời sang APPT_1209 ngày 12/11/2026)
+    APPOINTMENT_NOT_CHECKABLE("APPT_1205", "Lịch hẹn không ở trạng thái CONFIRMED hoặc không đúng ngày hẹn", HttpStatus.BAD_REQUEST),
     INVALID_APPOINTMENT_STATUS("APPT_1206", "Trạng thái lịch hẹn không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
     DUPLICATE_APPOINTMENT("APPT_1207", "Thú cưng này đã có lịch hẹn khác trong ngày", HttpStatus.CONFLICT),
     INVALID_APPOINTMENT_SLOT("APPT_1208", "Khung giờ đặt hẹn không hợp lệ", HttpStatus.BAD_REQUEST),
+    SLOT_BUSY("APPT_1209", "Hệ thống đang xử lý một yêu cầu đặt lịch khác cho khung giờ này, vui lòng thử lại sau vài giây", HttpStatus.CONFLICT),
 
     // 4. Khám lâm sàng & Cận lâm sàng (CLIN: 1300 - 1399)
     VISIT_NOT_FOUND("CLIN_1301", "Không tìm thấy đợt khám y tế", HttpStatus.NOT_FOUND),
-    DOCTOR_NOT_AVAILABLE("CLIN_1302", "Bác sĩ hiện đang bận ca khám khác", HttpStatus.CONFLICT),
-    DOCTOR_PRIORITY_LOCKED("CLIN_1303", "Bác sĩ đang có ca chờ đọc kết quả cận lâm sàng, vui lòng ưu tiên gọi lại ca tái khám", HttpStatus.CONFLICT),
+    DOCTOR_NOT_AVAILABLE("CLIN_1302", "Bác sĩ đang khám một ca khác, hãy kết thúc ca hiện tại trước", HttpStatus.CONFLICT),
+    // CLIN_1303 đổi nghĩa ở v3.0: không còn "Khóa ưu tiên" mà là "hàng đợi trống" (khi Bác sĩ/KTV bấm Gọi số tiếp theo)
+    QUEUE_EMPTY("CLIN_1303", "Hàng đợi hiện không còn bệnh nhân nào", HttpStatus.NOT_FOUND),
     PARACLINICAL_SERVICE_IN_PROGRESS("CLIN_1304", "Dịch vụ cận lâm sàng đang thực hiện, không thể hủy", HttpStatus.BAD_REQUEST),
     INVALID_STATUS_TRANSITION("CLIN_1305", "Trạng thái ca khám không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
-    VISIT_ALREADY_ACTIVE("CLIN_1306", "Thú cưng này đang có một đợt khám chưa hoàn tất", HttpStatus.CONFLICT),
-    APPOINTMENT_NOT_READY_FOR_CHECKIN("CLIN_1307", "Lịch hẹn chưa được xác nhận hoặc không phải lịch của ngày hôm nay", HttpStatus.BAD_REQUEST),
-    VISIT_NOT_ASSIGNED_TO_YOU("CLIN_1308", "Đợt khám này không được phân công cho bạn", HttpStatus.FORBIDDEN),
-    SERVICE_NOT_FOUND("CLIN_1309", "Không tìm thấy dịch vụ kỹ thuật hoặc dịch vụ đã ngừng sử dụng", HttpStatus.NOT_FOUND),
-    SERVICE_DETAIL_NOT_FOUND("CLIN_1310", "Không tìm thấy chỉ định dịch vụ", HttpStatus.NOT_FOUND),
-    INVALID_SERVICE_DETAIL_STATUS("CLIN_1311", "Trạng thái chỉ định dịch vụ không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
-    DIAGNOSIS_REQUIRED("CLIN_1312", "Vui lòng nhập kết luận chẩn đoán xác định trước khi chốt đợt khám", HttpStatus.BAD_REQUEST),
+    PET_HAS_OPEN_VISIT("CLIN_1306", "Thú cưng đang có đợt khám chưa kết thúc", HttpStatus.CONFLICT),
+    DIAGNOSIS_REQUIRED("CLIN_1307", "Vui lòng nhập chẩn đoán trước khi chốt đợt khám", HttpStatus.BAD_REQUEST),
+    VITAL_SIGNS_REQUIRED("CLIN_1308", "Vui lòng nhập cân nặng và thân nhiệt của thú cưng", HttpStatus.BAD_REQUEST),
+    IN_ROOM_SERVICE_PENDING("CLIN_1309", "Còn dịch vụ tại phòng chưa thực hiện hoặc chưa hủy", HttpStatus.BAD_REQUEST),
+    PAID_SERVICE_CANNOT_BE_CANCELLED("CLIN_1310", "Không thể hủy dịch vụ đã được thanh toán", HttpStatus.CONFLICT),
+    NOT_ASSIGNED_DOCTOR("CLIN_1311", "Bạn không phải Bác sĩ được phân công cho ca khám này", HttpStatus.FORBIDDEN),
+    // CLIN_1312 bỏ trống có chủ ý (từng là DIAGNOSIS_REQUIRED ở v2; chuyển sang CLIN_1307) – không tái sử dụng để tránh nhầm mã cũ
     LAB_REFERENCE_NOT_FOUND("CLIN_1313", "Chưa cấu hình khoảng tham chiếu của chỉ số này cho loài của thú cưng", HttpStatus.BAD_REQUEST),
     INVALID_IMAGING_FILE("CLIN_1314", "Tệp ảnh không hợp lệ (chỉ nhận JPEG, PNG hoặc DICOM, tối đa 20MB)", HttpStatus.BAD_REQUEST),
     SPECIES_NOT_FOUND("CLIN_1315", "Không tìm thấy loài thú cưng", HttpStatus.NOT_FOUND),
@@ -66,20 +71,32 @@ public enum ErrorCode {
     LAB_ITEM_NOT_FOUND("CLIN_1317", "Không tìm thấy chỉ số xét nghiệm", HttpStatus.NOT_FOUND),
     CODE_ALREADY_EXISTS("CLIN_1318", "Mã đã tồn tại trong danh mục", HttpStatus.CONFLICT),
     LAB_ITEM_NOT_IN_SERVICE("CLIN_1319", "Chỉ số này không thuộc dịch vụ xét nghiệm được chỉ định", HttpStatus.BAD_REQUEST),
+    // Mã chỉ có trong code (không có trong Quy chuẩn §5.1): dời xuống cuối nhóm ngày 12/11/2026 để nhường số 1303-1311 cho docs
+    SERVICE_NOT_FOUND("CLIN_1320", "Không tìm thấy dịch vụ kỹ thuật hoặc dịch vụ đã ngừng sử dụng", HttpStatus.NOT_FOUND),
+    SERVICE_DETAIL_NOT_FOUND("CLIN_1321", "Không tìm thấy chỉ định dịch vụ", HttpStatus.NOT_FOUND),
+    INVALID_SERVICE_DETAIL_STATUS("CLIN_1322", "Trạng thái chỉ định dịch vụ không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
+    // [v2 – TẠM GIỮ, XÓA ở bước 3.A3] "Khóa ưu tiên" không còn trong v3.0; chỉ để code v2 còn biên dịch tới khi viết lại hàng đợi
+    DOCTOR_PRIORITY_LOCKED("CLIN_1323", "Bác sĩ đang có ca chờ đọc kết quả cận lâm sàng, vui lòng ưu tiên gọi lại ca tái khám", HttpStatus.CONFLICT),
 
-    // 5. Viện phí & Kho dược (BILL/PHARM: 1400 - 1499)
-    INVOICE_NOT_FOUND("BILL_1401", "Không tìm thấy hóa đơn viện phí", HttpStatus.NOT_FOUND),
-    DISCOUNT_EXCEEDS_TOTAL("BILL_1402", "Số tiền chiết khấu không thể vượt quá tổng viện phí", HttpStatus.BAD_REQUEST),
-    INVOICE_ALREADY_PAID("BILL_1403", "Hóa đơn này đã được thanh toán trước đó", HttpStatus.BAD_REQUEST),
+    // 5. Hóa đơn & Kho dược (BILL/PHARM: 1400 - 1499) – dùng cho cả service_invoices (clinical) và medicine_invoices (billing-pharmacy)
+    INVOICE_NOT_FOUND("BILL_1401", "Không tìm thấy hóa đơn", HttpStatus.NOT_FOUND),
+    DISCOUNT_EXCEEDS_INVOICE_AMOUNT("BILL_1402", "Số tiền giảm giá không được vượt quá số tiền của hóa đơn này", HttpStatus.BAD_REQUEST),
+    INVOICE_ALREADY_PAID("BILL_1403", "Hóa đơn này đã được thanh toán trước đó", HttpStatus.CONFLICT),
     PRESCRIPTION_NOT_FOUND("PHARM_1404", "Không tìm thấy đơn thuốc của đợt khám", HttpStatus.NOT_FOUND),
     MEDICINE_NOT_FOUND("PHARM_1405", "Không tìm thấy thuốc trong danh mục kho", HttpStatus.NOT_FOUND),
-    INSUFFICIENT_STOCK("PHARM_1406", "Số lượng tồn kho không đủ để xuất thuốc", HttpStatus.BAD_REQUEST),
-    PRESCRIPTION_ALREADY_DISPENSED("PHARM_1407", "Đơn thuốc này đã được xuất kho trước đó", HttpStatus.CONFLICT),
-    PRESCRIPTION_ALREADY_EXISTS("PHARM_1408", "Đợt khám này đã có đơn thuốc, hãy cập nhật đơn hiện có", HttpStatus.CONFLICT),
-    PRESCRIPTION_LOCKED("PHARM_1409", "Đợt khám không còn ở giai đoạn khám hoặc đã được chốt, không thể thay đổi đơn thuốc", HttpStatus.BAD_REQUEST),
-    INVALID_PRESCRIPTION_STATUS("PHARM_1410", "Trạng thái đơn thuốc không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
-    MEDICINE_CODE_ALREADY_EXISTS("PHARM_1411", "Mã thuốc đã tồn tại trong danh mục", HttpStatus.CONFLICT),
+    INSUFFICIENT_STOCK("PHARM_1406", "Số lượng tồn kho không đủ để bán", HttpStatus.CONFLICT),
+    PRESCRIPTION_ALREADY_INVOICED("PHARM_1407", "Đơn thuốc này đã được lập hóa đơn thuốc trước đó", HttpStatus.CONFLICT),
+    INVOICE_ALREADY_CANCELLED("BILL_1408", "Hóa đơn này đã bị hủy", HttpStatus.CONFLICT),
+    VISIT_NOT_READY_FOR_PAYMENT("BILL_1409", "Đợt khám chưa được Bác sĩ chốt chuyên môn", HttpStatus.BAD_REQUEST),
+    PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED("PHARM_1410", "Số lượng mua không được vượt quá số lượng Bác sĩ đã kê", HttpStatus.BAD_REQUEST),
+    PRESCRIPTION_LOCKED("PHARM_1411", "Đơn thuốc đã khóa (đợt khám đã chốt hoặc đơn đã được bán), không thể chỉnh sửa", HttpStatus.CONFLICT),
+    // Mã chỉ có trong code (không có trong Quy chuẩn §5.1), giữ nguyên số đã dùng
     INVALID_STOCK_ADJUSTMENT("PHARM_1412", "Điều chỉnh làm tồn kho âm, không thể thực hiện", HttpStatus.BAD_REQUEST),
+    // Dời số ngày 12/11/2026 để nhường PHARM_1408/1409/1410/1411 cho docs
+    PRESCRIPTION_ALREADY_EXISTS("PHARM_1413", "Đợt khám này đã có đơn thuốc, hãy cập nhật đơn hiện có", HttpStatus.CONFLICT),
+    MEDICINE_CODE_ALREADY_EXISTS("PHARM_1414", "Mã thuốc đã tồn tại trong danh mục", HttpStatus.CONFLICT),
+    // [v2 – TẠM GIỮ, XÓA ở Phase 4.A] đơn thuốc v3.0 không còn trạng thái / hóa đơn gộp
+    INVALID_PRESCRIPTION_STATUS("PHARM_1415", "Trạng thái đơn thuốc không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
     INVOICE_NOT_PAID("BILL_1413", "Hóa đơn chưa được thanh toán, chưa thể xuất thuốc", HttpStatus.BAD_REQUEST),
     INVALID_INVOICE_STATUS("BILL_1414", "Trạng thái hóa đơn không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
     VISIT_NOT_READY_FOR_INVOICE("BILL_1415", "Đợt khám chưa được bác sĩ chốt sang chờ thanh toán", HttpStatus.BAD_REQUEST);

@@ -227,7 +227,7 @@ class VisitServiceImplTest {
         when(appointmentClient.getAppointment(3L)).thenReturn(ApiResponse.success(appointment("NO_SHOW", LocalDate.of(2026, 10, 30), 11L)));
 
         for (long id : new long[]{1L, 2L, 3L}) {
-            assertError(ErrorCode.APPOINTMENT_NOT_READY_FOR_CHECKIN, () -> service.checkIn(new CheckInRequest(null, id, null, false)));
+            assertError(ErrorCode.APPOINTMENT_NOT_CHECKABLE, () -> service.checkIn(new CheckInRequest(null, id, null, false)));
         }
         verify(visitRepository, never()).saveAndFlush(any());
     }
@@ -246,7 +246,7 @@ class VisitServiceImplTest {
         when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
         when(visitRepository.existsByPetIdAndStatusIn(11L, VisitStatus.ACTIVE)).thenReturn(true);
 
-        assertError(ErrorCode.VISIT_ALREADY_ACTIVE, () -> service.checkIn(new CheckInRequest(11L, null, null, false)));
+        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(11L, null, null, false)));
         verify(visitRepository, never()).saveAndFlush(any());
         verify(publisher, never()).publishEvent(any(Object.class));
     }
@@ -257,7 +257,7 @@ class VisitServiceImplTest {
         when(visitRepository.existsByAppointmentId(7L)).thenReturn(true);
 
         // Chặn ngay trước khi gọi sang appointment-service (lịch đã CHECKED_IN sẽ báo "chưa sẵn sàng" gây khó hiểu)
-        assertError(ErrorCode.VISIT_ALREADY_ACTIVE, () -> service.checkIn(new CheckInRequest(null, 7L, null, false)));
+        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(null, 7L, null, false)));
         verifyNoInteractions(appointmentClient);
     }
 
@@ -384,7 +384,7 @@ class VisitServiceImplTest {
         when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.WAITING_RESULTS, DOCTOR)));
         when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
 
-        assertError(ErrorCode.VISIT_NOT_ASSIGNED_TO_YOU, () -> service.startExam(100L, request));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.startExam(100L, request));
         assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.startExam(101L, request));
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.startExam(102L, request));
     }
@@ -523,7 +523,7 @@ class VisitServiceImplTest {
         when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.IN_PROGRESS, OTHER_DOCTOR)));
 
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.closeVisit(100L, request));
-        assertError(ErrorCode.VISIT_NOT_ASSIGNED_TO_YOU, () -> service.closeVisit(101L, request));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.closeVisit(101L, request));
     }
 
     // ================================================================== khách bỏ về / hủy (EX-03, EX-11)
@@ -609,7 +609,7 @@ class VisitServiceImplTest {
 
         loginAs(OTHER_DOCTOR, RoleCode.VETERINARIAN);
         when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.RESULTS_READY, DOCTOR)));
-        assertError(ErrorCode.VISIT_NOT_ASSIGNED_TO_YOU, () -> service.abandon(101L));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.abandon(101L));
     }
 
     @Test

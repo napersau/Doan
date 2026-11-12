@@ -175,7 +175,7 @@ class PrescriptionServiceImplTest {
         loginAs(OTHER_DOCTOR, RoleCode.VETERINARIAN);
         when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
 
-        assertError(ErrorCode.VISIT_NOT_ASSIGNED_TO_YOU, () -> service.create(request(7L, line(1L, 1))));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.create(request(7L, line(1L, 1))));
     }
 
     @Test
@@ -350,7 +350,7 @@ class PrescriptionServiceImplTest {
         when(prescriptionRepository.findByIdForUpdate(3L))
                 .thenReturn(Optional.of(twoItemPrescription(PrescriptionStatus.DISPENSED)));
 
-        assertError(ErrorCode.PRESCRIPTION_ALREADY_DISPENSED, () -> service.dispense(3L));
+        assertError(ErrorCode.PRESCRIPTION_ALREADY_INVOICED, () -> service.dispense(3L));
         verify(medicineRepository, never()).deductStock(anyLong(), anyInt());
         verify(publisher, never()).publishEvent(any());
     }

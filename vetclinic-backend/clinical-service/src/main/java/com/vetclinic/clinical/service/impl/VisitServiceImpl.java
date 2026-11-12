@@ -127,7 +127,7 @@ public class VisitServiceImpl implements VisitService {
 
         if (appointmentId != null) {
             if (visitRepository.existsByAppointmentId(appointmentId)) {
-                throw new AppException(ErrorCode.VISIT_ALREADY_ACTIVE);
+                throw new AppException(ErrorCode.PET_HAS_OPEN_VISIT);
             }
             ApiResponse<AppointmentSummaryResponse> response = appointmentClient.getAppointment(appointmentId);
             AppointmentSummaryResponse appointment = response == null ? null : response.getData();
@@ -135,7 +135,7 @@ public class VisitServiceImpl implements VisitService {
                 throw new AppException(ErrorCode.APPOINTMENT_NOT_FOUND);
             }
             if (!"CONFIRMED".equals(appointment.status()) || !LocalDate.now(clock).equals(appointment.appointmentDate())) {
-                throw new AppException(ErrorCode.APPOINTMENT_NOT_READY_FOR_CHECKIN);
+                throw new AppException(ErrorCode.APPOINTMENT_NOT_CHECKABLE);
             }
             if (petId != null && !petId.equals(appointment.petId())) {
                 throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Thú cưng không khớp với lịch hẹn");
@@ -164,10 +164,10 @@ public class VisitServiceImpl implements VisitService {
         Pet pet = petRepository.findWithSpeciesById(petId)
                 .orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
         if (visitRepository.existsByPetIdAndStatusIn(petId, VisitStatus.ACTIVE)) {
-            throw new AppException(ErrorCode.VISIT_ALREADY_ACTIVE);
+            throw new AppException(ErrorCode.PET_HAS_OPEN_VISIT);
         }
         if (appointmentId != null && visitRepository.existsByAppointmentId(appointmentId)) {
-            throw new AppException(ErrorCode.VISIT_ALREADY_ACTIVE, "Lịch hẹn này đã được tiếp nhận trước đó");
+            throw new AppException(ErrorCode.PET_HAS_OPEN_VISIT, "Lịch hẹn này đã được tiếp nhận trước đó");
         }
 
         Instant now = clock.instant();

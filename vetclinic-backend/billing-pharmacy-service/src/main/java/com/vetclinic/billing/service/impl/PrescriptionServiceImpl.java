@@ -204,7 +204,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
 
     private static void assertDoctorMayPrescribe(VisitSummaryResponse visit, Long doctorId) {
         if (!doctorId.equals(visit.doctorId())) {
-            throw new AppException(ErrorCode.VISIT_NOT_ASSIGNED_TO_YOU);
+            throw new AppException(ErrorCode.NOT_ASSIGNED_DOCTOR);
         }
         if (visit.status() != VisitStatus.IN_PROGRESS) {
             throw new AppException(ErrorCode.PRESCRIPTION_LOCKED);
@@ -232,7 +232,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
         Prescription prescription = prescriptionRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new AppException(ErrorCode.PRESCRIPTION_NOT_FOUND));
         if (prescription.getStatus() == PrescriptionStatus.DISPENSED) {
-            throw new AppException(ErrorCode.PRESCRIPTION_ALREADY_DISPENSED);
+            throw new AppException(ErrorCode.PRESCRIPTION_ALREADY_INVOICED);
         }
         if (prescription.getStatus() != PrescriptionStatus.PRESCRIBED) {
             throw new AppException(ErrorCode.INVALID_PRESCRIPTION_STATUS);
@@ -283,7 +283,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
         Prescription prescription = prescriptionRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new AppException(ErrorCode.PRESCRIPTION_NOT_FOUND));
         if (prescription.getStatus() == PrescriptionStatus.DISPENSED) {
-            throw new AppException(ErrorCode.PRESCRIPTION_ALREADY_DISPENSED);
+            throw new AppException(ErrorCode.PRESCRIPTION_ALREADY_INVOICED);
         }
         if (prescription.getStatus() != PrescriptionStatus.PRESCRIBED) {
             throw new AppException(ErrorCode.INVALID_PRESCRIPTION_STATUS);

@@ -234,7 +234,7 @@ class InvoiceServiceImplTest {
         Invoice invoice = pendingInvoice();
         when(invoiceRepository.findByIdForUpdate(40L)).thenReturn(Optional.of(invoice));
 
-        assertError(ErrorCode.DISCOUNT_EXCEEDS_TOTAL,
+        assertError(ErrorCode.DISCOUNT_EXCEEDS_INVOICE_AMOUNT,
                 () -> service.applyDiscount(40L, new DiscountRequest(new BigDecimal("280000.01"), null)));
         assertThat(invoice.getDiscountAmount()).isEqualByComparingTo("0");   // bị chặn thì không đổi gì
 

@@ -228,7 +228,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             Invoice invoice = lockPending(id);
             BigDecimal discount = InvoiceCalculator.money(request.discountAmount());
             if (discount.compareTo(InvoiceCalculator.gross(invoice)) > 0) {
-                throw new AppException(ErrorCode.DISCOUNT_EXCEEDS_TOTAL);
+                throw new AppException(ErrorCode.DISCOUNT_EXCEEDS_INVOICE_AMOUNT);
             }
             invoice.setDiscountAmount(discount);
             if (request.notes() != null && !request.notes().isBlank()) {
