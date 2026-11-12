@@ -10,8 +10,8 @@
 | Phase | Trạng thái | Ghi chú |
 |---|---|---|
 | **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
-| Phase 1 `common-library` | ⬜ chưa làm | **Bước kế tiếp: 1.1 (đánh số lại `ErrorCode`)** |
-| Phase 2 `appointment-service` | ⬜ chưa làm | |
+| **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
+| Phase 2 `appointment-service` | ⬜ chưa làm | **Bước kế tiếp: 2.A1 (bỏ 7 cột khỏi entity `Appointment`)** |
 | Phase 3 `clinical-service` | ⬜ chưa làm | |
 | Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
 | Phase 5 `notification-service` | ⬜ chưa làm | |
@@ -86,7 +86,9 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ## PHASE 1 — `common-library` (làm một lần, các module khác dùng chung)
 
-- [ ] **1.1 Đánh số lại `ErrorCode` theo Quy chuẩn §5.1** (một commit, vì mã trùng số nhưng khác nghĩa):
+> **PHASE 1 = ✅ ĐÃ XONG ngày 12/11/2026.** Kết quả thực tế ghi ở cuối mục Phase 1. Báo Linh: FE hiện **không** tham chiếu các mã đã đổi (tìm `fe/src` = 0 chỗ), chỉ `e2e/*` (v2, bị bỏ ở 7.5) có.
+
+- [x] **1.1 Đánh số lại `ErrorCode` theo Quy chuẩn §5.1** (một commit, vì mã trùng số nhưng khác nghĩa) — **đã làm**, bảng dưới là kế hoạch ban đầu; thực tế: mã v2-only được giữ tạm ở số mới (`DOCTOR_PRIORITY_LOCKED`→`CLIN_1323`, `INVALID_PRESCRIPTION_STATUS`→`PHARM_1415`, `BILL_1413–1415` giữ nguyên) để code v2 còn biên dịch; `CLIN_1312` bỏ trống có chủ ý; **xóa các mã v2-only ở 3.A3 / 4.A2**:
 
   | Mã | Code hiện tại | Theo docs v3.0 | Việc |
   |---|---|---|---|
@@ -107,8 +109,9 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
   | `PHARM_1411` | `MEDICINE_CODE_ALREADY_EXISTS` | `PRESCRIPTION_LOCKED` | mã thuốc trùng → số mới |
 
   Quy tắc: số của docs thắng; mã chỉ có trong code thì dời xuống số tiếp theo trong nhóm (CLAUDE.md §5.1). Báo FE (Linh) bảng này ngay.
-- [ ] **1.2 Thêm event mới, CHƯA xóa event cũ:** `AppointmentBookedEvent`, `AppointmentNoShowEvent`, `PatientCalledEvent`, `ParaclinicalResultsReadyEvent`, `VisitCompletedEvent`, `MedicineInvoicePaidEvent`, `MedicineLowStockEvent` + routing key trong `EventRouting` (`appointment.booked`, `appointment.no_show`, `visit.patient_called`, `visit.results_ready`, `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`). `VisitCheckedInEvent` và `AppointmentStatusChangedEvent` giữ, chỉ thêm trường nếu cần (`doctorId`).
-- [ ] **1.3** Đổi `InventoryTransactionType`/`PaymentStatus` nằm ở billing (xem 4.A), không ở common.
+- [x] **1.2 Thêm event mới, CHƯA xóa event cũ** — **đã làm** (7 record + 9 routing key, khớp Kiến trúc §5.2; `VisitCheckedInEvent` **chưa** thêm `doctorId`: làm ở 3.B1 khi cần để khỏi vỡ constructor sớm; event/key v2 còn nguyên, xóa ở 7.1): `AppointmentBookedEvent`, `AppointmentNoShowEvent`, `PatientCalledEvent`, `ParaclinicalResultsReadyEvent`, `VisitCompletedEvent`, `MedicineInvoicePaidEvent`, `MedicineLowStockEvent` + routing key trong `EventRouting` (`appointment.booked`, `appointment.no_show`, `visit.patient_called`, `visit.results_ready`, `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`). `VisitCheckedInEvent` và `AppointmentStatusChangedEvent` giữ, chỉ thêm trường nếu cần (`doctorId`).
+- [x] **1.3** Đổi `InventoryTransactionType`/`PaymentStatus` nằm ở billing (xem 4.A), không ở common. *(không có việc ở Phase 1)*
+- **Kết quả đo:** `mvn clean test` 8/8 module BUILD SUCCESS, **288 test, 0 lỗi**; không có 2 mã nào trùng chuỗi. Lưu ý kỹ thuật: build gia tăng (`mvn test` không `clean`) từng gây `NoClassDefFoundError: LabTestItem` ở clinical → **luôn dùng `mvn clean test`**.
 - **Xong khi:** `mvn -q clean install -DskipTests` xanh; test của `auth-service` vẫn xanh (nếu đỏ do đổi mã lỗi thì sửa test).
 
 ---
