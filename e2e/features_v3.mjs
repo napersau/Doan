@@ -1,0 +1,418 @@
+// Kiểm thử các chức năng NGOÀI luồng khám chính (v3.0) qua Gateway: tài khoản, danh mục, thú cưng, lịch hẹn, quản lý đợt khám,
+// báo cáo, thuốc, WebSocket/STOMP. Bổ sung cho backend_v3.mjs / notification_v3.mjs / fe_smoke_v3.mjs (không lặp lại nội dung của chúng).
+// Chạy: node e2e/features_v3.mjs   (stack đang chạy + dữ liệu seed; chạy SAU backend_v3.mjs vì script này tạo thêm bác sĩ -> đổi sức chứa khung giờ)
+// CẢNH BÁO: tạo dữ liệu thật, không dọn lại.
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '..');
+const WebSocket = createRequire(path.join(root, 'fe', 'package.json'))('ws');
+const API = process.env.API_URL || 'http://localhost:8080';
+const WS_URL = process.env.WS_URL || API.replace(/^http/, 'ws') + '/ws';
+const PASSWORD = 'Admin@123';
+const RUN = Date.now().toString().slice(-6);
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+let passed = 0; const failures = [];
+const check = (name, ok, extra = '') => { if (ok) { passed += 1; console.log(`  PASS ${name}`); } else { failures.push(name); console.log(`  FAIL ${name} ${extra}`); } };
+const step = (title) => console.log(`\n== ${title}`);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const brief = (res) => `${res.status}${res.code ? `/${res.code}` : ''} ${String(res.message || '').slice(0, 120)}`;
+
+async function call(method, url, { token, body, form } = {}) {
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const response = await fetch(`${API}${url}`, { method, headers, body: form || (body === undefined ? undefined : JSON.stringify(body)) });
+  const text = await response.text();
+  let json = {}; try { json = text ? JSON.parse(text) : {}; } catch { json = { message: text }; }
+  return { status: response.status, code: json.errorCode, data: json.data, message: json.message };
+}
+const AUTH = '/api/v1/auth'; const CLIN = '/api/v1/clinical'; const PHARM = '/api/v1/pharmacy'; const BILL = '/api/v1/billing'; const APPT = '/api/v1/appointments';
+
+function sql(query) {
+  const env = fs.readFileSync(path.join(root, '.env'), 'utf8');
+  const password = /^MYSQL_ROOT_PASSWORD=(.*)$/m.exec(env)?.[1]?.trim();
+  return execSync(`docker compose exec -T mysql-server mysql -uroot -p${password} -N -B -e "${query.replace(/"/g, '\\"')}"`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+}
+const loginRes = (username, password = PASSWORD) => call('POST', `${AUTH}/login`, { body: { username, password } });
+async function login(username, password = PASSWORD) { const res = await loginRes(username, password); if (res.status !== 200) throw new Error(`login ${username}: ${brief(res)}`); return res.data; }
+const phone = (n) => `09${RUN}${String(n).padStart(2, '0')}`.slice(0, 10);
+const clinicNow = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:00`;
+const dayOffset = (n) => { const d = clinicNow(); d.setDate(d.getDate() + n); return iso(d); };
+
+const T = {};
+const newPet = async (name, owner = 8, species = 1) => {
+  const res = await call('POST', '/api/v1/pets', { token: T.rec, body: { ownerId: owner, speciesId: species, name: `${name}-${RUN}` } });
+  if (res.status !== 201) throw new Error(`newPet ${name}: ${brief(res)}`);
+  return res.data.id;
+};
+const checkIn = (petId, doctorId, extra = {}) => call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId, doctorId, isEmergency: false, initialSymptoms: 'e2e', ...extra } });
+const visitOf = async (id) => (await call('GET', `${CLIN}/pet-visits/${id}`, { token: T.rec })).data;
+const docToken = (id) => (id === 2 ? T.doc2 : id === 3 ? T.doc3 : T.doc4);
+const callNext = (token) => call('POST', `${CLIN}/pet-visits/call-next`, { token });
+const startExam = (token, id, vitals = true) => call('POST', `${CLIN}/pet-visits/${id}/start-exam`, { token, body: vitals ? { weightAtVisit: 6, temperature: 38.6 } : {} });
+const closeVisit = (token, id, diagnosis = 'Chẩn đoán e2e') => call('POST', `${CLIN}/pet-visits/${id}/close-visit`, { token, body: { diagnosis, treatmentPlan: 'Điều trị', doctorAdvice: 'Theo dõi' } });
+async function inProgress(petName, doctorId = 4) {
+  const pet = await newPet(petName);
+  const v = (await checkIn(pet, doctorId)).data.id;
+  await callNext(docToken(doctorId));
+  const st = await startExam(docToken(doctorId), v);
+  if (st.status !== 200) throw new Error(`startExam: ${brief(st)}`);
+  return { pet, v, token: docToken(doctorId) };
+}
+const statementOf = async (v) => (await call('GET', `${CLIN}/pet-visits/${v}/service-invoices`, { token: T.rec })).data;
+const imgForm = (bytes = PNG, type = 'image/png', name = 'a.png') => { const f = new FormData(); f.append('description', 'mô tả'); f.append('conclusion', 'kết luận'); f.append('files', new Blob([bytes], { type }), name); return f; };
+
+// ---------- STOMP tối thiểu ----------
+function stomp(token, { subscribe = [], send = false } = {}) {
+  const NUL = '\u0000';
+  const frames = []; let ws; const waiters = [];
+  const parse = (raw) => String(raw).split(NUL).map((p) => p.replace(/^\n+/, '')).filter((p) => p.trim()).map((p) => { const i = p.indexOf('\n\n'); const head = (i === -1 ? p : p.slice(0, i)).split('\n'); const headers = {}; head.slice(1).forEach((l) => { const c = l.indexOf(':'); if (c > 0) headers[l.slice(0, c)] = l.slice(c + 1); }); return { command: head[0].trim(), headers, body: i === -1 ? '' : p.slice(i + 2) }; });
+  const fr = (cmd, headers = {}, body = '') => `${cmd}\n${Object.entries(headers).map(([k, v]) => `${k}:${v}`).join('\n')}\n\n${body}${NUL}`;
+  return new Promise((resolve) => {
+    ws = new WebSocket(WS_URL);
+    const api = {
+      frames, close: () => { try { ws.close(); } catch { /* đã đóng */ } },
+      waitFor: async (pred, ms = 12000) => { const end = Date.now() + ms; while (Date.now() < end) { const f = frames.find(pred); if (f) return f; await sleep(150); } return null; },
+    };
+    ws.on('open', () => ws.send(fr('CONNECT', { 'accept-version': '1.2', host: 'localhost', 'heart-beat': '0,0', ...(token ? { Authorization: `Bearer ${token}` } : {}) })));
+    ws.on('message', (raw) => parse(raw).forEach((f) => {
+      frames.push(f);
+      if (f.command === 'CONNECTED') { subscribe.forEach((dest, i) => ws.send(fr('SUBSCRIBE', { id: `s${i}`, destination: dest }))); if (send) ws.send(fr('SEND', { destination: '/topic/role/ADMIN' }, '{"x":1}')); resolve(api); }
+    }));
+    ws.on('error', () => resolve(api));
+    ws.on('close', () => resolve(api));
+    setTimeout(() => resolve(api), 6000);
+  });
+}
+
+async function main() {
+  const who = { admin: 'admin', doc2: 'bs_tien', doc3: 'bs_an', doc4: 'bs_mai', rec: 'letan_hoa', lab: 'ktv_lab_minh', img: 'ktv_cdha_dung', owner: 'khach_lan', owner2: 'khach_nam' };
+  for (const [k, u] of Object.entries(who)) T[k] = (await login(u)).accessToken;
+  // Dọn đợt khám dở dang của các bác sĩ #2-#4 từ lần chạy trước để script chạy lại được (chỉ là vệ sinh dữ liệu thử, không phải nghiệp vụ)
+  sql("UPDATE pet_clinic_clinical_db.pet_visits SET status='CANCELLED' WHERE doctor_id IN (2,3,4) AND status IN ('WAITING','IN_PROGRESS','RESULTS_READY','WAITING_RESULTS')");
+
+  // =====================================================================================================================
+  step('A. Tài khoản: tự đăng ký, hồ sơ, đổi mật khẩu, tạo / khóa / đổi vai trò / đặt lại mật khẩu, chặn dò mật khẩu');
+  const regPhone = phone(1);
+  const reg = await call('POST', `${AUTH}/register`, { body: { password: 'Owner@1234', fullName: `Chu E2E ${RUN}`, phoneNumber: regPhone, email: `e2e${RUN}@example.com` } });
+  check('tự đăng ký chủ nuôi (luôn PET_OWNER, username = SĐT)', [200, 201].includes(reg.status) && (reg.data?.user?.role || reg.data?.role) !== 'ADMIN', brief(reg));
+  check('đăng ký trùng SĐT → 409 AUTH_1102', (await call('POST', `${AUTH}/register`, { body: { password: 'Owner@1234', fullName: 'Trùng', phoneNumber: regPhone } })).code === 'AUTH_1102');
+  check('mật khẩu yếu bị từ chối (400 SYS_1001)', (await call('POST', `${AUTH}/register`, { body: { password: 'abc', fullName: 'Yếu', phoneNumber: phone(2) } })).code === 'SYS_1001');
+  check('đăng nhập sai mật khẩu → AUTH_1103', (await loginRes(regPhone, 'Sai@12345')).code === 'AUTH_1103');
+  let me = await login(regPhone, 'Owner@1234');
+  const ownerTok = me.accessToken;
+  check('GET /me trả đúng hồ sơ', (await call('GET', `${AUTH}/me`, { token: ownerTok })).data?.fullName === `Chu E2E ${RUN}`);
+  check('PUT /me đổi họ tên + địa chỉ', (await call('PUT', `${AUTH}/me`, { token: ownerTok, body: { fullName: `Chu E2E đổi ${RUN}`, address: 'Hà Nội' } })).data?.address === 'Hà Nội');
+  check('đổi mật khẩu: sai mật khẩu hiện tại → AUTH_1111', (await call('POST', `${AUTH}/change-password`, { token: ownerTok, body: { currentPassword: 'Sai@12345', newPassword: 'Owner@5678' } })).code === 'AUTH_1111');
+  check('đổi mật khẩu thành công', (await call('POST', `${AUTH}/change-password`, { token: ownerTok, body: { currentPassword: 'Owner@1234', newPassword: 'Owner@5678' } })).status === 200);
+  check('refresh token cũ bị thu hồi sau khi đổi mật khẩu', (await call('POST', `${AUTH}/refresh`, { body: { refreshToken: me.refreshToken } })).status === 401);
+  check('đăng nhập bằng mật khẩu mới', (await loginRes(regPhone, 'Owner@5678')).status === 200);
+
+  const docPhone = phone(3); const docRoom = `E${RUN.slice(-3)}`;
+  const createdDoc = await call('POST', `${AUTH}/users`, { token: T.admin, body: { roleCode: 'VETERINARIAN', fullName: `BS E2E ${RUN}`, phoneNumber: docPhone, password: 'Doctor@123', roomNumber: docRoom } });
+  check('Admin tạo bác sĩ có số phòng', [200, 201].includes(createdDoc.status), brief(createdDoc));
+  const docId = createdDoc.data?.id;
+  check('trùng số phòng → 409', (await call('POST', `${AUTH}/users`, { token: T.admin, body: { roleCode: 'VETERINARIAN', fullName: 'BS trùng phòng', phoneNumber: phone(4), password: 'Doctor@123', roomNumber: docRoom } })).status === 409);
+  check('Lễ tân tạo chủ nuôi được', [200, 201].includes((await call('POST', `${AUTH}/users`, { token: T.rec, body: { roleCode: 'PET_OWNER', fullName: `Khách quầy ${RUN}`, phoneNumber: phone(5), password: 'Owner@1234' } })).status));
+  check('Lễ tân KHÔNG tạo được bác sĩ (403)', (await call('POST', `${AUTH}/users`, { token: T.rec, body: { roleCode: 'VETERINARIAN', fullName: 'X', phoneNumber: phone(6), password: 'Doctor@123', roomNumber: 'Z99' } })).status === 403);
+  check('chủ nuôi không xem được danh sách người dùng (403)', (await call('GET', `${AUTH}/users`, { token: T.owner })).status === 403);
+  const found = await call('GET', `${AUTH}/users?keyword=${docPhone}`, { token: T.admin });
+  check('tìm người dùng theo SĐT', found.data?.items?.some((u) => u.id === docId));
+  check('lọc theo vai trò VETERINARIAN', (await call('GET', `${AUTH}/users?role=VETERINARIAN&size=50`, { token: T.admin })).data?.items?.every((u) => u.role === 'VETERINARIAN'));
+  check('GET /users/doctors có bác sĩ mới', (await call('GET', `${AUTH}/users/doctors`, { token: T.rec })).data?.some((u) => u.id === docId));
+  check('Admin sửa thông tin bác sĩ', (await call('PUT', `${AUTH}/users/${docId}`, { token: T.admin, body: { fullName: `BS E2E sửa ${RUN}` } })).data?.fullName === `BS E2E sửa ${RUN}`);
+  const docSession = await login(docPhone, 'Doctor@123');
+  check('khóa tài khoản → đăng nhập bị từ chối AUTH_1107', (await call('POST', `${AUTH}/users/${docId}/status`, { token: T.admin, body: { status: 'LOCKED' } })).status === 200 && (await loginRes(docPhone, 'Doctor@123')).code === 'AUTH_1107');
+  check('khóa tài khoản thu hồi mọi refresh token', (await call('POST', `${AUTH}/refresh`, { body: { refreshToken: docSession.refreshToken } })).status === 401);
+  check('bác sĩ bị khóa không còn trong danh sách bác sĩ hoạt động', !(await call('GET', `${AUTH}/users/doctors`, { token: T.rec })).data?.some((u) => u.id === docId));
+  check('mở khóa → đăng nhập lại được', (await call('POST', `${AUTH}/users/${docId}/status`, { token: T.admin, body: { status: 'ACTIVE' } })).status === 200 && (await loginRes(docPhone, 'Doctor@123')).status === 200);
+  check('Admin không tự khóa chính mình', (await call('POST', `${AUTH}/users/1/status`, { token: T.admin, body: { status: 'LOCKED' } })).status >= 400);
+  check('đổi vai trò bác sĩ → lễ tân', (await call('POST', `${AUTH}/users/${docId}/role`, { token: T.admin, body: { roleCode: 'RECEPTIONIST' } })).data?.role === 'RECEPTIONIST');
+  check('Admin đặt lại mật khẩu nhân sự', (await call('POST', `${AUTH}/users/${docId}/reset-password`, { token: T.admin, body: { newPassword: 'Reset@1234' } })).status === 200 && (await loginRes(docPhone, 'Reset@1234')).status === 200);
+  check('Lễ tân đặt lại mật khẩu cho chủ nuôi (UC tại quầy)', (await call('POST', `${AUTH}/users/${(await call('GET', `${AUTH}/users?keyword=${regPhone}`, { token: T.rec })).data.items[0].id}/reset-password`, { token: T.rec, body: { newPassword: 'Owner@9999' } })).status === 200);
+  check('Lễ tân KHÔNG đặt lại mật khẩu nhân sự (403)', (await call('POST', `${AUTH}/users/${docId}/reset-password`, { token: T.rec, body: { newPassword: 'Reset@1234' } })).status === 403);
+  let lock = null; for (let i = 1; i <= 6; i += 1) lock = await loginRes(`khong-co-${RUN}`, 'Sai@12345');
+  check('sai 5 lần liên tiếp → lần thứ 6 bị chặn 429 AUTH_1112', lock.status === 429 && lock.code === 'AUTH_1112', brief(lock));
+
+  // =====================================================================================================================
+  step('B. Danh mục: loài, dịch vụ (VAT), chỉ số xét nghiệm + khoảng tham chiếu + gói, đánh giá LOW/NORMAL/HIGH');
+  const sp = await call('POST', '/api/v1/species', { token: T.admin, body: { code: `SP${RUN}`, name: `Loài ${RUN}` } });
+  check('Admin thêm loài', [200, 201].includes(sp.status), brief(sp));
+  check('trùng mã loài → 409', (await call('POST', '/api/v1/species', { token: T.admin, body: { code: `SP${RUN}`, name: 'Trùng' } })).status === 409);
+  check('sửa loài', (await call('PUT', `/api/v1/species/${sp.data.id}`, { token: T.admin, body: { code: `SP${RUN}`, name: `Loài sửa ${RUN}` } })).data?.name === `Loài sửa ${RUN}`);
+  check('lễ tân không thêm loài (403)', (await call('POST', '/api/v1/species', { token: T.rec, body: { code: `X${RUN}`, name: 'x' } })).status === 403);
+  const svc = await call('POST', `${CLIN}/services`, { token: T.admin, body: { code: `SV${RUN}`, name: `Thủ thuật ${RUN}`, category: 'PROCEDURE', price: 123000, vatRate: 0.08, description: 'e2e' } });
+  check('Admin thêm dịch vụ có VAT 8%', [200, 201].includes(svc.status) && Number(svc.data.vatRate) === 0.08, brief(svc));
+  check('đổi giá dịch vụ', Number((await call('PUT', `${CLIN}/services/${svc.data.id}`, { token: T.admin, body: { price: 150000 } })).data?.price) === 150000);
+  check('lễ tân không sửa dịch vụ (403)', (await call('PUT', `${CLIN}/services/${svc.data.id}`, { token: T.rec, body: { price: 1 } })).status === 403);
+  // chỉ số xét nghiệm + gói riêng
+  const mkItem = (code, name) => call('POST', `${CLIN}/lab-test-items`, { token: T.admin, body: { code: `${code}${RUN}`, name, unit: 'u', ranges: [{ speciesId: 1, minValue: 10, maxValue: 20 }] } });
+  const itemLow = await mkItem('LOW', 'Chỉ số thấp'); const itemNorm = await mkItem('NRM', 'Chỉ số bình thường'); const itemHigh = await mkItem('HGH', 'Chỉ số cao');
+  check('thêm 3 chỉ số xét nghiệm kèm khoảng tham chiếu loài Chó', [itemLow, itemNorm, itemHigh].every((r) => [200, 201].includes(r.status)), brief(itemLow));
+  check('sửa chỉ số + lưu lại khoảng tham chiếu', (await call('PUT', `${CLIN}/lab-test-items/${itemLow.data.id}`, { token: T.admin, body: { name: 'Chỉ số thấp (sửa)', unit: 'u' } })).status === 200 && (await call('PUT', `${CLIN}/lab-test-items/${itemLow.data.id}/ranges/1`, { token: T.admin, body: { minValue: 10, maxValue: 20 } })).status === 200);
+  const labSvc = await call('POST', `${CLIN}/services`, { token: T.admin, body: { code: `LB${RUN}`, name: `Gói XN e2e ${RUN}`, category: 'LABORATORY', price: 90000, vatRate: 0 } });
+  check('gói xét nghiệm gồm 3 chỉ số', (await call('PUT', `${CLIN}/services/${labSvc.data.id}/lab-test-items`, { token: T.admin, body: { labTestItemIds: [itemLow.data.id, itemNorm.data.id, itemHigh.data.id] } })).status === 200 && (await call('GET', `${CLIN}/services/${labSvc.data.id}/lab-test-items`, { token: T.admin })).data?.length === 3);
+  const lv = await inProgress('XN', 4);
+  check('chỉ định gói xét nghiệm mới (CLS) thành công', (await call('POST', `${CLIN}/pet-visits/${lv.v}/paraclinical-orders`, { token: lv.token, body: { serviceIds: [labSvc.data.id] } })).data?.status === 'WAITING_RESULTS');
+  await call('POST', `${CLIN}/lab-queue/call-next`, { token: T.lab });
+  const labDetail = ((await call('GET', `${CLIN}/lab-queue`, { token: T.lab })).data.find((i) => i.visitId === lv.v) || {}).serviceDetailId;
+  await call('POST', `${CLIN}/service-details/${labDetail}/start`, { token: T.lab });
+  const form = (await call('GET', `${CLIN}/service-details/${labDetail}/lab-form`, { token: T.lab })).data;
+  check('lab-form trả đủ 3 chỉ số kèm khoảng tham chiếu của loài Chó', form?.length === 3 && form.every((f) => f.ranges?.some((r) => Number(r.minValue) === 10 && Number(r.maxValue) === 20)), JSON.stringify(form).slice(0, 200));
+  const partial = await call('POST', `${CLIN}/lab-results/${labDetail}`, { token: T.lab, body: { results: [{ labTestItemId: itemLow.data.id, resultValue: 5 }] } });
+  check('nhập thiếu chỉ số của gói → 400 SYS_1001', partial.status === 400 && partial.code === 'SYS_1001', brief(partial));
+  const full = await call('POST', `${CLIN}/lab-results/${labDetail}`, { token: T.lab, body: { results: [{ labTestItemId: itemLow.data.id, resultValue: 5 }, { labTestItemId: itemNorm.data.id, resultValue: 15 }, { labTestItemId: itemHigh.data.id, resultValue: 25 }] } });
+  check('nhập đủ chỉ số → 200', full.status === 200, brief(full));
+  const results = (await call('GET', `${CLIN}/lab-results/${labDetail}`, { token: T.doc4 })).data || [];
+  const evalOf = (id) => results.find((r) => r.labTestItemId === id)?.evaluation;
+  check('đánh giá tính khi hiển thị: 5 → LOW, 15 → NORMAL, 25 → HIGH', evalOf(itemLow.data.id) === 'LOW' && evalOf(itemNorm.data.id) === 'NORMAL' && evalOf(itemHigh.data.id) === 'HIGH', JSON.stringify(results).slice(0, 300));
+  check('khoảng tham chiếu được chụp (snapshot) vào kết quả', results.every((r) => Number(r.minValue) === 10 && Number(r.maxValue) === 20));
+  await call('POST', `${CLIN}/pet-visits/${lv.v}/abandon`, { token: T.rec });
+  check('dịch vụ tắt hoạt động không còn trong danh mục thường', (await call('PUT', `${CLIN}/services/${svc.data.id}`, { token: T.admin, body: { active: false } })).status === 200 && !(await call('GET', `${CLIN}/services`, { token: T.doc4 })).data.some((s) => s.id === svc.data.id));
+  check('dịch vụ tắt vẫn xem được với includeInactive', (await call('GET', `${CLIN}/services?includeInactive=true`, { token: T.admin })).data.some((s) => s.id === svc.data.id));
+
+  // =====================================================================================================================
+  step('C. Thú cưng và quyền xem hồ sơ');
+  const freshOwnerToken = (await login(regPhone, 'Owner@9999')).accessToken;
+  const ownerPet = await call('POST', '/api/v1/pets', { token: freshOwnerToken, body: { speciesId: 2, name: `Mèo tự thêm ${RUN}`, gender: 'FEMALE' } });
+  check('chủ nuôi tự thêm thú cưng của mình', ownerPet.status === 201, brief(ownerPet));
+  const petId = await newPet('Quầy', 8);
+  check('lễ tân thêm hộ thú cưng cho chủ nuôi #8', petId > 0);
+  check('lễ tân sửa thông tin thú cưng', (await call('PUT', `/api/v1/pets/${petId}`, { token: T.rec, body: { color: 'Vàng', neutered: true } })).data?.color === 'Vàng');
+  check('lọc thú cưng theo chủ nuôi', (await call('GET', '/api/v1/pets?ownerId=8&size=100', { token: T.rec })).data?.items?.some((p) => p.id === petId));
+  check('chủ nuôi chỉ thấy thú cưng của mình', (await call('GET', '/api/v1/pets?size=100', { token: T.owner2 })).data?.items?.every((p) => p.ownerId === 9));
+  check('chủ nuôi KHÔNG xem được thú cưng của người khác', [403, 404].includes((await call('GET', `/api/v1/pets/${petId}`, { token: T.owner2 })).status));
+  check('chủ nuôi không xem bệnh án thú cưng người khác', [403, 404].includes((await call('GET', `/api/v1/pets/${petId}/medical-history`, { token: T.owner2 })).status));
+  check('bác sĩ xem được bệnh án', (await call('GET', `/api/v1/pets/${petId}/medical-history`, { token: T.doc4 })).status === 200);
+
+  // =====================================================================================================================
+  step('D. Lịch hẹn: đặt, duyệt, đổi giờ, hủy (quy tắc 2 giờ), vắng mặt, tiếp nhận theo lịch, báo cáo');
+  const pA = await newPet('Lich-A'); const pB = await newPet('Lich-B'); const pC = await newPet('Lich-C');
+  const day1 = dayOffset(2); const day2 = dayOffset(3);
+  const byRec = await call('POST', APPT, { token: T.rec, body: { petId: pA, ownerId: 8, appointmentDate: day1, startTime: '08:30', reason: 'Đặt qua điện thoại', bookingChannel: 'PHONE' } });
+  check('lễ tân đặt lịch qua điện thoại → CONFIRMED ngay', byRec.status === 201 && byRec.data.status === 'CONFIRMED' && byRec.data.bookingChannel === 'PHONE', brief(byRec));
+  const byOwner = await call('POST', APPT, { token: T.owner, body: { petId: pB, ownerId: 9, appointmentDate: day1, startTime: '09:00', reason: 'Đặt online', bookingChannel: 'PHONE' } });
+  check('chủ nuôi đặt online → PENDING, kênh ONLINE (bỏ qua ownerId/kênh trong body)', byOwner.status === 201 && byOwner.data.status === 'PENDING' && byOwner.data.bookingChannel === 'ONLINE', brief(byOwner));
+  check('cùng thú cưng cùng ngày: đặt lần hai bị từ chối (409)', (await call('POST', APPT, { token: T.rec, body: { petId: pA, ownerId: 8, appointmentDate: day1, startTime: '10:00', reason: 'Trùng ngày', bookingChannel: 'PHONE' } })).status === 409);
+  check('đặt lịch ngày đã qua bị từ chối (400)', (await call('POST', APPT, { token: T.rec, body: { petId: pC, ownerId: 8, appointmentDate: dayOffset(-1), startTime: '09:00', reason: 'Quá khứ' } })).status === 400);
+  check('chủ nuôi không đặt cho thú cưng của người khác (403/404)', [403, 404].includes((await call('POST', APPT, { token: T.owner2, body: { petId: pC, appointmentDate: day2, startTime: '09:00', reason: 'Của người khác' } })).status));
+  check('chủ nuôi không duyệt lịch (403)', (await call('POST', `${APPT}/${byOwner.data.id}/confirm`, { token: T.owner })).status === 403);
+  check('lễ tân duyệt lịch PENDING → CONFIRMED', (await call('POST', `${APPT}/${byOwner.data.id}/confirm`, { token: T.rec })).data?.status === 'CONFIRMED');
+  check('duyệt lần hai bị từ chối (trạng thái nguồn không hợp lệ)', (await call('POST', `${APPT}/${byOwner.data.id}/confirm`, { token: T.rec })).status === 400);
+  const rs = await call('POST', `${APPT}/${byOwner.data.id}/reschedule`, { token: T.owner, body: { newDate: day2, newStartTime: '10:30', reason: 'Bận việc' } });
+  check('chủ nuôi đổi sang khung khác (≥ 2 giờ trước giờ hẹn)', rs.status === 200 && rs.data.appointmentDate === day2 && String(rs.data.startTime).startsWith('10:30'), brief(rs));
+  check('lịch sử trạng thái ghi đủ (tạo, duyệt, đổi giờ)', (await call('GET', `${APPT}/${byOwner.data.id}/history`, { token: T.rec })).data?.length >= 2);
+  check('hủy bắt buộc có lý do (400)', (await call('POST', `${APPT}/${byOwner.data.id}/cancel`, { token: T.owner, body: {} })).status === 400);
+  const before = (await call('GET', `${APPT}/slots?date=${day2}`)).data.find((s) => s.startTime.startsWith('10:30')).remaining;
+  check('chủ nuôi hủy lịch ≥ 2 giờ → CANCELLED, trả lại chỗ', (await call('POST', `${APPT}/${byOwner.data.id}/cancel`, { token: T.owner, body: { reason: 'Đổi ý' } })).data?.status === 'CANCELLED' && (await call('GET', `${APPT}/slots?date=${day2}`)).data.find((s) => s.startTime.startsWith('10:30')).remaining === before + 1);
+  check('hủy lịch đã hủy → từ chối', (await call('POST', `${APPT}/${byOwner.data.id}/cancel`, { token: T.rec, body: { reason: 'Lại' } })).status === 400);
+  check('chủ nuôi chỉ thấy lịch của mình trong danh sách', (await call('GET', `${APPT}?size=100`, { token: T.owner2 })).data?.items?.every((a) => a.ownerId === 9 || a.ownerId === undefined));
+  check('lọc lịch theo mã / trạng thái / ngày', (await call('GET', `${APPT}?code=${byRec.data.appointmentCode}`, { token: T.rec })).data?.items?.length === 1 && (await call('GET', `${APPT}?status=CANCELLED&fromDate=${day1}&toDate=${day2}`, { token: T.rec })).data?.items?.some((a) => a.id === byOwner.data.id));
+  // quy tắc 2 giờ: lịch hôm nay còn 1 giờ nữa
+  const now = clinicNow(); const soon = new Date(now.getTime() + 3600000);
+  sql(`INSERT INTO pet_clinic_appointment_db.appointments (appointment_code,pet_id,appointment_date,start_time,reason,booking_channel,status) VALUES ('APT-E2E-${RUN}-A',${pC},'${iso(soon)}','${hhmm(soon)}','Sát giờ','PHONE','CONFIRMED')`);
+  const soonId = Number(sql(`SELECT id FROM pet_clinic_appointment_db.appointments WHERE appointment_code='APT-E2E-${RUN}-A'`));
+  const tooLate = await call('POST', `${APPT}/${soonId}/cancel`, { token: T.owner, body: { reason: 'Muộn' } });
+  check('chủ nuôi hủy trong vòng 2 giờ trước giờ hẹn → APPT_1204', tooLate.code === 'APPT_1204', brief(tooLate));
+  check('lễ tân hủy được dù sát giờ (không bị quy tắc 2 giờ)', (await call('POST', `${APPT}/${soonId}/cancel`, { token: T.rec, body: { reason: 'Phòng khám chủ động hủy' } })).data?.status === 'CANCELLED');
+  // NO_SHOW + tiếp nhận muộn như vãng lai
+  const pD = await newPet('NoShow'); const yesterday = dayOffset(-1);
+  sql(`INSERT INTO pet_clinic_appointment_db.appointments (appointment_code,pet_id,appointment_date,start_time,reason,booking_channel,status) VALUES ('APT-E2E-${RUN}-B',${pD},'${yesterday}','08:00:00','Quá giờ','PHONE','CONFIRMED')`);
+  const nsId = Number(sql(`SELECT id FROM pet_clinic_appointment_db.appointments WHERE appointment_code='APT-E2E-${RUN}-B'`));
+  check('lễ tân đánh dấu vắng mặt lịch đã quá giờ → NO_SHOW', (await call('POST', `${APPT}/${nsId}/no-show`, { token: T.rec })).data?.status === 'NO_SHOW');
+  check('đánh dấu vắng mặt lịch tương lai bị từ chối (APPT_1206)', (await call('POST', `${APPT}/${byRec.data.id}/no-show`, { token: T.rec })).code === 'APPT_1206');
+  const lateWalkin = await checkIn(pD, 4, { appointmentId: nsId });
+  check('tiếp nhận theo lịch đã NO_SHOW bị từ chối (APPT_1205)', lateWalkin.code === 'APPT_1205', brief(lateWalkin));
+  const asWalkIn = await checkIn(pD, 4);
+  check('khách đến trễ được tiếp nhận như vãng lai, lịch giữ NO_SHOW (FR-18)', asWalkIn.status === 201 && (await call('GET', `${APPT}/${nsId}`, { token: T.rec })).data?.status === 'NO_SHOW');
+  await call('POST', `${CLIN}/pet-visits/${asWalkIn.data.id}/cancel`, { token: T.rec, body: { reason: 'dọn' } });
+  // tiếp nhận theo lịch hôm nay → lịch CHECKED_IN qua sự kiện
+  const pE = await newPet('CheckInAppt'); const today = iso(clinicNow());
+  sql(`INSERT INTO pet_clinic_appointment_db.appointments (appointment_code,pet_id,appointment_date,start_time,reason,booking_channel,status) VALUES ('APT-E2E-${RUN}-C',${pE},'${today}','16:30:00','Có hẹn','PHONE','CONFIRMED')`);
+  const ciId = Number(sql(`SELECT id FROM pet_clinic_appointment_db.appointments WHERE appointment_code='APT-E2E-${RUN}-C'`));
+  const ci = await checkIn(pE, 4, { appointmentId: ciId, petId: undefined });
+  check('tiếp nhận theo lịch hẹn hôm nay thành công (petId lấy từ lịch)', ci.status === 201 && ci.data.petId === pE, brief(ci));
+  let checkedIn = false; for (let i = 0; i < 20 && !checkedIn; i += 1) { checkedIn = (await call('GET', `${APPT}/${ciId}`, { token: T.rec })).data?.status === 'CHECKED_IN'; if (!checkedIn) await sleep(500); }
+  check('sự kiện visit.checked_in chuyển lịch hẹn sang CHECKED_IN', checkedIn);
+  check('check-in lại thú cưng đang có đợt khám mở → CLIN_1306', (await checkIn(pE, 4)).code === 'CLIN_1306');
+  await call('POST', `${CLIN}/pet-visits/${ci.data.id}/cancel`, { token: T.rec, body: { reason: 'dọn' } });
+  const rep = await call('GET', `${APPT}/reports/summary?fromDate=${dayOffset(-3)}&toDate=${dayOffset(10)}`, { token: T.admin });
+  check('báo cáo lịch hẹn: có tổng, tỉ lệ vắng mặt/hủy, theo kênh', rep.status === 200 && rep.data.totalAppointments >= 4 && rep.data.byChannel && 'noShowRate' in rep.data && 'cancellationRate' in rep.data, brief(rep));
+
+  // =====================================================================================================================
+  step('E. Quản lý đợt khám: phân công, hủy, dịch vụ tại phòng, mở lại hồ sơ, bỏ về, cấp cứu, quyền, giảm giá');
+  const qa = await newPet('Q-A'); const qb = await newPet('Q-B');
+  const va = (await checkIn(qa, undefined)).data; const vb = (await checkIn(qb, undefined, { isEmergency: true })).data;
+  const board = (await call('GET', `${CLIN}/pet-visits/queue`, { token: T.rec })).data;
+  check('ca chưa chọn bác sĩ vào danh sách chờ phân công; có gợi ý bác sĩ', board.unassigned.some((v) => v.id === va.id) && board.suggestedDoctorId > 0);
+  check('lễ tân xếp ca cho bác sĩ bất kỳ, kể cả đang khám ca khác (Q2)', (await call('POST', `${CLIN}/pet-visits/${va.id}/assign-doctor`, { token: T.rec, body: { doctorId: 3 } })).data?.doctorId === 3);
+  const orderBefore = (await visitOf(va.id)).queueOrder;
+  check('đổi bác sĩ giữ nguyên thứ tự đến (queue_order)', (await call('POST', `${CLIN}/pet-visits/${va.id}/assign-doctor`, { token: T.rec, body: { doctorId: 4 } })).data?.doctorId === 4 && (await visitOf(va.id)).queueOrder === orderBefore);
+  check('gỡ phân công → về danh sách chờ', (await call('POST', `${CLIN}/pet-visits/${va.id}/unassign-doctor`, { token: T.rec })).data?.doctorId == null);
+  check('bác sĩ không được phân công ca (chỉ lễ tân): 403', (await call('POST', `${CLIN}/pet-visits/${va.id}/assign-doctor`, { token: T.doc4, body: { doctorId: 4 } })).status === 403);
+  check('phân công cho tài khoản không phải bác sĩ hoạt động bị từ chối', (await call('POST', `${CLIN}/pet-visits/${va.id}/assign-doctor`, { token: T.rec, body: { doctorId: 5 } })).status >= 400);
+  await call('POST', `${CLIN}/pet-visits/${va.id}/assign-doctor`, { token: T.rec, body: { doctorId: 4 } });
+  await call('POST', `${CLIN}/pet-visits/${vb.id}/assign-doctor`, { token: T.rec, body: { doctorId: 4 } });
+  const queue4 = (await call('GET', `${CLIN}/pet-visits/my-queue`, { token: T.doc4 })).data.map((v) => v.id);
+  check('ca cấp cứu (đến sau) đứng trước ca thường trong hàng đợi bác sĩ', queue4.indexOf(vb.id) >= 0 && queue4.indexOf(vb.id) < queue4.indexOf(va.id), JSON.stringify(queue4));
+  check('gọi số: bác sĩ khác không đẩy lùi được ca của người khác', (await call('POST', `${CLIN}/pet-visits/${vb.id}/skip`, { token: T.doc3 })).status >= 400);
+  const called = await callNext(T.doc4);
+  check('call-next chọn ca cấp cứu trước', called.data?.id === vb.id, brief(called));
+  const skipped = await call('POST', `${CLIN}/pet-visits/${vb.id}/skip`, { token: T.doc4 });
+  check('ca cấp cứu bị đẩy lùi mất ưu tiên (xếp như ca thường), người kế tiếp được gọi', skipped.data?.id === va.id && (await visitOf(vb.id)).skipCount === 1);
+  check('hủy tiếp nhận ca WAITING bắt buộc lý do (400)', (await call('POST', `${CLIN}/pet-visits/${vb.id}/cancel`, { token: T.rec, body: {} })).status === 400);
+  check('hủy tiếp nhận ca WAITING (T03) → CANCELLED', (await call('POST', `${CLIN}/pet-visits/${vb.id}/cancel`, { token: T.rec, body: { reason: 'Khách bỏ về' } })).data?.status === 'CANCELLED');
+  check('bác sĩ khác bắt đầu khám ca không thuộc mình → CLIN_1311', (await startExam(T.doc3, va.id)).code === 'CLIN_1311');
+  check('bắt đầu khám đúng bác sĩ (T02)', (await startExam(T.doc4, va.id, false)).status === 200);
+  check('đang có ca IN_PROGRESS thì không gọi số tiếp → CLIN_1302', (await callNext(T.doc4)).code === 'CLIN_1302');
+  check('hủy tiếp nhận ca đang khám bị từ chối (chỉ WAITING)', (await call('POST', `${CLIN}/pet-visits/${va.id}/cancel`, { token: T.rec, body: { reason: 'x' } })).status === 400);
+  check('thiếu sinh hiệu → chỉ định CLS bị từ chối CLIN_1308', (await call('POST', `${CLIN}/pet-visits/${va.id}/paraclinical-orders`, { token: T.doc4, body: { serviceIds: [5] } })).code === 'CLIN_1308');
+  check('chốt ca thiếu chẩn đoán → CLIN_1307', (await call('POST', `${CLIN}/pet-visits/${va.id}/close-visit`, { token: T.doc4, body: { treatmentPlan: 'x' } })).code === 'CLIN_1307');
+  check('cập nhật sinh hiệu (PUT clinical-info)', (await call('PUT', `${CLIN}/pet-visits/${va.id}/clinical-info`, { token: T.doc4, body: { weightAtVisit: 7.5, temperature: 38.9, clinicalNotes: 'Ghi chú' } })).data?.weightAtVisit == 7.5);
+  const st = (await call('GET', `${CLIN}/doctors/status`, { token: T.rec })).data;
+  check('doctors/status: BS #4 BUSY, BS #3 AVAILABLE', st.find((d) => d.doctorId === 4)?.status === 'BUSY' && st.find((d) => d.doctorId === 3)?.status === 'AVAILABLE');
+  // dịch vụ tại phòng
+  const ord = await call('POST', `${CLIN}/pet-visits/${va.id}/in-room-services`, { token: T.doc4, body: { services: [{ serviceId: 2, quantity: 1 }, { serviceId: 4, quantity: 2, notes: 'e2e' }] } });
+  check('chỉ định 2 dịch vụ tại phòng, mỗi dịch vụ một hóa đơn PENDING', ord.status === 200 && (await statementOf(va.id)).invoices.length === 3, brief(ord));
+  check('dịch vụ CLS không chỉ định qua đường dịch vụ tại phòng (400)', (await call('POST', `${CLIN}/pet-visits/${va.id}/in-room-services`, { token: T.doc4, body: { services: [{ serviceId: 5, quantity: 1 }] } })).status >= 400);
+  const details = (await visitOf(va.id)).services;
+  const vac = details.find((d) => d.serviceId === 2); const dew = details.find((d) => d.serviceId === 4);
+  check('"Đã thực hiện" → COMPLETED', (await call('POST', `${CLIN}/service-details/${vac.id}/perform`, { token: T.doc4 })).data?.status === 'COMPLETED');
+  check('hủy dịch vụ chưa làm → dịch vụ và hóa đơn CANCELLED', (await call('POST', `${CLIN}/service-details/${dew.id}/cancel`, { token: T.doc4, body: { reason: 'Khách không đồng ý' } })).data?.status === 'CANCELLED' && (await statementOf(va.id)).invoices.find((i) => i.visitServiceDetailId === dew.id).paymentStatus === 'CANCELLED');
+  check('chốt chuyên môn (T05) → WAITING_PAYMENT', (await closeVisit(T.doc4, va.id)).data?.status === 'WAITING_PAYMENT');
+  check('bác sĩ không sửa đơn thuốc sau khi chốt (PHARM_1411)', (await call('POST', `${PHARM}/prescriptions`, { token: T.doc4, body: { visitId: va.id, items: [{ medicineId: 1, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1411');
+  const stmt = await statementOf(va.id);
+  const vacInv = stmt.invoices.find((i) => i.visitServiceDetailId === vac.id);
+  const gross = Number(vacInv.payableAmount) + Number(vacInv.discountAmount);
+  check('giảm giá vượt giá trị hóa đơn → BILL_1402', (await call('POST', `${CLIN}/service-invoices/${vacInv.id}/discount`, { token: T.rec, body: { discountAmount: gross + 1 } })).code === 'BILL_1402');
+  check('giảm giá hợp lệ làm giảm số phải trả', Number((await call('POST', `${CLIN}/service-invoices/${vacInv.id}/discount`, { token: T.rec, body: { discountAmount: 10000 } })).data?.payableAmount ?? (await statementOf(va.id)).invoices.find((i) => i.id === vacInv.id).payableAmount) === gross - 10000);
+  check('thu hóa đơn không thuộc ca → BILL_1401', (await call('POST', `${CLIN}/pet-visits/${va.id}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: [999999] } })).code === 'BILL_1401');
+  check('thu một phần: chỉ hóa đơn tiêm phòng', (await call('POST', `${CLIN}/pet-visits/${va.id}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: [vacInv.id] } })).status === 200 && (await visitOf(va.id)).status === 'WAITING_PAYMENT');
+  check('thu lại hóa đơn đã thu → BILL_1403', (await call('POST', `${CLIN}/pet-visits/${va.id}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: [vacInv.id] } })).code === 'BILL_1403');
+  check('thu hóa đơn đã hủy → BILL_1408', (await call('POST', `${CLIN}/pet-visits/${va.id}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: [stmt.invoices.find((i) => i.paymentStatus === 'CANCELLED').id] } })).code === 'BILL_1408');
+  // mở lại hồ sơ T14
+  check('mở lại hồ sơ bắt buộc lý do (400)', (await call('POST', `${CLIN}/pet-visits/${va.id}/reopen`, { token: T.doc4, body: {} })).status === 400);
+  check('bác sĩ khác không mở lại ca của người khác', (await call('POST', `${CLIN}/pet-visits/${va.id}/reopen`, { token: T.doc3, body: { reason: 'x' } })).status >= 400);
+  check('bác sĩ phụ trách mở lại hồ sơ (T14) → IN_PROGRESS', (await call('POST', `${CLIN}/pet-visits/${va.id}/reopen`, { token: T.doc4, body: { reason: 'Bổ sung dịch vụ' } })).data?.status === 'IN_PROGRESS');
+  check('dịch vụ đã thu tiền không hủy được → CLIN_1310', (await call('POST', `${CLIN}/service-details/${vac.id}/cancel`, { token: T.doc4, body: { reason: 'Muốn hủy' } })).code === 'CLIN_1310');
+  const add = await call('POST', `${CLIN}/pet-visits/${va.id}/in-room-services`, { token: T.doc4, body: { services: [{ serviceId: 3, quantity: 1 }] } });
+  check('thêm dịch vụ sau khi mở lại → hóa đơn mới PENDING, hóa đơn PAID giữ nguyên', add.status === 200 && (await statementOf(va.id)).invoices.find((i) => i.id === vacInv.id).paymentStatus === 'PAID');
+  const newSvc = (await visitOf(va.id)).services.find((d) => d.serviceId === 3);
+  await call('POST', `${CLIN}/service-details/${newSvc.id}/perform`, { token: T.doc4 });
+  check('chốt lại ca (T09) sau khi mở lại', (await closeVisit(T.doc4, va.id)).data?.status === 'WAITING_PAYMENT');
+  check('Admin cũng mở lại được hồ sơ (T14)', (await call('POST', `${CLIN}/pet-visits/${va.id}/reopen`, { token: T.admin, body: { reason: 'Admin kiểm tra' } })).data?.status === 'IN_PROGRESS');
+  check('hủy ca đã có dịch vụ tại phòng hoàn thành bị từ chối (T11 chỉ khi chưa có dịch vụ COMPLETED)', (await call('POST', `${CLIN}/pet-visits/${va.id}/cancel-exam`, { token: T.doc4, body: { reason: 'Chuyển viện' } })).status >= 400);
+  await closeVisit(T.doc4, va.id);
+  const rest = (await statementOf(va.id)).invoices.filter((i) => i.paymentStatus === 'PENDING').map((i) => i.id);
+  check('thu nốt các hóa đơn còn lại → ca COMPLETED', (await call('POST', `${CLIN}/pet-visits/${va.id}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: rest } })).status === 200 && (await visitOf(va.id)).status === 'COMPLETED');
+  const hist = await call('GET', `${CLIN}/pet-visits/${va.id}/history`, { token: T.doc4 });
+  check('lịch sử trạng thái ghi đủ mọi lần chuyển (T01…T14) kèm người thực hiện', hist.data?.length >= 8 && hist.data.some((h) => h.toStatus === 'COMPLETED'), `${hist.data?.length}`);
+  // T11 hủy ca không thu phí
+  const ex = await inProgress('T11', 4);
+  await call('POST', `${CLIN}/pet-visits/${ex.v}/in-room-services`, { token: ex.token, body: { services: [{ serviceId: 4, quantity: 1 }] } });
+  check('hủy ca / chuyển viện (T11) → CANCELLED, mọi hóa đơn CANCELLED', (await call('POST', `${CLIN}/pet-visits/${ex.v}/cancel-exam`, { token: ex.token, body: { reason: 'Chuyển viện' } })).data?.status === 'CANCELLED' && (await statementOf(ex.v)).invoices.every((i) => i.paymentStatus === 'CANCELLED'));
+  // T12 bỏ về khi chờ kết quả
+  const ab = await inProgress('T12', 4);
+  await call('POST', `${CLIN}/pet-visits/${ab.v}/paraclinical-orders`, { token: ab.token, body: { serviceIds: [5, 7] } });
+  await call('POST', `${CLIN}/lab-queue/call-next`, { token: T.lab });
+  const abLab = ((await call('GET', `${CLIN}/lab-queue`, { token: T.lab })).data.find((i) => i.visitId === ab.v) || {}).serviceDetailId;
+  await call('POST', `${CLIN}/service-details/${abLab}/start`, { token: T.lab });
+  check('bỏ về khi KTV đang thực hiện dở → CLIN_1304', (await call('POST', `${CLIN}/pet-visits/${ab.v}/abandon`, { token: T.rec })).code === 'CLIN_1304');
+  await call('POST', `${CLIN}/service-details/${abLab}/cancel`, { token: T.doc4, body: { reason: 'Dừng xét nghiệm' } });
+  const abandoned = await call('POST', `${CLIN}/pet-visits/${ab.v}/abandon`, { token: T.rec });
+  const abInv = (await statementOf(ab.v)).invoices;
+  check('bỏ về giữa chừng (T12) → COMPLETED; CLS chưa làm bị hủy kèm hóa đơn; hóa đơn khám giữ PENDING (công nợ)', abandoned.data?.status === 'COMPLETED' && abInv.some((i) => i.paymentStatus === 'PENDING') && abInv.some((i) => i.paymentStatus === 'CANCELLED'), brief(abandoned));
+  const abCode = (await visitOf(ab.v)).visitCode;
+  const found2 = await call('GET', `${CLIN}/pet-visits?status=COMPLETED&keyword=${encodeURIComponent(abCode)}`, { token: T.admin });
+  check('tìm đợt khám theo trạng thái + từ khóa (mã đợt khám)', found2.data?.items?.some((v) => v.id === ab.v));
+  check('lọc theo trạng thái khác không lẫn ca (WAITING không chứa ca đã COMPLETED)', !(await call('GET', `${CLIN}/pet-visits?status=WAITING&size=100`, { token: T.admin })).data.items.some((v) => v.id === ab.v));
+  check('lọc đợt khám theo bác sĩ và ngày', (await call('GET', `${CLIN}/pet-visits?doctorId=4&date=${iso(clinicNow())}&size=50`, { token: T.admin })).data?.items?.every((v) => v.doctorId === 4));
+  // ảnh CĐHA: kiểm tra nội dung tệp + tải ảnh theo quyền
+  const im = await inProgress('IMG', 4);
+  await call('POST', `${CLIN}/pet-visits/${im.v}/paraclinical-orders`, { token: im.token, body: { serviceIds: [6] } });
+  await call('POST', `${CLIN}/imaging-queue/call-next`, { token: T.img });
+  const imgDetail = ((await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data.find((i) => i.visitId === im.v) || {}).serviceDetailId;
+  await call('POST', `${CLIN}/service-details/${imgDetail}/start`, { token: T.img });
+  check('tệp giả ảnh (nội dung không phải PNG) bị từ chối', (await call('POST', `${CLIN}/imaging-results/${imgDetail}`, { token: T.img, form: imgForm(Buffer.from('không phải ảnh'), 'image/png', 'gia.png') })).status >= 400);
+  check('định dạng không cho phép (pdf) bị từ chối', (await call('POST', `${CLIN}/imaging-results/${imgDetail}`, { token: T.img, form: imgForm(Buffer.from('%PDF-1.4'), 'application/pdf', 'a.pdf') })).status >= 400);
+  const saved = await call('POST', `${CLIN}/imaging-results/${imgDetail}`, { token: T.img, form: imgForm() });
+  check('ảnh hợp lệ được lưu', saved.status === 200, brief(saved));
+  const attach = (await visitOf(im.v)).imagingResults?.[0]?.attachments?.[0];
+  const dl = attach && await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/file`, { headers: { Authorization: `Bearer ${T.doc4}` } });
+  check('bác sĩ tải được ảnh (đúng loại, đúng dung lượng)', dl?.status === 200 && Buffer.from(await dl.arrayBuffer()).length === PNG.length);
+  const dlOther = attach && await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/file`, { headers: { Authorization: `Bearer ${T.owner2}` } });
+  check('chủ nuôi khác KHÔNG tải được ảnh (403/404)', [403, 404].includes(dlOther?.status));
+  check('không token không tải được ảnh (401)', attach && (await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/file`)).status === 401);
+  await call('POST', `${CLIN}/pet-visits/${im.v}/abandon`, { token: T.rec });
+
+  // =====================================================================================================================
+  step('F. Báo cáo');
+  const r1 = await call('GET', `${CLIN}/reports/operations?fromDate=${dayOffset(-1)}&toDate=${dayOffset(1)}`, { token: T.admin });
+  check('báo cáo vận hành: tổng ca, hoàn tất, hủy, cấp cứu, theo bác sĩ', r1.status === 200 && r1.data.totalVisits > 5 && r1.data.completedVisits > 0 && r1.data.cancelledVisits > 0 && r1.data.emergencyVisits > 0 && r1.data.doctors.length > 0, JSON.stringify(r1.data).slice(0, 200));
+  const r2 = await call('GET', `${CLIN}/reports/revenue?fromDate=${dayOffset(-1)}&toDate=${dayOffset(1)}`, { token: T.admin });
+  check('doanh thu dịch vụ: có nhóm dịch vụ, tổng thực thu và công nợ', r2.status === 200 && Number(r2.data.totalPaid) > 0 && r2.data.byCategory.length > 0 && r2.data.debt.invoiceCount >= 1, JSON.stringify(r2.data).slice(0, 250));
+  const r3 = await call('GET', `${BILL}/reports/revenue?fromDate=${dayOffset(-1)}&toDate=${dayOffset(1)}&groupBy=MONTH`, { token: T.admin });
+  check('doanh thu thuốc: nhóm theo tháng, có tổng và trạng thái hóa đơn', r3.status === 200 && r3.data.groupBy === 'MONTH' && r3.data.periods.length >= 1 && 'PAID' in r3.data.byStatus);
+  check('khoảng báo cáo đảo ngược / quá dài bị từ chối', (await call('GET', `${BILL}/reports/revenue?fromDate=${dayOffset(5)}&toDate=${dayOffset(1)}`, { token: T.admin })).status === 400 && (await call('GET', `${BILL}/reports/revenue?fromDate=2020-01-01&toDate=2026-11-01`, { token: T.admin })).status === 400);
+  check('lễ tân / bác sĩ không xem báo cáo doanh thu (403)', (await call('GET', `${BILL}/reports/revenue`, { token: T.rec })).status === 403 && (await call('GET', `${CLIN}/reports/revenue`, { token: T.doc4 })).status === 403);
+
+  // =====================================================================================================================
+  step('G. Danh mục thuốc và kho');
+  const med = await call('POST', `${PHARM}/medicines`, { token: T.admin, body: { code: `MED${RUN}`, name: `Thuốc e2e ${RUN}`, dosageForm: 'Viên', unit: 'Viên', salePrice: 12000, vatRate: 0.1, initialStock: 30, minStockAlert: 5 } });
+  check('Admin thêm thuốc (VAT 10%, tồn đầu 30)', med.status === 201 && Number(med.data.vatRate) === 0.1 && med.data.stockQuantity === 30, brief(med));
+  check('trùng mã thuốc → 409 PHARM_1414', (await call('POST', `${PHARM}/medicines`, { token: T.admin, body: { code: `MED${RUN}`, name: 'Trùng', dosageForm: 'Viên', unit: 'Viên', salePrice: 1 } })).code === 'PHARM_1414');
+  check('tồn đầu kỳ được ghi nhật ký IMPORT dương', (await call('GET', `${PHARM}/medicines/${med.data.id}/transactions`, { token: T.admin })).data.items.some((t) => t.transactionType === 'IMPORT' && t.quantity === 30));
+  check('nhập kho số âm / bằng 0 bị từ chối (400)', (await call('POST', `${PHARM}/inventory/import`, { token: T.admin, body: { medicineId: med.data.id, quantity: 0 } })).status === 400);
+  check('cân chỉnh thiếu lý do bị từ chối (400)', (await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: med.data.id, delta: -1 } })).status === 400);
+  check('cân chỉnh −28 → tồn 2; lọc "sắp hết" thấy thuốc', (await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: med.data.id, delta: -28, reason: 'Kiểm kê' } })).data?.stockQuantity === 2 && (await call('GET', `${PHARM}/medicines?lowStock=true&size=100`, { token: T.admin })).data.items.some((m) => m.id === med.data.id));
+  check('đổi giá + VAT không đụng tồn kho', (await call('PUT', `${PHARM}/medicines/${med.data.id}`, { token: T.admin, body: { name: `Thuốc e2e ${RUN}`, dosageForm: 'Viên', unit: 'Viên', salePrice: 15000, vatRate: 0.05 } })).data?.stockQuantity === 2);
+  check('ngừng kinh doanh: bác sĩ không còn thấy; Admin vẫn thấy', (await call('PUT', `${PHARM}/medicines/${med.data.id}`, { token: T.admin, body: { name: `Thuốc e2e ${RUN}`, dosageForm: 'Viên', unit: 'Viên', salePrice: 15000, active: false } })).data?.active === false && !(await call('GET', `${PHARM}/medicines?size=100`, { token: T.doc4 })).data.items.some((m) => m.id === med.data.id) && (await call('GET', `${PHARM}/medicines?active=false&size=100`, { token: T.admin })).data.items.some((m) => m.id === med.data.id));
+  const rv = await inProgress('KeDon', 4);
+  check('kê thuốc đã ngừng kinh doanh → 404 PHARM_1405', (await call('POST', `${PHARM}/prescriptions`, { token: rv.token, body: { visitId: rv.v, items: [{ medicineId: med.data.id, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1405');
+  const rxOk = await call('POST', `${PHARM}/prescriptions`, { token: rv.token, body: { visitId: rv.v, items: [{ medicineId: 1, quantity: 2, dosage: '1', frequency: '2', durationDays: 3 }, { medicineId: 2, quantity: 1, dosage: '1', frequency: '1', durationDays: 1 }] } });
+  check('kê đơn nhiều thuốc; kê trùng thuốc trong một đơn bị từ chối', rxOk.status === 201 && (await call('POST', `${PHARM}/prescriptions`, { token: T.doc4, body: { visitId: rv.v, items: [{ medicineId: 1, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }, { medicineId: 1, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).status >= 400);
+  check('mỗi đợt khám tối đa một đơn → PHARM_1413', (await call('POST', `${PHARM}/prescriptions`, { token: rv.token, body: { visitId: rv.v, items: [{ medicineId: 1, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1413');
+  check('sửa đơn: bỏ bớt thuốc, giữ id dòng còn lại', (await call('PUT', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: rv.token, body: { items: [{ medicineId: 1, quantity: 3, dosage: '1', frequency: '2', durationDays: 3 }] } })).data?.items?.length === 1);
+  check('chủ nuôi xem đơn của thú cưng mình; chủ nuôi khác không (404)', (await call('GET', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: T.owner })).status === 200 && (await call('GET', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: T.owner2 })).status === 404);
+  await closeVisit(rv.token, rv.v);
+  const mInv = await call('POST', `${PHARM}/prescriptions/${rxOk.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: (await call('GET', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: T.rec })).data.items[0].id, quantity: 2 }], discountAmount: 99999999 } });
+  check('giảm giá hóa đơn thuốc vượt tổng → BILL_1402', mInv.code === 'BILL_1402', brief(mInv));
+  await call('POST', `${CLIN}/pet-visits/${rv.v}/reopen`, { token: T.admin, body: { reason: 'dọn' } });
+  await call('POST', `${CLIN}/pet-visits/${rv.v}/cancel-exam`, { token: rv.token, body: { reason: 'dọn' } });
+
+  // =====================================================================================================================
+  step('H. WebSocket / STOMP: xác thực JWT, chỉ nhận kênh của mình, cấm gửi, nhận thông báo thời gian thực');
+  check('CONNECT không token bị từ chối (ERROR)', !!(await (await stomp(null)).waitFor((f) => f.command === 'ERROR', 6000)));
+  check('CONNECT token sai bị từ chối', !!(await (await stomp('abc.def.ghi')).waitFor((f) => f.command === 'ERROR', 6000)));
+  const ownerWs = await stomp(T.owner, { subscribe: ['/user/queue/notifications'] });
+  check('CONNECT với JWT hợp lệ → CONNECTED', !!(await ownerWs.waitFor((f) => f.command === 'CONNECTED', 6000)));
+  const recWs = await stomp(T.rec, { subscribe: ['/topic/role/RECEPTIONIST'] });
+  check('lễ tân đăng ký kênh vai trò của mình được', !!(await recWs.waitFor((f) => f.command === 'CONNECTED', 6000)) && !recWs.frames.some((f) => f.command === 'ERROR'));
+  const evilWs = await stomp(T.rec, { subscribe: ['/topic/role/ADMIN'] });
+  check('đăng ký kênh vai trò khác (/topic/role/ADMIN) bị từ chối', !!(await evilWs.waitFor((f) => f.command === 'ERROR', 6000)));
+  const sendWs = await stomp(T.rec, { send: true });
+  check('client gửi dữ liệu (SEND) bị từ chối', !!(await sendWs.waitFor((f) => f.command === 'ERROR', 6000)));
+  const pw = await newPet('WS', 8);
+  const wsVisit = (await checkIn(pw, 4)).data.id;
+  const msg = await ownerWs.waitFor((f) => f.command === 'MESSAGE' && /VISIT_CHECKED_IN/.test(f.body), 12000);
+  check('chủ nuôi nhận thông báo VISIT_CHECKED_IN theo thời gian thực qua kênh riêng', !!msg && JSON.parse(msg.body).data.visitId === wsVisit);
+  check('lễ tân nhận thông báo qua kênh vai trò', !!(await recWs.waitFor((f) => f.command === 'MESSAGE' && /VISIT_CHECKED_IN/.test(f.body), 12000)));
+  const other = await stomp(T.owner2, { subscribe: ['/user/queue/notifications'] });
+  await sleep(1500);
+  check('chủ nuôi khác KHÔNG nhận thông báo của người khác', !other.frames.some((f) => f.command === 'MESSAGE' && f.body.includes(String(wsVisit))));
+  [ownerWs, recWs, evilWs, sendWs, other].forEach((c) => c.close());
+  await call('POST', `${CLIN}/pet-visits/${wsVisit}/cancel`, { token: T.rec, body: { reason: 'dọn' } });
+
+  console.log(`\n${passed} đạt, ${failures.length} lỗi${failures.length ? `: ${failures.join('; ')}` : ''}`);
+  process.exit(failures.length ? 1 : 0);
+}
+
+main().catch((problem) => { console.error(problem); process.exit(2); });

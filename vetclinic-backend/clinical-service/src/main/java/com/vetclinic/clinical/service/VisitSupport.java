@@ -122,6 +122,14 @@ public class VisitSupport {
      * BR-33 / EX-08: hủy dịch vụ thì hóa đơn của chính dịch vụ đó chuyển CANCELLED trong CÙNG giao dịch (bất biến "dịch vụ
      * CANCELLED <=> hóa đơn CANCELLED"). Hóa đơn đã PAID thì không hủy được (CLIN_1310): hoàn tiền ngoài phạm vi.
      */
+    public void assertInvoiceNotPaid(Long detailId) {
+        invoiceRepository.findByVisitServiceDetailId(detailId).ifPresent(invoice -> {
+            if (invoice.getPaymentStatus() == PaymentStatus.PAID) {
+                throw new AppException(ErrorCode.PAID_SERVICE_CANNOT_BE_CANCELLED);
+            }
+        });
+    }
+
     public void cancelInvoiceOf(Long detailId) {
         invoiceRepository.findByVisitServiceDetailId(detailId).ifPresent(invoice -> {
             if (invoice.getPaymentStatus() == PaymentStatus.PAID) {

@@ -375,6 +375,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
             support.assertAssignedTo(c.visit(), actor);
             support.assertStatus(c.visit(), VisitStatus.IN_PROGRESS, "Chỉ hủy được dịch vụ tại phòng khi ca đang khám (IN_PROGRESS)");
         }
+        // Hóa đơn đã thu tiền thì nói rõ lý do này trước (CLIN_1310, hoàn tiền ngoài phạm vi), thay vì báo "sai trạng thái" chung chung
+        support.assertInvoiceNotPaid(c.detail().getId());
         if (!ServiceDetailStatus.OPEN.contains(c.detail().getStatus())) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS,
                     "Chỉ hủy được chỉ định đang chờ hoặc đang thực hiện");

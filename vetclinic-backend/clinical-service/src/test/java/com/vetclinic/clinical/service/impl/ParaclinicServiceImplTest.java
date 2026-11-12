@@ -788,6 +788,18 @@ class ParaclinicServiceImplTest {
         assertThat(paid.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
     }
 
+    @Test
+    void cancel_ofACompletedInRoomServiceThatWasPaid_saysItIsPaid_notJustWrongState() {
+        // Sau "Mở lại hồ sơ" (T14) bác sĩ có thể thử hủy dịch vụ đã làm xong và đã thu tiền: thông báo đúng lý do (CLIN_1310)
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubLocks(detail(1L, 100L, DEWORM, ServiceDetailStatus.COMPLETED), VisitStatus.IN_PROGRESS);
+        ServiceInvoice paid = ServiceInvoice.builder().id(50L).visitServiceDetailId(1L).unitPrice(new BigDecimal("50000.00"))
+                .vatRate(BigDecimal.ZERO).paymentStatus(PaymentStatus.PAID).build();
+        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(paid));
+
+        assertError(ErrorCode.PAID_SERVICE_CANNOT_BE_CANCELLED, () -> service.cancel(1L, "Muốn hủy"));
+    }
+
     // ================================================================== kết quả CĐHA (UC-26)
 
     @Test
