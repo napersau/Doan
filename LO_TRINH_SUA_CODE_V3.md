@@ -13,8 +13,8 @@
 | **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
 | **Phase 2** `appointment-service` | ✅ **ĐÃ XONG** (12/11/2026) | Khối A + B xong; 68 test pass + chạy thật trên schema v3.0 |
 | Phase 3 `clinical-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (3.B1–3.B14); 183 unit test clinical; **đã chạy kiểm chứng thật trên MySQL** (luồng chính + đẩy lùi Lab + T11/T12/T14 + thu tiền T10 + công nợ + báo cáo doanh thu: 100% đạt, phát hiện và sửa 1 lỗi lazy ở `skip` phòng Lab) | |
-| Phase 4 `billing-pharmacy-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (4.B1–4.B6); 56 unit test billing (+183 clinical vẫn đạt); **đã chạy kiểm chứng thật trên MySQL** (kê đơn + `stockWarnings`, khóa đơn `PHARM_1411`, lập/sửa/hủy hóa đơn thuốc, thu tiền + trừ kho nguyên tử, EX-15 rollback rồi sửa hóa đơn thu lại, EX-16 kể cả 3 yêu cầu song song, nhập/cân chỉnh kho, mở lại hồ sơ T14, báo cáo doanh thu thuốc, bệnh án ghép đơn: 65/65 đạt) | **Bước kế tiếp: Phase 5 (notification-service)** |
-| Phase 5 `notification-service` | ⬜ chưa làm | |
+| Phase 4 `billing-pharmacy-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (4.B1–4.B6); 56 unit test billing (+183 clinical vẫn đạt); **đã chạy kiểm chứng thật trên MySQL** (kê đơn + `stockWarnings`, khóa đơn `PHARM_1411`, lập/sửa/hủy hóa đơn thuốc, thu tiền + trừ kho nguyên tử, EX-15 rollback rồi sửa hóa đơn thu lại, EX-16 kể cả 3 yêu cầu song song, nhập/cân chỉnh kho, mở lại hồ sơ T14, báo cáo doanh thu thuốc, bệnh án ghép đơn: 65/65 đạt) | |
+| Phase 5 `notification-service` | ✅ **ĐÃ XONG (12/11/2026)** — 5.1–5.5; 45 unit test notification (+ appointment 68, clinical 183, billing 56 vẫn đạt); **đã chạy kiểm chứng thật** với RabbitMQ + Mailpit + 5 service (gọi số / đẩy lùi / có kết quả / hoàn tất / bán thuốc / tồn kho thấp / đặt lịch / duyệt / vắng mặt, 5 loại email, `POST /{id}/read`, 9 queue + DLQ rỗng) | **Bước kế tiếp: Phase 6 (Gateway + Frontend)** |
 | Phase 6 Gateway + FE | ⬜ chưa làm | |
 | Phase 7 Dọn dẹp + kiểm thử cuối | ⬜ chưa làm | |
 
@@ -215,11 +215,21 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ## PHASE 5 — `notification-service` (làm rải, mỗi lần một event)
 
-- [ ] **5.1** Thêm listener cho `appointment.booked` → (xóa `appointment.created` ở 7.1). *(appointment-service đang phát song song `appointment.created` + `appointment.booked` từ 12/11; sau khi listener mới chạy, KHÔNG cần sửa gì thêm ở appointment — chỉ xóa event cũ ở 7.1.)*
-- [ ] **5.2** `appointment.no_show`, `visit.patient_called` (gọi số: phòng + STT; báo bị đẩy lùi), `visit.results_ready`. **BẮT BUỘC kèm theo:** khi listener `appointment.no_show` đã chạy, vào `AppointmentServiceImpl.transition()` (appointment-service) **bỏ việc phát `AppointmentStatusChangedEvent` cho `NO_SHOW`** (hiện phát song song với `AppointmentNoShowEvent`, comment ghi rõ tại chỗ) — nếu không chủ nuôi nhận hai thông báo; đồng thời bỏ nhánh `NO_SHOW` trong listener `status_changed` của notification.
-- [ ] **5.3** `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`.
-- [ ] **5.4** `POST /notifications/{id}/read`; **bỏ** `POST /notifications/send-email`.
-- [ ] **5.5** Cập nhật `NotificationType`; chưa làm `/topic/lobby` (CLAUDE.md §10 #6).
+- [x] **5.1** Thêm listener cho `appointment.booked` → (xóa `appointment.created` ở 7.1). *(appointment-service đang phát song song `appointment.created` + `appointment.booked` từ 12/11; sau khi listener mới chạy, KHÔNG cần sửa gì thêm ở appointment — chỉ xóa event cũ ở 7.1.)*
+- [x] **5.2** `appointment.no_show`, `visit.patient_called` (gọi số: phòng + STT; báo bị đẩy lùi), `visit.results_ready`. **BẮT BUỘC kèm theo:** khi listener `appointment.no_show` đã chạy, vào `AppointmentServiceImpl.transition()` (appointment-service) **bỏ việc phát `AppointmentStatusChangedEvent` cho `NO_SHOW`** (hiện phát song song với `AppointmentNoShowEvent`, comment ghi rõ tại chỗ) — nếu không chủ nuôi nhận hai thông báo; đồng thời bỏ nhánh `NO_SHOW` trong listener `status_changed` của notification.
+- [x] **5.3** `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`.
+- [x] **5.4** `POST /notifications/{id}/read`; **bỏ** `POST /notifications/send-email`.
+- [x] **5.5** Cập nhật `NotificationType`; chưa làm `/topic/lobby` (CLAUDE.md §10 #6).
+
+
+> **Ghi chú điều chỉnh sau Phase 5 (12/11/2026):**
+> - **9 queue** `notification-service.<routing-key>` (+ DLQ): `appointment.booked`, `appointment.status_changed`, `appointment.no_show`, `visit.checked_in`, `visit.patient_called`, `visit.results_ready`, `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`. Đã bỏ 5 queue v2 (`appointment.created`, `doctor.priority_callback`, `visit.closed_to_payment`, `payment.completed`, `stock.low_alert`).
+> - **Ngừng phát event trùng/cũ ở nơi phát:** appointment-service không còn phát `AppointmentCreatedEvent`, và chuyển sang `NO_SHOW` chỉ phát `AppointmentNoShowEvent` (không còn `status_changed` cho NO_SHOW, đúng yêu cầu BẮT BUỘC của 5.2); clinical-service không còn phát `DoctorPriorityCallbackEvent`. Các **class** event/routing key v2 vẫn còn trong `common-library`, xóa ở 7.1 (không còn ai phát hay nghe).
+> - **Feign notification→clinical** đổi sang `/internal/pet-visits/{id}/summary`; đã xóa `/internal/clinical/visits/{id}` của clinical (không còn consumer).
+> - **Nội dung thông báo:** `visit.patient_called` → chủ nuôi nhận "Mời vào <phòng> (phòng <số>)" kèm mã ca làm số thứ tự, hoặc "lùi một lượt" khi `PUSHED_BACK`; bác sĩ / KTV Lab / KTV CĐHA của đúng hàng đợi nhận bản làm mới. `visit.results_ready` → bác sĩ của ca (user) + chủ nuôi. `visit.checked_in` → thêm thông báo riêng cho bác sĩ được xếp ngay lúc tiếp nhận. `visit.completed` → chủ nuôi + lễ tân; **khách bỏ về (`abandoned`) thì lễ tân nhận cảnh báo công nợ, chủ nuôi không nhận email phiếu thu**. `medicine_invoice_paid` → chủ nuôi (push + email có số tiền). `low_stock` → Admin. Không còn thông báo "Có ca chờ thanh toán" cho lễ tân (v3.0 không có event khi bác sĩ chốt ca).
+> - **API:** `GET /notifications` trả thêm trường `read`; `POST /notifications/{id}/read` (idempotent, trạng thái đọc riêng từng người, id không thuộc người đó → 404 `SYS_1006`); **đã xóa** `POST /notifications/send-email` và `SendEmailRequest`. Lịch sử vẫn trong bộ nhớ (mất khi khởi động lại).
+> - **`NotificationType` đổi (FE Phase 6 bị ảnh hưởng):** `APPOINTMENT_CREATED→APPOINTMENT_BOOKED`; thêm `APPOINTMENT_NO_SHOW`, `PATIENT_CALLED`, `RESULTS_READY`, `MEDICINE_INVOICE_PAID`; bỏ `PRIORITY_CALLBACK`, `PAYMENT_PENDING`. FE đang dùng `APPOINTMENT_CREATED`, `PAYMENT_PENDING`, `PRIORITY_CALLBACK` ở `AppointmentsPage`, `DispensePage`, `InvoicesPage`, `QueuePage`, `TodayPage` (hook `useNotificationEvents`) và `notificationsApi.sendEmail` ở `api/endpoints.js`.
+> - **Chưa làm (CLAUDE.md §10 #6):** `/topic/lobby` và màn hình sảnh công cộng; vẫn dùng `/user/queue/notifications` + `/topic/role/<ROLE>`.
 
 ---
 
