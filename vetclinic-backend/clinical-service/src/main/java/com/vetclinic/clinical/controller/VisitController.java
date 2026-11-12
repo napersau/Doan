@@ -154,9 +154,16 @@ public class VisitController {
         return ResponseEntity.ok(ApiResponse.success("Đã chỉ định dịch vụ tại phòng", enricher.enrich(visitService.orderInRoomServices(id, request))));
     }
 
-    /** Mở lại đợt khám đã chốt (chưa thu tiền) để điều chỉnh chuyên môn. Bắt buộc lý do. */
+    /** T07: bệnh nhân đã vào phòng sau khi gọi số: bắt đầu Giai đoạn 2 (đọc kết quả cận lâm sàng). */
+    @PostMapping("/{id}/start-phase2")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<VisitResponse>> startPhase2(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã bắt đầu khám Giai đoạn 2", enricher.enrich(visitService.startPhase2(id))));
+    }
+
+    /** T14 "Mở lại hồ sơ" (chưa thu đủ tiền) để điều chỉnh chuyên môn: Bác sĩ phụ trách hoặc Admin. Bắt buộc lý do. */
     @PostMapping("/{id}/reopen")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<VisitResponse>> reopen(@PathVariable Long id, @Valid @RequestBody ReasonRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã mở lại đợt khám", enricher.enrich(visitService.reopen(id, request))));
     }
@@ -169,17 +176,26 @@ public class VisitController {
         return ResponseEntity.ok(ApiResponse.success("Đã chốt đợt khám, chuyển sang thanh toán", enricher.enrich(visitService.closeVisit(id, request))));
     }
 
-    /** EX-11: khách bỏ về hẳn không đọc kết quả. */
+    /** EX-11 (T08 / T12): khách bỏ về giữa chừng hoặc không đọc kết quả: đóng ca, ghi công nợ. */
     @PostMapping("/{id}/abandon")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> abandon(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success("Đã đóng ca, ghi nợ viện phí", enricher.enrich(visitService.abandon(id))));
     }
 
+    /** T11 "Hủy ca / Chuyển viện" ở Giai đoạn 1 (không thu phí). Bắt buộc lý do. */
+    @PostMapping("/{id}/cancel-exam")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<VisitResponse>> cancelExam(@PathVariable Long id,
+                                                                 @Valid @RequestBody ReasonRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Đã hủy ca khám", enricher.enrich(visitService.cancelExam(id, request))));
+    }
+
+    /** T03 / EX-03: Lễ tân hủy tiếp nhận khi khách bỏ về lúc đang chờ khám. */
     @PostMapping("/{id}/cancel")
-    @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN')")
+    @PreAuthorize("hasRole('RECEPTIONIST')")
     public ResponseEntity<ApiResponse<VisitResponse>> cancel(@PathVariable Long id,
                                                              @Valid @RequestBody ReasonRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã hủy đợt khám", enricher.enrich(visitService.cancel(id, request))));
+        return ResponseEntity.ok(ApiResponse.success("Đã hủy tiếp nhận", enricher.enrich(visitService.cancel(id, request))));
     }
 }

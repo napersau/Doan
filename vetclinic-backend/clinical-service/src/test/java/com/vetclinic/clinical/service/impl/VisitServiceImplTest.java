@@ -2,7 +2,6 @@ package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AppointmentClient;
 import com.vetclinic.clinical.client.AuthClient;
-import com.vetclinic.clinical.constant.DoctorStatus;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -29,13 +28,12 @@ import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
-import com.vetclinic.clinical.service.DoctorStatusService;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.QueueOrders;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.VisitCheckedInEvent;
-import com.vetclinic.common.event.VisitClosedToPaymentEvent;
+import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.lock.NamedLockService;
 import com.vetclinic.common.security.RoleCode;
@@ -103,10 +101,6 @@ class VisitServiceImplTest {
     @Mock
     private AppointmentClient appointmentClient;
     @Mock
-    private com.vetclinic.clinical.client.BillingClient billingClient;
-    @Mock
-    private DoctorStatusService doctorStatusService;
-    @Mock
     private NamedLockService lockService;
     @Mock
     private ApplicationEventPublisher publisher;
@@ -132,7 +126,7 @@ class VisitServiceImplTest {
         lenient().when(lockService.runLocked(anyCollection(), any())).thenAnswer(inv ->
                 ((Supplier<?>) inv.getArgument(1)).get());
         service = new VisitServiceImpl(visitRepository, petRepository, historyRepository, detailRepository,
-                serviceRepository, authClient, appointmentClient, billingClient, doctorStatusService, support, assembler,
+                serviceRepository, authClient, appointmentClient, support, assembler,
                 lockService, publisher, CLOCK, tm);
     }
 
@@ -303,7 +297,6 @@ class VisitServiceImplTest {
         service.assignDoctor(100L, new AssignDoctorRequest(DOCTOR));
 
         assertThat(visit.getDoctorId()).isEqualTo(DOCTOR);
-        org.mockito.Mockito.verifyNoInteractions(doctorStatusService);
     }
 
     @Test
@@ -638,7 +631,37 @@ class VisitServiceImplTest {
                 () -> service.orderInRoomServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(4L, 1, null)))));   // BR-27: hồ sơ đã khóa
     }
 
-    // ================================================================== chốt ca (UC-33). Gọi số / Đẩy lùi / Bắt đầu GĐ 2 làm ở 3.B3, 3.B10
+    // ================================================================== bắt đầu Giai đoạn 2 (T07)
+
+    @Test
+    void startPhase2_movesResultsReadyToInProgress_forTheAssignedDoctor() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        PetVisit visit = visitWithVitals(100L, VisitStatus.RESULTS_READY);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+
+        VisitResponse response = service.startPhase2(100L);
+
+        assertThat(response.status()).isEqualTo(VisitStatus.IN_PROGRESS);
+        assertThat(lastHistory().getFromStatus()).isEqualTo(VisitStatus.RESULTS_READY);
+        assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
+        assertThat(lastHistory().getChangedByUserId()).isEqualTo(DOCTOR);
+    }
+
+    @Test
+    void startPhase2_refusedForOtherDoctorWrongStateOrABusyDoctor() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR)));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.startPhase2(100L));   // chưa có đủ kết quả
+
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.RESULTS_READY, OTHER_DOCTOR)));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.startPhase2(101L));
+
+        when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.RESULTS_READY, DOCTOR)));
+        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
+        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.startPhase2(102L));
+    }
+
+    // ================================================================== chốt ca (T05 / T09, UC-33)
 
     @Test
     void closeVisit_withoutDiagnosis_isRefusedAndNothingChanges() {
@@ -651,10 +674,13 @@ class VisitServiceImplTest {
     }
 
     @Test
-    void closeVisit_locksTheRecordAndNotifiesBilling() {
+    void closeVisit_locksTheRecord_completesTheExamFee_andPublishesNothing() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
+        PetVisit visit = visitWithVitals(100L, VisitStatus.IN_PROGRESS);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        VisitServiceDetail exam = detail(1L, 100L, service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00"),
+                ServiceDetailStatus.IN_PROGRESS);
+        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(exam));
 
         VisitResponse response = service.closeVisit(100L,
                 new CloseVisitRequest("Viêm dạ dày ruột", "Truyền dịch 3 ngày", "Ăn cháo loãng", "Tỉnh táo"));
@@ -662,12 +688,8 @@ class VisitServiceImplTest {
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING_PAYMENT);
         assertThat(response.locked()).isTrue();
         assertThat(response.diagnosis()).isEqualTo("Viêm dạ dày ruột");
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(event.capture());
-        VisitClosedToPaymentEvent closed = (VisitClosedToPaymentEvent) event.getValue();
-        assertThat(closed.visitId()).isEqualTo(100L);
-        assertThat(closed.doctorId()).isEqualTo(DOCTOR);
-        assertThat(closed.abandoned()).isFalse();
+        assertThat(exam.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // hóa đơn của dịch vụ khám giữ PENDING cho thu ngân
+        verify(publisher, never()).publishEvent(any(Object.class));   // v3.0: không còn event "đóng ca" sang billing
     }
 
     @Test
@@ -682,10 +704,23 @@ class VisitServiceImplTest {
         assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.closeVisit(101L, request));
     }
 
-    // ================================================================== khách bỏ về / hủy (EX-03, EX-11)
+    @Test
+    void closeVisit_requiresVitalSigns_CLIN_1308_andNoOpenInRoomService_CLIN_1309() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        CloseVisitRequest request = new CloseVisitRequest("Chẩn đoán", null, null, null);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.IN_PROGRESS, DOCTOR)));
+        assertError(ErrorCode.VITAL_SIGNS_REQUIRED, () -> service.closeVisit(100L, request));
+
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visitWithVitals(101L, VisitStatus.IN_PROGRESS)));
+        lenient().when(detailRepository.countByVisitAndCategoriesAndStatuses(101L, ServiceCategory.IN_ROOM, ServiceDetailStatus.OPEN)).thenReturn(1L);
+        assertError(ErrorCode.IN_ROOM_SERVICE_PENDING, () -> service.closeVisit(101L, request));
+        verify(historyRepository, never()).save(any());
+    }
+
+    // ================================================================== khách bỏ về (EX-11: T08, T12)
 
     @Test
-    void abandon_closesTheVisitAsCompletedAndRecordsTheDebt() {
+    void abandon_fromResultsReady_closesTheVisitAsCompleted_T08_andNotifiesWithoutCreatingInvoices() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = visit(100L, VisitStatus.RESULTS_READY, DOCTOR);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
@@ -693,81 +728,116 @@ class VisitServiceImplTest {
         VisitResponse response = service.abandon(100L);
 
         assertThat(response.status()).isEqualTo(VisitStatus.COMPLETED);
+        assertThat(lastHistory().getChangedByUserId()).isEqualTo(RECEPTIONIST);
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(publisher).publishEvent(event.capture());
-        assertThat(((VisitClosedToPaymentEvent) event.getValue()).abandoned()).isTrue();
+        VisitCompletedEvent completed = (VisitCompletedEvent) event.getValue();
+        assertThat(completed.abandoned()).isTrue();
+        assertThat(completed.visitId()).isEqualTo(100L);
+        verify(invoiceRepository, never()).saveAndFlush(any());
     }
 
-    // ================================================================== mở lại đợt khám (T12)
-
     @Test
-    void reopen_movesAClosedVisitBackToInProgressAndCancelsTheInvoiceFirst() {
-        loginAs(ADMIN_ID, RoleCode.ADMIN);
-        PetVisit visit = visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR);
-        when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit));
+    void abandon_fromWaitingResults_T12_cancelsPendingParaclinicalWithInvoice_butKeepsTheDoneOnesAsDebt() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.AVAILABLE);
+        VisitServiceDetail exam = detail(1L, 100L, service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00"), ServiceDetailStatus.COMPLETED);
+        VisitServiceDetail done = detail(2L, 100L, service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00"), ServiceDetailStatus.COMPLETED);
+        VisitServiceDetail pending = detail(3L, 100L, service(6L, "IMG_US_AB", ServiceCategory.IMAGING, "200000.00"), ServiceDetailStatus.PENDING);
+        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(exam, done, pending));
+        com.vetclinic.clinical.entity.ServiceInvoice invoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
+                .id(50L).visitServiceDetailId(3L).unitPrice(new BigDecimal("200000.00")).vatRate(BigDecimal.ZERO).build();
+        when(invoiceRepository.findByVisitServiceDetailId(3L)).thenReturn(Optional.of(invoice));
 
-        VisitResponse response = service.reopen(100L, new ReasonRequest("  Nhập sai liều thuốc "));
+        VisitResponse response = service.abandon(100L);
 
-        assertThat(response.status()).isEqualTo(VisitStatus.IN_PROGRESS);
-        assertThat(response.locked()).isFalse();            // hồ sơ được mở khóa để sửa
-        assertThat(response.closedAt()).isNull();
-        verify(billingClient).cancelInvoiceForReopen(100L);
-        PetVisitStatusHistory history = lastHistory();
-        assertThat(history.getFromStatus()).isEqualTo(VisitStatus.WAITING_PAYMENT);
-        assertThat(history.getToStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
-        assertThat(history.getChangedByUserId()).isEqualTo(ADMIN_ID);
-        assertThat(history.getNotes()).contains("Nhập sai liều thuốc");
+        assertThat(response.status()).isEqualTo(VisitStatus.COMPLETED);
+        assertThat(pending.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
+        assertThat(invoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
+        assertThat(done.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // đã làm: giữ hóa đơn PENDING làm công nợ
+        assertThat(exam.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
+        verify(invoiceRepository, never()).findByVisitServiceDetailId(2L);
+        verify(invoiceRepository, never()).findByVisitServiceDetailId(1L);
     }
 
     @Test
-    void reopen_isRefusedWhenTheDoctorIsBusy_andTheInvoiceIsLeftAlone() {
-        loginAs(ADMIN_ID, RoleCode.ADMIN);
-        when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
-        when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.BUSY);
-
-        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.reopen(100L, new ReasonRequest("Điều chỉnh")));
-        verify(billingClient, never()).cancelInvoiceForReopen(any());   // không hủy hóa đơn rồi mới phát hiện không mở lại được
-    }
-
-    @Test
-    void reopen_onlyForVisitsAwaitingPayment() {
-        loginAs(ADMIN_ID, RoleCode.ADMIN);
-        when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.COMPLETED, DOCTOR)));
-        when(visitRepository.findWithPetById(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.IN_PROGRESS, DOCTOR)));
-        when(visitRepository.findWithPetById(404L)).thenReturn(Optional.empty());
-
-        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.reopen(100L, new ReasonRequest("x")));   // đã hoàn tất, khóa vĩnh viễn
-        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.reopen(101L, new ReasonRequest("x")));
-        assertError(ErrorCode.VISIT_NOT_FOUND, () -> service.reopen(404L, new ReasonRequest("x")));
-        verify(billingClient, never()).cancelInvoiceForReopen(any());
-    }
-
-    @Test
-    void reopen_isRefusedAfterThePaymentWasCollected() {
-        loginAs(ADMIN_ID, RoleCode.ADMIN);
-        when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
-        when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.AVAILABLE);
-        when(billingClient.cancelInvoiceForReopen(100L)).thenThrow(new com.vetclinic.common.exception.AppException(ErrorCode.INVOICE_ALREADY_PAID));
-
-        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.reopen(100L, new ReasonRequest("Điều chỉnh")));
-        verify(visitRepository, never()).findByIdForUpdate(any());   // ca không bị đụng tới
-    }
-
-    @Test
-    void abandon_onlyForResultsReady_andOtherDoctorCannotDoIt() {
+    void abandon_refusedWhileAParaclinicalServiceIsInProgress_CLIN_1304() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR)));
+        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL,
+                List.of(ServiceDetailStatus.IN_PROGRESS))).thenReturn(1L);
+
+        assertError(ErrorCode.PARACLINICAL_SERVICE_IN_PROGRESS, () -> service.abandon(100L));
+        verify(historyRepository, never()).save(any());
+    }
+
+    @Test
+    void abandon_onlyAfterResultsAreAwaitedOrReady_andOtherDoctorOrOtherRolesCannotDoIt() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.IN_PROGRESS, DOCTOR)));
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.abandon(100L));
 
         loginAs(OTHER_DOCTOR, RoleCode.VETERINARIAN);
         when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.RESULTS_READY, DOCTOR)));
         assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.abandon(101L));
+
+        loginAs(ADMIN_ID, RoleCode.ADMIN);
+        when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.RESULTS_READY, DOCTOR)));
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.abandon(102L));
+    }
+
+    // ================================================================== hủy ca / chuyển viện (T11) và hủy tiếp nhận (T03)
+
+    @Test
+    void cancelExam_cancelsEveryOpenServiceWithItsInvoice_andTheVisit() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        VisitServiceDetail exam = detail(1L, 100L, service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00"), ServiceDetailStatus.IN_PROGRESS);
+        VisitServiceDetail vaccine = detail(2L, 100L, service(2L, "VAC_7B", ServiceCategory.VACCINATION, "150000.00"), ServiceDetailStatus.PENDING);
+        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(exam, vaccine));
+        com.vetclinic.clinical.entity.ServiceInvoice examInvoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
+                .id(50L).visitServiceDetailId(1L).unitPrice(new BigDecimal("100000.00")).vatRate(BigDecimal.ZERO).build();
+        com.vetclinic.clinical.entity.ServiceInvoice vaccineInvoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
+                .id(51L).visitServiceDetailId(2L).unitPrice(new BigDecimal("150000.00")).vatRate(BigDecimal.ZERO).build();
+        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(examInvoice));
+        when(invoiceRepository.findByVisitServiceDetailId(2L)).thenReturn(Optional.of(vaccineInvoice));
+
+        VisitResponse response = service.cancelExam(100L, new ReasonRequest("  Chuyển viện cấp cứu  "));
+
+        assertThat(response.status()).isEqualTo(VisitStatus.CANCELLED);
+        assertThat(exam.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
+        assertThat(vaccine.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
+        assertThat(examInvoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
+        assertThat(vaccineInvoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
+        assertThat(lastHistory().getNotes()).isEqualTo("Chuyển viện cấp cứu");   // lý do ghi nguyên văn vào lịch sử
+        assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.CANCELLED);
     }
 
     @Test
-    void cancel_waitingVisit_byReceptionist() {
+    void cancelExam_refusedInPhaseTwo_afterAnInRoomServiceWasDone_orByAnotherDoctor() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        ReasonRequest reason = new ReasonRequest("Khách xin chuyển viện");
+        // Giai đoạn 2: đã có kết quả cận lâm sàng cần thu phí
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.IN_PROGRESS, DOCTOR)));
+        lenient().when(historyRepository.existsByVisitIdAndToStatus(100L, VisitStatus.WAITING_RESULTS)).thenReturn(true);
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancelExam(100L, reason));
+        // Đã thực hiện một dịch vụ tại phòng: không hủy, phải chốt để thu phí
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.IN_PROGRESS, DOCTOR)));
+        when(detailRepository.countByVisitAndCategoriesAndStatuses(101L, ServiceCategory.IN_ROOM,
+                List.of(ServiceDetailStatus.COMPLETED))).thenReturn(1L);
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancelExam(101L, reason));
+        // Bác sĩ khác / ca đã khóa
+        when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.IN_PROGRESS, OTHER_DOCTOR)));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.cancelExam(102L, reason));
+        when(visitRepository.findByIdForUpdate(103L)).thenReturn(Optional.of(visit(103L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancelExam(103L, reason));
+        verify(historyRepository, never()).save(any());
+    }
+
+    @Test
+    void cancel_waitingVisit_byReceptionist_T03() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = visit(100L, VisitStatus.WAITING, null);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
@@ -782,45 +852,69 @@ class VisitServiceImplTest {
     }
 
     @Test
-    void cancel_whileWaitingResults_cancelsOpenParaclinicalServicesSoTheyAreNeverBilled() {
-        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
-        ClinicService us = service(6L, "IMG_US_AB", ServiceCategory.IMAGING, "200000.00");
-        VisitServiceDetail done = detail(1L, 100L, cbc, ServiceDetailStatus.COMPLETED);
-        VisitServiceDetail pending = detail(2L, 100L, us, ServiceDetailStatus.PENDING);
-        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(done, pending));
-
-        service.cancel(100L, new ReasonRequest("Khách bỏ về khi chưa có kết quả"));
-
-        assertThat(done.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // dịch vụ đã làm giữ nguyên
-        assertThat(pending.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
-        verify(detailHistoryRepository).save(any());
-    }
-
-    @Test
-    void cancel_permissionsFollowTheStatus() {
-        // Bác sĩ không hủy được ca đang chờ ở sảnh; Lễ tân không hủy được ca đang khám
+    void cancel_isOnlyForTheReceptionist_andOnlyWhileWaiting() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING, DOCTOR)));
-        assertError(ErrorCode.ACCESS_DENIED, () -> service.cancel(100L, new ReasonRequest("x")));
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.cancel(100L, new ReasonRequest("x")));   // Bác sĩ dùng cancel-exam
 
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.IN_PROGRESS, DOCTOR)));
-        assertError(ErrorCode.ACCESS_DENIED, () -> service.cancel(101L, new ReasonRequest("x")));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancel(101L, new ReasonRequest("x")));
+        when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.WAITING_RESULTS, DOCTOR)));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancel(102L, new ReasonRequest("x")));   // khách bỏ về = abandon
+        when(visitRepository.findByIdForUpdate(103L)).thenReturn(Optional.of(visit(103L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancel(103L, new ReasonRequest("x")));
+    }
 
-        // Ca đã chốt hoặc đã hoàn tất thì không hủy được nữa
-        when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
-        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancel(102L, new ReasonRequest("x")));
+    // ================================================================== Mở lại hồ sơ (T14)
+
+    @Test
+    void reopen_byTheAssignedDoctor_movesBackToInProgress_withoutTouchingBilling() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        PetVisit visit = visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+
+        VisitResponse response = service.reopen(100L, new ReasonRequest("  Nhập sai liều thuốc "));
+
+        assertThat(response.status()).isEqualTo(VisitStatus.IN_PROGRESS);
+        assertThat(response.locked()).isFalse();            // hồ sơ được mở khóa để sửa
+        PetVisitStatusHistory history = lastHistory();
+        assertThat(history.getFromStatus()).isEqualTo(VisitStatus.WAITING_PAYMENT);
+        assertThat(history.getToStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
+        assertThat(history.getChangedByUserId()).isEqualTo(DOCTOR);
+        assertThat(history.getNotes()).contains("Nhập sai liều thuốc");
+        verify(invoiceRepository, never()).save(any());   // hóa đơn dịch vụ giữ nguyên (PAID/PENDING)
     }
 
     @Test
-    void cancel_inProgress_byTheAssignedDoctor() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.IN_PROGRESS, DOCTOR)));
+    void reopen_byAdmin_isAllowedToo() {
+        loginAs(ADMIN_ID, RoleCode.ADMIN);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
 
-        assertThat(service.cancel(100L, new ReasonRequest("Chuyển viện cấp cứu")).status()).isEqualTo(VisitStatus.CANCELLED);
+        assertThat(service.reopen(100L, new ReasonRequest("Điều chỉnh theo yêu cầu")).status()).isEqualTo(VisitStatus.IN_PROGRESS);
+        assertThat(lastHistory().getChangedByUserId()).isEqualTo(ADMIN_ID);
+    }
+
+    @Test
+    void reopen_refusedForOtherDoctorsOtherRolesWrongStatusOrABusyDoctor() {
+        loginAs(OTHER_DOCTOR, RoleCode.VETERINARIAN);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.reopen(100L, new ReasonRequest("x")));
+
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.reopen(100L, new ReasonRequest("x")));
+
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.COMPLETED, DOCTOR)));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.reopen(101L, new ReasonRequest("x")));   // đã hoàn tất: khóa vĩnh viễn
+        when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.IN_PROGRESS, DOCTOR)));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.reopen(102L, new ReasonRequest("x")));
+
+        when(visitRepository.findByIdForUpdate(103L)).thenReturn(Optional.of(visit(103L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
+        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
+        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.reopen(103L, new ReasonRequest("x")));
+        when(visitRepository.findByIdForUpdate(404L)).thenReturn(Optional.empty());
+        assertError(ErrorCode.VISIT_NOT_FOUND, () -> service.reopen(404L, new ReasonRequest("x")));
+        verify(historyRepository, never()).save(any());
     }
 
     // ================================================================== dịch vụ tính tiền (tạm, billing v2 còn gọi tới 3.B13)
@@ -855,27 +949,6 @@ class VisitServiceImplTest {
 
         assertThat(lines.get(0).unitPrice()).isEqualByComparingTo("100000.00");
         assertThat(lines.get(0).subtotal()).isEqualByComparingTo("200000.00");   // = số lượng × đơn giá snapshot (tính khi hiển thị)
-    }
-
-    @Test
-    void cancel_alsoCancelsThePendingInvoiceOfEveryCancelledService_BR33() {
-        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
-        VisitServiceDetail pending = detail(1L, 100L, cbc, ServiceDetailStatus.PENDING);
-        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(pending));
-        com.vetclinic.clinical.entity.ServiceInvoice invoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
-                .id(50L).visitServiceDetailId(1L).unitPrice(new BigDecimal("250000.00")).vatRate(BigDecimal.ZERO).build();
-        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(invoice));
-
-        service.cancel(100L, new ReasonRequest("Khách xin về"));
-
-        assertThat(pending.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
-        assertThat(invoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
-        // Lý do hủy ghi nguyên văn vào lịch sử trạng thái (không còn cột cancel_reason)
-        assertThat(lastHistory().getNotes()).isEqualTo("Khách xin về");
-        assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.CANCELLED);
     }
 
     // ================================================================== fixtures

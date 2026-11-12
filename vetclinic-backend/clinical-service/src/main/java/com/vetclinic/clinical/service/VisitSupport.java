@@ -11,6 +11,7 @@ import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.common.event.DoctorPriorityCallbackEvent;
+import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.clinical.constant.PaymentStatus;
@@ -19,6 +20,7 @@ import com.vetclinic.clinical.entity.ServiceInvoice;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Collection;
 import java.util.Map;
 import java.util.function.Function;
@@ -165,10 +167,12 @@ public class VisitSupport {
     }
 
     /**
-     * FR-44: mỗi khi một dịch vụ cận lâm sàng COMPLETED / CANCELLED, nếu không còn dịch vụ Lab / CĐHA nào
-     * PENDING hoặc IN_PROGRESS thì ca WAITING_RESULTS chuyển sang RESULTS_READY và báo cho Bác sĩ (Khóa ưu tiên).
-     * Phải gọi SAU KHI đã khóa dòng đợt khám và trong transaction READ_COMMITTED, để thấy kết quả mới nhất của
-     * kỹ thuật viên phòng còn lại vừa commit.
+     * T06 / Q5 (FR-44): mỗi khi một dịch vụ cận lâm sàng COMPLETED / CANCELLED, nếu không còn dịch vụ Lab / CĐHA nào PENDING hoặc
+     * IN_PROGRESS thì HỆ THỐNG tự chuyển ca WAITING_RESULTS -> RESULTS_READY (lịch sử {@code changed_by_user_id = NULL}) và đưa ca
+     * lên ĐẦU hàng đợi của Bác sĩ khám chính (chỉ sau ca cấp cứu): {@code queue_order = MIN(hàng đợi) - 1}, {@code skip_count = 0}.
+     * Phải gọi SAU KHI đã khóa dòng đợt khám (khóa TRƯỚC rồi mới đếm) và trong transaction READ_COMMITTED, để thấy kết quả mới nhất
+     * của kỹ thuật viên phòng còn lại vừa commit; nếu đếm trước khi khóa thì hai kỹ thuật viên hoàn tất cùng lúc làm ca kẹt mãi.
+     * {@code actorId} là người vừa hoàn tất dịch vụ cuối (chỉ dùng cho event, không ghi vào lịch sử trạng thái).
      */
     public void evaluateParaclinicalCompletion(PetVisit visit, Long actorId) {
         if (visit.getStatus() != VisitStatus.WAITING_RESULTS) {
@@ -179,10 +183,22 @@ public class VisitSupport {
         if (open > 0) {
             return;
         }
-        transition(visit, VisitStatus.RESULTS_READY, actorId,
-                "Đã có đủ kết quả cận lâm sàng, chuyển vào hàng đợi tái khám ưu tiên của Bác sĩ");
+        Long doctorId = visit.getDoctorId();
+        Long minOrder = doctorId == null ? null : visitRepository.findMinQueueOrder(
+                doctorId, List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY), visit.getId());
+        transition(visit, VisitStatus.RESULTS_READY, null,
+                "Đã có đủ kết quả cận lâm sàng: hệ thống tự chuyển, ca lên đầu hàng đợi của Bác sĩ");
+        visit.setSkipCount(0);
+        if (minOrder != null) {
+            visit.setQueueOrder(minOrder - 1);
+        }
+        visitRepository.save(visit);
+        Long petId = visit.getPet().getId();
+        eventPublisher.publishEvent(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), clock.instant(), null,
+                visit.getId(), visit.getVisitCode(), doctorId, petId));
+        // v2: còn phát song song tới khi notification-service đổi listener (Phase 5); xóa ở bước 7.1
         eventPublisher.publishEvent(new DoctorPriorityCallbackEvent(UUID.randomUUID(), clock.instant(), actorId,
-                visit.getId(), visit.getVisitCode(), visit.getDoctorId(), visit.getPet().getId()));
-        log.info("Đợt khám {} đã có đủ kết quả cận lâm sàng (RESULTS_READY)", visit.getVisitCode());
+                visit.getId(), visit.getVisitCode(), doctorId, petId));
+        log.info("Đợt khám {} đã có đủ kết quả cận lâm sàng (RESULTS_READY), lên đầu hàng đợi bác sĩ", visit.getVisitCode());
     }
 }

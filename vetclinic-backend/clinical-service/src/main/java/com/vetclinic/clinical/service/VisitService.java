@@ -62,20 +62,40 @@ public interface VisitService {
      */
     VisitResponse orderInRoomServices(Long id, OrderServicesRequest request);
 
-    /** UC-33: chốt chuyên môn, khóa hồ sơ. IN_PROGRESS -> WAITING_PAYMENT, phát sự kiện để billing lập hóa đơn. */
+    /**
+     * T07: Bác sĩ bắt đầu Giai đoạn 2 (đọc kết quả) sau khi gọi số và bệnh nhân đã vào phòng. RESULTS_READY -> IN_PROGRESS; đúng Bác sĩ
+     * khám chính, và Bác sĩ không có ca IN_PROGRESS khác (CLIN_1302).
+     */
+    VisitResponse startPhase2(Long id);
+
+    /**
+     * T05 / T09 (UC-33): chốt chuyên môn, khóa hồ sơ. IN_PROGRESS -> WAITING_PAYMENT. Cần chẩn đoán (CLIN_1307), cân nặng + thân nhiệt
+     * (CLIN_1308), dịch vụ tại phòng đã xong hoặc hủy (CLIN_1309). KHÔNG gọi billing, KHÔNG phát event: hóa đơn dịch vụ đã lập từ lúc
+     * chỉ định, thu ngân thu ở bảng kê hóa đơn (T10).
+     */
     VisitResponse closeVisit(Long id, CloseVisitRequest request);
 
     /**
-     * Mở lại đợt khám đã chốt để điều chỉnh chuyên môn (T12, "người có thẩm quyền" = Admin): WAITING_PAYMENT -> IN_PROGRESS,
-     * bỏ khóa hồ sơ, hủy hóa đơn PENDING bên billing. Chỉ khi chưa thu tiền và bác sĩ phụ trách đang không BUSY. Chốt lại bằng
-     * close-visit thì hóa đơn được dựng lại với nội dung mới.
+     * T14 "Mở lại hồ sơ": WAITING_PAYMENT -> IN_PROGRESS bởi Bác sĩ phụ trách HOẶC Admin, lý do bắt buộc, Bác sĩ không có ca IN_PROGRESS
+     * khác. Hóa đơn đã PAID giữ nguyên, hóa đơn PENDING còn nguyên; dịch vụ bỏ đi thì hủy kèm hóa đơn, dịch vụ thêm vào thì có hóa đơn
+     * mới. Chốt lại bằng close-visit (T05 / T09). Không gọi billing.
      */
     VisitResponse reopen(Long id, ReasonRequest request);
 
-    /** EX-11: khách bỏ về hẳn không đọc kết quả. RESULTS_READY -> COMPLETED, ghi nợ viện phí. */
+    /**
+     * EX-11 "Khách bỏ về" (T08 từ RESULTS_READY, T12 từ WAITING_RESULTS): -> COMPLETED, không lập hóa đơn mới. Chỉ định cận lâm sàng còn
+     * PENDING bị hủy kèm hóa đơn; dịch vụ đã làm giữ hóa đơn PENDING làm công nợ. Từ chối nếu còn dịch vụ cận lâm sàng IN_PROGRESS
+     * (CLIN_1304). Phát VisitCompletedEvent (chỉ thông báo).
+     */
     VisitResponse abandon(Long id);
 
-    /** EX-03 / FR-26 / FR-34 / FR-45: hủy đợt khám. */
+    /**
+     * T11 "Hủy ca / Chuyển viện" ở Giai đoạn 1: IN_PROGRESS -> CANCELLED bởi Bác sĩ phụ trách, lý do bắt buộc. Chỉ khi chưa có dịch vụ tại
+     * phòng COMPLETED; mọi dịch vụ còn dở bị hủy kèm hóa đơn CANCELLED.
+     */
+    VisitResponse cancelExam(Long id, ReasonRequest request);
+
+    /** T03 / EX-03: Lễ tân hủy tiếp nhận khi khách bỏ về lúc đang chờ. WAITING -> CANCELLED, lý do bắt buộc. */
     VisitResponse cancel(Long id, ReasonRequest request);
 
     /** Danh sách ca của Bác sĩ đang đăng nhập: chờ vào phòng, đang khám, chờ tái khám. */

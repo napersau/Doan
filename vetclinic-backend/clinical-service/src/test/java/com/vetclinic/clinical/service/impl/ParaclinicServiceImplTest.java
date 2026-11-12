@@ -37,6 +37,7 @@ import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.clinical.service.VisitTimeline;
 import com.vetclinic.common.event.DoctorPriorityCallbackEvent;
+import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
 import org.junit.jupiter.api.AfterEach;
@@ -614,11 +615,61 @@ class ParaclinicServiceImplTest {
         assertThat(history.getValue().getFromStatus()).isEqualTo(VisitStatus.WAITING_RESULTS);
         assertThat(history.getValue().getToStatus()).isEqualTo(VisitStatus.RESULTS_READY);
 
+        assertThat(history.getValue().getChangedByUserId()).isNull();   // T06: hệ thống tự chuyển
+
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(event.capture());
-        DoctorPriorityCallbackEvent callback = (DoctorPriorityCallbackEvent) event.getValue();
-        assertThat(callback.visitId()).isEqualTo(100L);
+        verify(publisher, org.mockito.Mockito.times(2)).publishEvent(event.capture());
+        ParaclinicalResultsReadyEvent ready = event.getAllValues().stream().filter(ParaclinicalResultsReadyEvent.class::isInstance)
+                .map(ParaclinicalResultsReadyEvent.class::cast).findFirst().orElseThrow();
+        assertThat(ready.visitId()).isEqualTo(100L);
+        assertThat(ready.doctorId()).isEqualTo(DOCTOR);
+        assertThat(ready.actorUserId()).isNull();
+        // v2 còn phát song song tới Phase 5/7.1
+        DoctorPriorityCallbackEvent callback = event.getAllValues().stream().filter(DoctorPriorityCallbackEvent.class::isInstance)
+                .map(DoctorPriorityCallbackEvent.class::cast).findFirst().orElseThrow();
         assertThat(callback.doctorId()).isEqualTo(DOCTOR);
+    }
+
+    @Test
+    void resultsReady_Q5_putsTheVisitAtTheHeadOfTheDoctorsQueue_andClearsItsSkipCount() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        VisitServiceDetail d = detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS);
+        PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        visit.setSkipCount(2);
+        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d));
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        LabTestItem wbc = labItem(1L, "WBC");
+        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
+        // Hàng đợi của bác sĩ (không tính ca này) có ca nhỏ nhất ở 5000
+        when(visitRepository.findMinQueueOrder(DOCTOR, List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY), 100L)).thenReturn(5000L);
+
+        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
+
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.RESULTS_READY);
+        assertThat(visit.getQueueOrder()).isEqualTo(4999L);   // MIN - 1: lên đầu hàng đợi (chỉ sau ca cấp cứu chưa bị lùi)
+        assertThat(visit.getSkipCount()).isZero();
+    }
+
+    @Test
+    void resultsReady_Q5_emptyDoctorQueue_keepsTheQueueOrder() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        VisitServiceDetail d = detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS);
+        PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        long before = visit.getQueueOrder();
+        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d));
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        LabTestItem wbc = labItem(1L, "WBC");
+        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
+        // MIN() trên hàng đợi trống trả về null (Mockito mặc định trả 0 cho Long nên phải nêu rõ)
+        when(visitRepository.findMinQueueOrder(DOCTOR, List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY), 100L)).thenReturn(null);
+
+        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
+
+        assertThat(visit.getQueueOrder()).isEqualTo(before);   // không có ca nào khác để vượt lên
     }
 
     @Test
@@ -691,6 +742,7 @@ class ParaclinicServiceImplTest {
         assertThat(lastDetailHistory().getReason()).isEqualTo("Thú cưng quá hung dữ");
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
         verify(publisher).publishEvent(any(DoctorPriorityCallbackEvent.class));
+        verify(publisher).publishEvent(any(ParaclinicalResultsReadyEvent.class));
     }
 
     @Test
@@ -764,6 +816,7 @@ class ParaclinicServiceImplTest {
         assertThat(response.status()).isEqualTo(ServiceDetailStatus.COMPLETED);
         verify(attachmentRepository).saveAll(anyList());
         verify(publisher).publishEvent(any(DoctorPriorityCallbackEvent.class));
+        verify(publisher).publishEvent(any(ParaclinicalResultsReadyEvent.class));
         verify(storage, never()).deleteQuietly(any());
     }
 
