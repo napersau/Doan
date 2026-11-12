@@ -23,7 +23,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AppointmentNoShowSchedulerTest {
 
-    // 2026-10-30 09:00 giờ Việt Nam. Hạn vắng mặt = bắt đầu + khung 30' + chờ 30' => lịch bắt đầu TRƯỚC 08:00 là quá hạn
+    // 2026-10-30 09:00 giờ Việt Nam. Hạn vắng mặt = giờ bắt đầu + 30 phút => lịch bắt đầu TRƯỚC 08:30 là quá hạn
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-30T02:00:00Z"), ZoneId.of("Asia/Ho_Chi_Minh"));
 
     @Mock
@@ -40,7 +40,7 @@ class AppointmentNoShowSchedulerTest {
     @Test
     void scan_queriesConfirmedAppointmentsStartedBeforeCutoff() {
         when(appointmentRepository.findIdsStartedBefore(AppointmentStatus.CONFIRMED,
-                LocalDate.of(2026, 10, 30), LocalTime.of(8, 0))).thenReturn(List.of());
+                LocalDate.of(2026, 10, 30), LocalTime.of(8, 30))).thenReturn(List.of());
 
         scheduler().scanAndMarkNoShowAppointments();
 
@@ -50,7 +50,7 @@ class AppointmentNoShowSchedulerTest {
     @Test
     void scan_oneFailingAppointmentDoesNotStopTheRest() {
         when(appointmentRepository.findIdsStartedBefore(AppointmentStatus.CONFIRMED,
-                LocalDate.of(2026, 10, 30), LocalTime.of(8, 0))).thenReturn(List.of(1L, 2L, 3L));
+                LocalDate.of(2026, 10, 30), LocalTime.of(8, 30))).thenReturn(List.of(1L, 2L, 3L));
         when(appointmentService.markNoShowBySystem(1L)).thenReturn(true);
         when(appointmentService.markNoShowBySystem(2L)).thenThrow(new IllegalStateException("lỗi giả lập"));
         when(appointmentService.markNoShowBySystem(3L)).thenReturn(true);

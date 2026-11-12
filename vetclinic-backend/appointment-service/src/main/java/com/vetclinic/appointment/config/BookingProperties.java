@@ -11,7 +11,7 @@ import java.util.List;
  * @param zone                 múi giờ vận hành của phòng khám; ngày giờ hẹn (DATE/TIME) là giờ địa phương
  * @param slotMinutes          độ dài mỗi khung giờ
  * @param slotStartTimes       các giờ bắt đầu khung, dạng "HH:mm"
- * @param noShowGraceMinutes   quá giờ KẾT THÚC khung hẹn thêm bấy nhiêu phút thì coi là vắng mặt (EX-01)
+ * @param noShowGraceMinutes   quá giờ BẮT ĐẦU khung hẹn thêm bấy nhiêu phút mà chưa check-in thì coi là vắng mặt (EX-01, FR-17)
  * @param minCancelHoursBefore chủ nuôi chỉ tự hủy / đổi lịch trước giờ hẹn tối thiểu bấy nhiêu giờ (FR-14)
  * @param maxAdvanceDays       đặt trước tối đa bấy nhiêu ngày
  * @param verifyPet            kiểm tra thú cưng tồn tại và thuộc đúng chủ nuôi qua clinical-service

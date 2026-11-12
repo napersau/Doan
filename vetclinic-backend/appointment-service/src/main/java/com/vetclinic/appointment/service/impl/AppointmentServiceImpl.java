@@ -25,6 +25,7 @@ import com.vetclinic.appointment.service.SlotPolicy;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.event.AppointmentCreatedEvent;
+import com.vetclinic.common.event.AppointmentNoShowEvent;
 import com.vetclinic.common.event.AppointmentStatusChangedEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
@@ -377,7 +378,7 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
         if (!isNoShowDue(appointment)) {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
-                    "Chưa quá " + properties.noShowGraceMinutes() + " phút sau giờ kết thúc khung hẹn nên chưa thể đánh dấu vắng mặt");
+                    "Chưa quá " + properties.noShowGraceMinutes() + " phút sau giờ hẹn nên chưa thể đánh dấu vắng mặt");
         }
         transition(appointment, AppointmentStatus.NO_SHOW, actor.id(), "Lễ tân xác nhận khách vắng mặt (No-show)", null, ownerId);
         return toResponse(appointment).withOwnerId(ownerId);
@@ -449,8 +450,13 @@ public class AppointmentServiceImpl implements AppointmentService {
         return LocalDateTime.of(appointment.getAppointmentDate(), slotPolicy.endOf(appointment.getStartTime()));
     }
 
+    /**
+     * EX-01 / FR-17: lịch CONFIRMED quá {@code appointment_date + start_time + 30 phút} mà chưa check-in là vắng mặt. Mốc tính từ giờ
+     * BẮT ĐẦU khung (không phải giờ kết thúc khung như v2).
+     */
     private boolean isNoShowDue(Appointment appointment) {
-        return slotPolicy.now().isAfter(endOf(appointment).plusMinutes(properties.noShowGraceMinutes()));
+        LocalDateTime start = LocalDateTime.of(appointment.getAppointmentDate(), appointment.getStartTime());
+        return slotPolicy.now().isAfter(start.plusMinutes(properties.noShowGraceMinutes()));
     }
 
     private boolean isPendingExpired(Appointment appointment) {
@@ -491,6 +497,21 @@ public class AppointmentServiceImpl implements AppointmentService {
         if (ownerNotifiable && (ownerId == null || !ownerId.equals(actorId))) {
             notifyOwner(appointment, ownerId, actorId, false, reason);
         }
+        // Danh mục sự kiện v3.0 có sự kiện riêng cho vắng mặt (appointment.no_show). TẠM phát song song với status_changed cho tới khi
+        // notification-service nghe appointment.no_show (LO_TRINH_SUA_CODE_V3.md bước 5.2); khi đó phải NGỪNG phát status_changed cho
+        // NO_SHOW ở đây để chủ nuôi không nhận hai thông báo.
+        if (to == AppointmentStatus.NO_SHOW) {
+            publishNoShow(appointment, ownerId, actorId);
+        }
+    }
+
+    private void publishNoShow(Appointment appointment, Long ownerId, Long actorId) {
+        if (ownerId == null) {
+            return;   // đã cảnh báo trong notifyOwner
+        }
+        eventPublisher.publishEvent(new AppointmentNoShowEvent(UUID.randomUUID(), clock.instant(), actorId,
+                appointment.getId(), appointment.getAppointmentCode(), ownerId, appointment.getPetId(),
+                appointment.getAppointmentDate(), appointment.getStartTime()));
     }
 
     /**

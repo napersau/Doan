@@ -428,8 +428,11 @@ class AppointmentServiceImplTest {
 
     private com.vetclinic.common.event.AppointmentStatusChangedEvent publishedStatusEvent() {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher).publishEvent(captor.capture());
-        return (com.vetclinic.common.event.AppointmentStatusChangedEvent) captor.getValue();
+        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+        return captor.getAllValues().stream()
+                .filter(com.vetclinic.common.event.AppointmentStatusChangedEvent.class::isInstance)
+                .map(com.vetclinic.common.event.AppointmentStatusChangedEvent.class::cast)
+                .findFirst().orElseThrow();
     }
 
     @Test
@@ -612,7 +615,7 @@ class AppointmentServiceImplTest {
 
     @Test
     void markNoShowBySystem_beforeGracePeriodEnds_doesNothing() {
-        // Khung 08:30-09:00, bây giờ 09:00: còn 30 phút nữa mới quá hạn
+        // Hẹn 08:30 + 30 phút = 09:00, bây giờ đúng 09:00: chưa quá hạn
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY, LocalTime.of(8, 30));
         lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
         lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
@@ -620,6 +623,52 @@ class AppointmentServiceImplTest {
         assertThat(service.markNoShowBySystem(1L)).isFalse();
         assertThat(a.getStatus()).isEqualTo(AppointmentStatus.CONFIRMED);
         verify(historyRepository, never()).save(any());
+    }
+
+    @Test
+    void markNoShowBySystem_isDueAtStartTimePlus30Minutes_notAtEndOfSlotPlus30() {
+        // Hẹn 08:00, bây giờ 09:00. v3.0 (FR-17): hạn = 08:00 + 30' = 08:30 => đã quá hạn.
+        // (v2 tính từ giờ KẾT THÚC khung: 08:30 + 30' = 09:00 => chưa quá hạn, nên test này phân biệt được hai công thức)
+        Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY, LocalTime.of(8, 0));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
+
+        assertThat(service.markNoShowBySystem(1L)).isTrue();
+        assertThat(a.getStatus()).isEqualTo(AppointmentStatus.NO_SHOW);
+    }
+
+    @Test
+    void noShow_publishesTheDedicatedNoShowEvent_withNoActorForTheSystemScan() {
+        Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY.minusDays(1), LocalTime.of(9, 0));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
+
+        assertThat(service.markNoShowBySystem(1L)).isTrue();
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+        var noShow = captor.getAllValues().stream()
+                .filter(com.vetclinic.common.event.AppointmentNoShowEvent.class::isInstance)
+                .map(com.vetclinic.common.event.AppointmentNoShowEvent.class::cast)
+                .findFirst().orElseThrow();
+        assertThat(noShow.routingKey()).isEqualTo("appointment.no_show");
+        assertThat(noShow.actorUserId()).isNull();                 // null = hệ thống tự quét
+        assertThat(noShow.ownerId()).isEqualTo(OWNER);             // chủ nuôi suy ra từ thú cưng
+        assertThat(noShow.appointmentId()).isEqualTo(1L);
+    }
+
+    @Test
+    void markNoShowBySystem_doesNotFailWhenTheOwnerCannotBeResolved_justSkipsTheNotification() {
+        // clinical-service tạm sập: nghiệp vụ vẫn chạy (lịch vẫn NO_SHOW), chỉ không báo được chủ nuôi
+        when(petClient.getPet(PET)).thenThrow(new RuntimeException("clinical down"));
+        Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY.minusDays(1), LocalTime.of(9, 0));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
+
+        assertThat(service.markNoShowBySystem(1L)).isTrue();
+
+        assertThat(a.getStatus()).isEqualTo(AppointmentStatus.NO_SHOW);
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
     }
 
     @Test
