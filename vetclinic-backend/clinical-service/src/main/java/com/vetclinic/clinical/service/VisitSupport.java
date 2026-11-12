@@ -133,6 +133,28 @@ public class VisitSupport {
         });
     }
 
+    /**
+     * Giai đoạn 2 = ca đã từng qua WAITING_RESULTS (T04). Chỉ định cận lâm sàng chỉ được làm ở Giai đoạn 1 (T04).
+     */
+    public boolean isPhaseTwo(Long visitId) {
+        return historyRepository.existsByVisitIdAndToStatus(visitId, VisitStatus.WAITING_RESULTS);
+    }
+
+    /**
+     * Dịch vụ khám (EXAMINATION) tạo ở T02 ở trạng thái IN_PROGRESS; hoàn tất (COMPLETED) khi Bác sĩ rời giai đoạn khám:
+     * chỉ định cận lâm sàng (T04) hoặc chốt ca (T05 / T09). Hóa đơn của nó giữ nguyên PENDING.
+     */
+    public void completeExamDetails(Long visitId, Long actorId) {
+        for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
+            if (detail.getService().getCategory() == ServiceCategory.EXAMINATION
+                    && detail.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
+                detail.setStatus(ServiceDetailStatus.COMPLETED);
+                detailRepository.save(detail);
+                recordDetail(detail.getId(), ServiceDetailStatus.IN_PROGRESS, ServiceDetailStatus.COMPLETED, "COMPLETED", actorId, null);
+            }
+        }
+    }
+
     /** Hóa đơn của nhiều dòng chỉ định theo lô (key = id dòng chỉ định). */
     public Map<Long, ServiceInvoice> invoicesOf(Collection<Long> detailIds) {
         if (detailIds.isEmpty()) {

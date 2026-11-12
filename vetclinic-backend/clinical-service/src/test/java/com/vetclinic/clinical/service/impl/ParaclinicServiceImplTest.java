@@ -197,6 +197,73 @@ class ParaclinicServiceImplTest {
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.start(2L));
     }
 
+    // ================================================================== dịch vụ tại phòng (FR-30)
+
+    private static final ClinicService DEWORM = service(4L, "DEWORM", ServiceCategory.DEWORMING, "50000.00");
+    private static final ClinicService EXAM = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
+
+    @Test
+    void perform_completesAnInRoomService_recordingStartThenCompleted() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        VisitServiceDetail d = stubLocks(detail(1L, 100L, DEWORM, ServiceDetailStatus.PENDING), VisitStatus.IN_PROGRESS);
+
+        ServiceDetailResponse response = service.perform(1L);
+
+        assertThat(response.status()).isEqualTo(ServiceDetailStatus.COMPLETED);
+        assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
+        ArgumentCaptor<VisitServiceDetailHistory> audit = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
+        verify(detailHistoryRepository, org.mockito.Mockito.times(2)).save(audit.capture());
+        assertThat(audit.getAllValues()).extracting(VisitServiceDetailHistory::getAction).containsExactly("START_PROCESSING", "COMPLETED");
+    }
+
+    @Test
+    void perform_refusedForTheWrongRoleDoctorServiceOrState() {
+        // Kỹ thuật viên không ghi nhận dịch vụ tại phòng
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        stubLocks(detail(1L, 100L, DEWORM, ServiceDetailStatus.PENDING), VisitStatus.IN_PROGRESS);
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.perform(1L));
+
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        // Chỉ định cận lâm sàng không "Đã thực hiện" kiểu này
+        stubLocks(detail(2L, 101L, CBC, ServiceDetailStatus.PENDING), VisitStatus.IN_PROGRESS);
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.perform(2L));
+        // Ca đã khóa
+        stubLocks(detail(3L, 102L, DEWORM, ServiceDetailStatus.PENDING), VisitStatus.WAITING_PAYMENT);
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.perform(3L));
+        // Đã hoàn tất rồi
+        stubLocks(detail(4L, 103L, DEWORM, ServiceDetailStatus.COMPLETED), VisitStatus.IN_PROGRESS);
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.perform(4L));
+        // Bác sĩ khác không phải Bác sĩ được gán
+        loginAs(com.vetclinic.clinical.testsupport.TestData.OTHER_DOCTOR, RoleCode.VETERINARIAN);
+        stubLocks(detail(5L, 104L, DEWORM, ServiceDetailStatus.PENDING), VisitStatus.IN_PROGRESS);
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.perform(5L));
+    }
+
+    @Test
+    void cancel_ofAnInRoomService_byTheAssignedDoctor_cancelsItsInvoiceToo() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        VisitServiceDetail d = stubLocks(detail(1L, 100L, DEWORM, ServiceDetailStatus.PENDING), VisitStatus.IN_PROGRESS);
+        ServiceInvoice invoice = ServiceInvoice.builder().id(50L).visitServiceDetailId(1L).unitPrice(new BigDecimal("50000.00"))
+                .vatRate(BigDecimal.ZERO).build();
+        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(invoice));
+
+        service.cancel(1L, "Khách từ chối tẩy giun");
+
+        assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
+        assertThat(invoice.getPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
+        verify(publisher, never()).publishEvent(any(Object.class));   // dịch vụ tại phòng không ảnh hưởng RESULTS_READY
+    }
+
+    @Test
+    void cancel_ofAnInRoomService_refusedWhenTheVisitIsLocked_andTheExamFeeCannotBeCancelledAlone() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubLocks(detail(1L, 100L, DEWORM, ServiceDetailStatus.PENDING), VisitStatus.WAITING_PAYMENT);
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.cancel(1L, "x"));
+
+        stubLocks(detail(2L, 101L, EXAM, ServiceDetailStatus.IN_PROGRESS), VisitStatus.IN_PROGRESS);
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.cancel(2L, "x"));   // dùng "Hủy ca / Chuyển viện"
+    }
+
     // ================================================================== kết quả xét nghiệm (UC-25)
 
     @Test

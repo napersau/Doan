@@ -9,6 +9,8 @@ import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.AssignDoctorRequest;
 import com.vetclinic.clinical.dto.request.CheckInRequest;
+import com.vetclinic.clinical.dto.request.ClinicalInfoRequest;
+import com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest;
 import com.vetclinic.clinical.dto.request.CloseVisitRequest;
 import com.vetclinic.clinical.dto.request.OrderServicesRequest;
 import com.vetclinic.clinical.dto.request.ReasonRequest;
@@ -49,6 +51,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -299,59 +302,124 @@ public class VisitServiceImpl implements VisitService {
                 "Chỉ có thể bắt đầu khám đối với ca đang ở trạng thái Chờ khám (WAITING)");
         // BR-12: một Bác sĩ chỉ khám một ca tại một thời điểm
         if (visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)) {
-            throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE, "Bác sĩ đang có một ca khám khác chưa kết thúc!");
+            throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE);
         }
 
-        visit.setWeightAtVisit(request.weightAtVisit());
-        visit.setTemperature(request.temperature());
-        visit.setClinicalNotes(blankToNull(request.clinicalNotes()));
+        if (request != null) {
+            applyClinicalInfo(visit, request.weightAtVisit(), request.temperature(), request.clinicalNotes());
+        }
         // Thời điểm bắt đầu khám = created_at của dòng lịch sử này (không còn cột started_at)
         support.transition(visit, VisitStatus.IN_PROGRESS, doctorId, "Bác sĩ bắt đầu khám lâm sàng Giai đoạn 1");
 
+        // T02: tự tạo MỘT dịch vụ khám (EXAM_GEN) ở trạng thái IN_PROGRESS kèm hóa đơn PENDING (phí khám là một dịch vụ)
         serviceRepository.findByCode(EXAM_SERVICE_CODE)
                 .filter(ClinicService::isActive)
                 .filter(s -> !detailRepository.existsByVisitAndServiceCode(visit.getId(), s.getCode()))
-                .ifPresent(s -> createDetail(visit.getId(), s, 1, "Phí khám lâm sàng tổng quát (tự động)", doctorId));
+                .ifPresent(s -> createDetail(visit.getId(), s, 1, "Phí khám lâm sàng tổng quát (tự động)", doctorId,
+                        ServiceDetailStatus.IN_PROGRESS));
         return assembler.detail(visit);
     }
 
     @Override
     @Transactional
-    public VisitResponse orderServices(Long id, OrderServicesRequest request) {
+    public VisitResponse updateClinicalInfo(Long id, ClinicalInfoRequest request) {
+        Long doctorId = SecurityUtils.getCurrentUserId();
+        PetVisit visit = support.lock(id);
+        support.assertAssignedTo(visit, doctorId);
+        support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ cập nhật được thông tin lâm sàng khi ca đang khám (IN_PROGRESS)");
+        applyClinicalInfo(visit, request.weightAtVisit(), request.temperature(), request.clinicalNotes());
+        visitRepository.save(visit);
+        return assembler.detail(visit);
+    }
+
+    private static void applyClinicalInfo(PetVisit visit, BigDecimal weight, BigDecimal temperature, String notes) {
+        if (weight != null) {
+            visit.setWeightAtVisit(weight);
+        }
+        if (temperature != null) {
+            visit.setTemperature(temperature);
+        }
+        if (notes != null) {
+            visit.setClinicalNotes(blankToNull(notes));
+        }
+    }
+
+    @Override
+    @Transactional
+    public VisitResponse orderParaclinical(Long id, ParaclinicalOrderRequest request) {
+        Long doctorId = SecurityUtils.getCurrentUserId();
+        List<Long> serviceIds = request.serviceIds().stream().distinct().toList();
+        List<ClinicService> services = loadActiveServices(serviceIds);
+        if (services.stream().anyMatch(s -> !s.getCategory().isParaclinical())) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA,
+                    "Chỉ định cận lâm sàng chỉ nhận dịch vụ xét nghiệm (LABORATORY) hoặc chẩn đoán hình ảnh (IMAGING)");
+        }
+
+        PetVisit visit = support.lock(id);
+        support.assertAssignedTo(visit, doctorId);
+        support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ chỉ định cận lâm sàng khi ca khám đang diễn ra (IN_PROGRESS)");
+        if (support.isPhaseTwo(visit.getId())) {
+            throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION, "Ca đã ở Giai đoạn 2: không chỉ định thêm cận lâm sàng");
+        }
+        // T04: phải có cân nặng và thân nhiệt (> 0) trước khi đẩy sang cận lâm sàng
+        if (visit.getWeightAtVisit() == null || visit.getTemperature() == null || visit.getTemperature().signum() <= 0) {
+            throw new AppException(ErrorCode.VITAL_SIGNS_REQUIRED);
+        }
+        // T04: các dịch vụ làm tại phòng đã chỉ định ở Giai đoạn 1 phải xong (COMPLETED) hoặc hủy (CANCELLED)
+        if (detailRepository.countByVisitAndCategoriesAndStatuses(visit.getId(), ServiceCategory.IN_ROOM, ServiceDetailStatus.OPEN) > 0) {
+            throw new AppException(ErrorCode.IN_ROOM_SERVICE_PENDING);
+        }
+
+        String notes = blankToNull(request.notes());
+        for (ClinicService service : services) {
+            // Mỗi dịch vụ: dòng chỉ định PENDING (tự vào hàng đợi phòng, queue_order = lúc chỉ định) + hóa đơn PENDING, cùng giao dịch
+            createDetail(visit.getId(), service, 1, notes, doctorId, ServiceDetailStatus.PENDING);
+        }
+        support.completeExamDetails(visit.getId(), doctorId);   // dịch vụ khám của GĐ 1 hoàn tất
+        // FR-33: ca rời IN_PROGRESS nên trạng thái Bác sĩ tính ra AVAILABLE: Bác sĩ gọi số tiếp theo mà không chờ kết quả
+        support.transition(visit, VisitStatus.WAITING_RESULTS, doctorId,
+                "Bác sĩ chỉ định cận lâm sàng, ca chuyển sang chờ kết quả và Bác sĩ được giải phóng");
+        return assembler.detail(visit);
+    }
+
+    @Override
+    @Transactional
+    public VisitResponse orderInRoomServices(Long id, OrderServicesRequest request) {
         Long doctorId = SecurityUtils.getCurrentUserId();
         List<Long> serviceIds = request.services().stream().map(ServiceOrderItem::serviceId).distinct().toList();
-        Map<Long, ClinicService> found = serviceRepository.findByIdInAndActiveTrue(serviceIds).stream()
+        Map<Long, ClinicService> found = loadActiveServices(serviceIds).stream()
                 .collect(Collectors.toMap(ClinicService::getId, Function.identity()));
-        if (found.size() != serviceIds.size()) {
-            throw new AppException(ErrorCode.SERVICE_NOT_FOUND);
+        if (found.values().stream().anyMatch(s -> !s.getCategory().isInRoom())) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA,
+                    "Chỉ nhận dịch vụ thực hiện tại phòng (tiêm, tẩy giun, ngoại ký sinh, truyền dịch, thủ thuật, phẫu thuật)");
         }
 
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
         support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ chỉ định dịch vụ khi ca khám đang diễn ra (IN_PROGRESS)");
 
-        boolean hasParaclinical = false;
         for (ServiceOrderItem item : request.services()) {
-            ClinicService service = found.get(item.serviceId());
-            createDetail(visit.getId(), service, item.quantity() == null ? 1 : item.quantity(), blankToNull(item.notes()), doctorId);
-            hasParaclinical |= service.getCategory().isParaclinical();
-        }
-        // FR-33: có chỉ định Lab / CĐHA thì giải phóng Bác sĩ (ca rời IN_PROGRESS nên trạng thái Bác sĩ tính ra AVAILABLE)
-        if (hasParaclinical) {
-            support.transition(visit, VisitStatus.WAITING_RESULTS, doctorId,
-                    "Bác sĩ chỉ định cận lâm sàng, ca chuyển sang chờ kết quả và Bác sĩ được giải phóng");
+            // PENDING cho tới khi Bác sĩ bấm "Đã thực hiện"; hóa đơn PENDING lập ngay cùng giao dịch
+            createDetail(visit.getId(), found.get(item.serviceId()), item.quantity() == null ? 1 : item.quantity(),
+                    blankToNull(item.notes()), doctorId, ServiceDetailStatus.PENDING);
         }
         return assembler.detail(visit);
     }
 
+    private List<ClinicService> loadActiveServices(List<Long> serviceIds) {
+        List<ClinicService> found = serviceRepository.findByIdInAndActiveTrue(serviceIds);
+        if (found.size() != serviceIds.size()) {
+            throw new AppException(ErrorCode.SERVICE_NOT_FOUND);
+        }
+        return found;
+    }
+
     /**
      * Tạo dòng chỉ định + HÓA ĐƠN RIÊNG của nó trong cùng giao dịch (BR-19, FR-32). Đơn giá / VAT được snapshot vào hóa đơn
-     * (BR-25), visit_service_details không chứa giá. Lab / CĐHA chờ ở hàng đợi (PENDING, queue_order = lúc chỉ định); dịch vụ làm
-     * tại phòng khám thì hoàn tất ngay.
+     * (BR-25), visit_service_details không chứa giá. {@code queue_order} = lúc chỉ định (hàng đợi Lab / CĐHA).
      */
-    private VisitServiceDetail createDetail(Long visitId, ClinicService service, int quantity, String notes, Long actorId) {
-        boolean paraclinical = service.getCategory().isParaclinical();
-        ServiceDetailStatus status = paraclinical ? ServiceDetailStatus.PENDING : ServiceDetailStatus.COMPLETED;
+    private VisitServiceDetail createDetail(Long visitId, ClinicService service, int quantity, String notes, Long actorId,
+                                            ServiceDetailStatus status) {
         VisitServiceDetail detail = detailRepository.saveAndFlush(VisitServiceDetail.builder()
                 .visitId(visitId)
                 .service(service)
@@ -361,8 +429,7 @@ public class VisitServiceImpl implements VisitService {
                 .queueOrder(QueueOrders.now(clock))
                 .build());
         support.createInvoice(detail, service);
-        support.recordDetail(detail.getId(), null, status, paraclinical ? "ORDERED" : "COMPLETED", actorId,
-                paraclinical ? notes : "Thực hiện tại phòng khám");
+        support.recordDetail(detail.getId(), null, status, "ORDERED", actorId, notes);
         return detail;
     }
 

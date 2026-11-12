@@ -127,15 +127,34 @@ public class VisitController {
         return ResponseEntity.ok(ApiResponse.success("Bác sĩ đã bắt đầu khám lâm sàng", enricher.enrich(visitService.startExam(id, request))));
     }
 
-    /** UC-23: chỉ định dịch vụ. Có Lab / CĐHA thì ca sang WAITING_RESULTS và Bác sĩ được giải phóng. */
-    @PostMapping("/{id}/services")
+    /** Cập nhật sinh hiệu / ghi chú lâm sàng khi ca đang khám (Bác sĩ được gán). */
+    @PutMapping("/{id}/clinical-info")
     @PreAuthorize("hasRole('VETERINARIAN')")
-    public ResponseEntity<ApiResponse<VisitResponse>> orderServices(@PathVariable Long id,
-                                                                    @Valid @RequestBody OrderServicesRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã chỉ định dịch vụ", enricher.enrich(visitService.orderServices(id, request))));
+    public ResponseEntity<ApiResponse<VisitResponse>> clinicalInfo(@PathVariable Long id,
+                                                                   @Valid @RequestBody com.vetclinic.clinical.dto.request.ClinicalInfoRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Đã cập nhật thông tin lâm sàng", enricher.enrich(visitService.updateClinicalInfo(id, request))));
     }
 
-    /** Mở lại đợt khám đã chốt (chưa thu tiền) để điều chỉnh chuyên môn. Chỉ Admin, bắt buộc lý do. */
+    /**
+     * T04, UC-23: chỉ định cận lâm sàng ({serviceIds, notes}). Cần có cân nặng + thân nhiệt (CLIN_1308) và không còn dịch vụ tại
+     * phòng dở dang (CLIN_1309); ca sang WAITING_RESULTS và Bác sĩ được giải phóng. Mỗi dịch vụ sinh một hóa đơn dịch vụ PENDING.
+     */
+    @PostMapping("/{id}/paraclinical-orders")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<VisitResponse>> paraclinicalOrders(@PathVariable Long id,
+                                                                         @Valid @RequestBody com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Đã chỉ định cận lâm sàng", enricher.enrich(visitService.orderParaclinical(id, request))));
+    }
+
+    /** FR-30: chỉ định dịch vụ tại phòng (tiêm, tẩy giun, thủ thuật...), mỗi dịch vụ một hóa đơn PENDING; ca vẫn IN_PROGRESS. */
+    @PostMapping("/{id}/in-room-services")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<VisitResponse>> inRoomServices(@PathVariable Long id,
+                                                                     @Valid @RequestBody OrderServicesRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Đã chỉ định dịch vụ tại phòng", enricher.enrich(visitService.orderInRoomServices(id, request))));
+    }
+
+    /** Mở lại đợt khám đã chốt (chưa thu tiền) để điều chỉnh chuyên môn. Bắt buộc lý do. */
     @PostMapping("/{id}/reopen")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<VisitResponse>> reopen(@PathVariable Long id, @Valid @RequestBody ReasonRequest request) {

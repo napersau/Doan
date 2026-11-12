@@ -2,8 +2,10 @@ package com.vetclinic.clinical.service;
 
 import com.vetclinic.clinical.dto.request.AssignDoctorRequest;
 import com.vetclinic.clinical.dto.request.CheckInRequest;
+import com.vetclinic.clinical.dto.request.ClinicalInfoRequest;
 import com.vetclinic.clinical.dto.request.CloseVisitRequest;
 import com.vetclinic.clinical.dto.request.OrderServicesRequest;
+import com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest;
 import com.vetclinic.clinical.dto.request.ReasonRequest;
 import com.vetclinic.clinical.dto.request.StartExamRequest;
 import com.vetclinic.clinical.dto.response.BillableServiceResponse;
@@ -38,11 +40,27 @@ public interface VisitService {
     /** UC-21 Luồng 5c: gỡ phân công (doctor_id = NULL), ca về danh sách chờ phân công; giữ nguyên queue_order. */
     VisitResponse unassignDoctor(Long id);
 
-    /** UC-22: Bác sĩ bắt đầu khám giai đoạn 1. WAITING -> IN_PROGRESS. */
+    /**
+     * T02, UC-22: Bác sĩ bắt đầu khám giai đoạn 1 (WAITING -> IN_PROGRESS). Chỉ Bác sĩ được gán (CLIN_1311) và không có ca
+     * IN_PROGRESS khác (CLIN_1302). Tự tạo MỘT dòng dịch vụ khám (EXAM_GEN, IN_PROGRESS) kèm hóa đơn PENDING. Sinh hiệu tùy chọn.
+     */
     VisitResponse startExam(Long id, StartExamRequest request);
 
-    /** UC-23: chỉ định dịch vụ. Có Lab / CĐHA thì IN_PROGRESS -> WAITING_RESULTS và giải phóng Bác sĩ. */
-    VisitResponse orderServices(Long id, OrderServicesRequest request);
+    /** Cập nhật sinh hiệu / ghi chú lâm sàng khi ca đang khám (IN_PROGRESS) và chưa bị khóa. */
+    VisitResponse updateClinicalInfo(Long id, ClinicalInfoRequest request);
+
+    /**
+     * T04, UC-23: chỉ định cận lâm sàng (chỉ LABORATORY / IMAGING). Yêu cầu đã có cân nặng và thân nhiệt (CLIN_1308), không còn
+     * dịch vụ tại phòng dang dở (CLIN_1309), và đang ở Giai đoạn 1. Mỗi dịch vụ: dòng chỉ định PENDING (tự vào hàng đợi Lab / CĐHA)
+     * + hóa đơn PENDING, cùng giao dịch; dịch vụ khám hoàn tất; ca IN_PROGRESS -> WAITING_RESULTS, Bác sĩ được giải phóng.
+     */
+    VisitResponse orderParaclinical(Long id, ParaclinicalOrderRequest request);
+
+    /**
+     * FR-30: chỉ định dịch vụ tại phòng (tiêm, tẩy giun, thủ thuật...). Mỗi dịch vụ một dòng PENDING + một hóa đơn PENDING; ca vẫn
+     * IN_PROGRESS. Bác sĩ bấm "Đã thực hiện" (POST /service-details/{id}/perform) để hoàn tất.
+     */
+    VisitResponse orderInRoomServices(Long id, OrderServicesRequest request);
 
     /** UC-33: chốt chuyên môn, khóa hồ sơ. IN_PROGRESS -> WAITING_PAYMENT, phát sự kiện để billing lập hóa đơn. */
     VisitResponse closeVisit(Long id, CloseVisitRequest request);

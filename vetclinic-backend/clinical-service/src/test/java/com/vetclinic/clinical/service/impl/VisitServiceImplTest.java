@@ -410,7 +410,7 @@ class VisitServiceImplTest {
 
         ArgumentCaptor<VisitServiceDetail> fee = ArgumentCaptor.forClass(VisitServiceDetail.class);
         verify(detailRepository).saveAndFlush(fee.capture());
-        assertThat(fee.getValue().getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
+        assertThat(fee.getValue().getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);   // T02: hoàn tất ở T04/T05/T09
         assertThat(fee.getValue().getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
         // v3.0: dòng chỉ định không chứa giá; hóa đơn riêng PENDING được lập CÙNG giao dịch, snapshot đơn giá và thuế suất
         ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoice =
@@ -452,66 +452,190 @@ class VisitServiceImplTest {
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.startExam(102L, request));
     }
 
+    private PetVisit visitWithVitals(long id, VisitStatus status) {
+        PetVisit v = visit(id, status, DOCTOR);
+        v.setWeightAtVisit(new BigDecimal("4.60"));
+        v.setTemperature(new BigDecimal("39.2"));
+        return v;
+    }
+
     @Test
-    void orderServices_withLabOrImaging_releasesTheDoctorAndSnapshotsPrices() {
+    void startExam_vitalSignsAreOptional_butTheExamFeeIsStillCreatedInProgress() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
+        PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
-        ClinicService vaccine = service(2L, "VAC_7B", ServiceCategory.VACCINATION, "150000.00");
-        when(serviceRepository.findByIdInAndActiveTrue(List.of(5L, 2L))).thenReturn(List.of(cbc, vaccine));
+        when(serviceRepository.findByCode("EXAM_GEN")).thenReturn(Optional.of(service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00")));
         stubSaveDetail();
 
-        VisitResponse response = service.orderServices(100L, new OrderServicesRequest(List.of(
-                new ServiceOrderItem(5L, 1, "Nghi nhiễm trùng"), new ServiceOrderItem(2L, 2, null))));
+        service.startExam(100L, new StartExamRequest(null, null, null));
 
-        // Có cận lâm sàng -> rời IN_PROGRESS, nên trạng thái Bác sĩ tính ra rảnh
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
+        assertThat(visit.getWeightAtVisit()).isNull();   // cân nặng / thân nhiệt có thể nhập sau bằng PUT /clinical-info
+        verify(detailRepository).saveAndFlush(any(VisitServiceDetail.class));
+    }
+
+    // ================================================================== sinh hiệu (PUT /clinical-info)
+
+    @Test
+    void updateClinicalInfo_changesOnlyTheGivenFields_whileExamining() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        PetVisit visit = visitWithVitals(100L, VisitStatus.IN_PROGRESS);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+
+        service.updateClinicalInfo(100L, new com.vetclinic.clinical.dto.request.ClinicalInfoRequest(null, new BigDecimal("38.1"), "Hạ sốt"));
+
+        assertThat(visit.getWeightAtVisit()).isEqualByComparingTo("4.60");   // giữ nguyên
+        assertThat(visit.getTemperature()).isEqualByComparingTo("38.1");
+        assertThat(visit.getClinicalNotes()).isEqualTo("Hạ sốt");
+    }
+
+    @Test
+    void updateClinicalInfo_refusedWhenNotInProgress_orNotTheAssignedDoctor() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR)));   // đã khóa
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.IN_PROGRESS, OTHER_DOCTOR)));
+        var request = new com.vetclinic.clinical.dto.request.ClinicalInfoRequest(null, null, "x");
+
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.updateClinicalInfo(100L, request));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.updateClinicalInfo(101L, request));
+    }
+
+    // ================================================================== chỉ định cận lâm sàng (T04)
+
+    @Test
+    void orderParaclinical_createsPendingLinesAndInvoices_completesTheExam_andReleasesTheDoctor() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        PetVisit visit = visitWithVitals(100L, VisitStatus.IN_PROGRESS);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
+        ClinicService xray = service(7L, "IMG_XRAY", ServiceCategory.IMAGING, "180000.00");
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(5L, 7L))).thenReturn(List.of(cbc, xray));
+        VisitServiceDetail examLine = detail(1L, 100L, service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00"),
+                ServiceDetailStatus.IN_PROGRESS);
+        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(examLine));
+        stubSaveDetail();
+
+        VisitResponse response = service.orderParaclinical(100L,
+                new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L, 7L), "Nghi viêm tụy"));
+
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING_RESULTS);
-        ArgumentCaptor<VisitServiceDetail> saved = ArgumentCaptor.forClass(VisitServiceDetail.class);
-        verify(detailRepository, org.mockito.Mockito.times(2)).saveAndFlush(saved.capture());
-        VisitServiceDetail labLine = saved.getAllValues().get(0);
-        assertThat(labLine.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        VisitServiceDetail vaccineLine = saved.getAllValues().get(1);
-        assertThat(vaccineLine.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // làm tại phòng khám
-        assertThat(vaccineLine.getQuantity()).isEqualTo(2);
-        // Mỗi chỉ định có ĐÚNG MỘT hóa đơn riêng với đơn giá snapshot (BR-19, BR-25)
+        assertThat(examLine.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // dịch vụ khám của GĐ 1 hoàn tất
+        ArgumentCaptor<VisitServiceDetail> lines = ArgumentCaptor.forClass(VisitServiceDetail.class);
+        verify(detailRepository, org.mockito.Mockito.times(2)).saveAndFlush(lines.capture());
+        assertThat(lines.getAllValues()).extracting(VisitServiceDetail::getStatus)
+                .containsOnly(ServiceDetailStatus.PENDING);   // tự vào hàng đợi Lab / CĐHA
+        assertThat(lines.getAllValues()).extracting(VisitServiceDetail::getNotes).containsOnly("Nghi viêm tụy");
         ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoices =
                 ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
         verify(invoiceRepository, org.mockito.Mockito.times(2)).saveAndFlush(invoices.capture());
-        assertThat(invoices.getAllValues()).extracting(i -> i.getUnitPrice().toPlainString())
-                .containsExactly("250000.00", "150000.00");
-        assertThat(invoices.getAllValues()).extracting(com.vetclinic.clinical.entity.ServiceInvoice::getPaymentStatus)
-                .containsOnly(com.vetclinic.clinical.constant.PaymentStatus.PENDING);
+        assertThat(invoices.getAllValues()).extracting(i -> i.getUnitPrice().toPlainString()).containsExactly("250000.00", "180000.00");
+        assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.WAITING_RESULTS);
     }
 
     @Test
-    void orderServices_inRoomOnly_keepsTheVisitInProgress() {
+    void orderParaclinical_requiresWeightAndTemperature_CLIN_1308() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.IN_PROGRESS, DOCTOR)));
-        ClinicService deworm = service(4L, "DEWORM", ServiceCategory.DEWORMING, "50000.00");
-        when(serviceRepository.findByIdInAndActiveTrue(List.of(4L))).thenReturn(List.of(deworm));
-        stubSaveDetail();
+        ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(5L))).thenReturn(List.of(cbc));
+        var request = new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L), null);
 
-        VisitResponse response = service.orderServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(4L, 1, null))));
+        PetVisit noVitals = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(noVitals));
+        assertError(ErrorCode.VITAL_SIGNS_REQUIRED, () -> service.orderParaclinical(100L, request));
 
-        assertThat(response.status()).isEqualTo(VisitStatus.IN_PROGRESS);
-        verify(historyRepository, never()).save(any());
+        PetVisit zeroTemp = visitWithVitals(101L, VisitStatus.IN_PROGRESS);
+        zeroTemp.setTemperature(BigDecimal.ZERO);
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(zeroTemp));
+        assertError(ErrorCode.VITAL_SIGNS_REQUIRED, () -> service.orderParaclinical(101L, request));
+        verify(detailRepository, never()).saveAndFlush(any());
     }
 
     @Test
-    void orderServices_rejectsUnknownOrInactiveServiceAndWrongState() {
+    void orderParaclinical_refusedWhileAnInRoomServiceIsStillOpen_CLIN_1309() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(5L))).thenReturn(List.of(service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00")));
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visitWithVitals(100L, VisitStatus.IN_PROGRESS)));
+        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.IN_ROOM, ServiceDetailStatus.OPEN)).thenReturn(1L);
+
+        assertError(ErrorCode.IN_ROOM_SERVICE_PENDING,
+                () -> service.orderParaclinical(100L, new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L), null)));
+        verify(detailRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void orderParaclinical_rejectsNonParaclinicalUnknownLockedAndPhaseTwo() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        // Dịch vụ tại phòng không đi qua cận lâm sàng
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(2L))).thenReturn(List.of(service(2L, "VAC_7B", ServiceCategory.VACCINATION, "150000.00")));
+        assertError(ErrorCode.INVALID_INPUT_DATA,
+                () -> service.orderParaclinical(100L, new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(2L), null)));
+        // Dịch vụ không tồn tại / đã ngừng
         when(serviceRepository.findByIdInAndActiveTrue(List.of(99L))).thenReturn(List.of());
         assertError(ErrorCode.SERVICE_NOT_FOUND,
-                () -> service.orderServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(99L, 1, null)))));
+                () -> service.orderParaclinical(100L, new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(99L), null)));
 
         ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
         when(serviceRepository.findByIdInAndActiveTrue(List.of(5L))).thenReturn(List.of(cbc));
-        // Hồ sơ đã khóa (WAITING_PAYMENT) không được thêm dịch vụ (BR-27)
-        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
-        assertError(ErrorCode.INVALID_STATUS_TRANSITION,
-                () -> service.orderServices(101L, new OrderServicesRequest(List.of(new ServiceOrderItem(5L, 1, null)))));
+        var request = new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L), null);
+        // Hồ sơ đã khóa
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visitWithVitals(101L, VisitStatus.WAITING_PAYMENT)));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.orderParaclinical(101L, request));
+        // Giai đoạn 2: đã từng qua WAITING_RESULTS
+        when(visitRepository.findByIdForUpdate(102L)).thenReturn(Optional.of(visitWithVitals(102L, VisitStatus.IN_PROGRESS)));
+        when(historyRepository.existsByVisitIdAndToStatus(102L, VisitStatus.WAITING_RESULTS)).thenReturn(true);
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.orderParaclinical(102L, request));
+        // Bác sĩ khác
+        when(visitRepository.findByIdForUpdate(103L)).thenReturn(Optional.of(visit(103L, VisitStatus.IN_PROGRESS, OTHER_DOCTOR)));
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.orderParaclinical(103L, request));
         verify(detailRepository, never()).saveAndFlush(any());
+    }
+
+    // ================================================================== dịch vụ tại phòng (FR-30)
+
+    @Test
+    void orderInRoomServices_createsPendingLinesWithInvoices_andKeepsTheVisitInProgress() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        PetVisit visit = visitWithVitals(100L, VisitStatus.IN_PROGRESS);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        ClinicService vaccine = service(2L, "VAC_7B", ServiceCategory.VACCINATION, "150000.00");
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(2L))).thenReturn(List.of(vaccine));
+        stubSaveDetail();
+
+        VisitResponse response = service.orderInRoomServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(2L, 2, "Mũi 1"))));
+
+        assertThat(response.status()).isEqualTo(VisitStatus.IN_PROGRESS);
+        ArgumentCaptor<VisitServiceDetail> line = ArgumentCaptor.forClass(VisitServiceDetail.class);
+        verify(detailRepository).saveAndFlush(line.capture());
+        assertThat(line.getValue().getStatus()).isEqualTo(ServiceDetailStatus.PENDING);   // chờ "Đã thực hiện"
+        assertThat(line.getValue().getQuantity()).isEqualTo(2);
+        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoice =
+                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
+        verify(invoiceRepository).saveAndFlush(invoice.capture());
+        assertThat(invoice.getValue().getUnitPrice()).isEqualByComparingTo("150000.00");
+        verify(historyRepository, never()).save(any());   // không đổi trạng thái ca
+    }
+
+    @Test
+    void orderInRoomServices_rejectsTheExamFeeAndParaclinicalServices_andUnknownOnes() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(1L))).thenReturn(List.of(service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00")));
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(5L))).thenReturn(List.of(service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00")));
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(99L))).thenReturn(List.of());
+
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.orderInRoomServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(1L, 1, null)))));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.orderInRoomServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(5L, 1, null)))));
+        assertError(ErrorCode.SERVICE_NOT_FOUND, () -> service.orderInRoomServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(99L, 1, null)))));
+        verify(detailRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void orderInRoomServices_refusedOnALockedVisit() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        when(serviceRepository.findByIdInAndActiveTrue(List.of(4L))).thenReturn(List.of(service(4L, "DEWORM", ServiceCategory.DEWORMING, "50000.00")));
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR)));
+
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION,
+                () -> service.orderInRoomServices(100L, new OrderServicesRequest(List.of(new ServiceOrderItem(4L, 1, null)))));   // BR-27: hồ sơ đã khóa
     }
 
     // ================================================================== chốt ca (UC-33). Gọi số / Đẩy lùi / Bắt đầu GĐ 2 làm ở 3.B3, 3.B10

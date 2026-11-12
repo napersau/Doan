@@ -169,10 +169,37 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ServiceDetailResponse perform(Long detailId) {
+        Long actor = SecurityUtils.getCurrentUserId();
+        Ctx c = lockForAction(detailId);
+        assertOperator(c.detail(), true);
+        if (!c.detail().getService().getCategory().isInRoom()) {
+            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ dịch vụ thực hiện tại phòng mới bấm \"Đã thực hiện\"");
+        }
+        support.assertAssignedTo(c.visit(), actor);
+        support.assertStatus(c.visit(), VisitStatus.IN_PROGRESS, "Chỉ ghi nhận dịch vụ khi ca đang khám (IN_PROGRESS)");
+        requireDetailStatus(c.detail(), ServiceDetailStatus.PENDING, "Chỉ ghi nhận \"Đã thực hiện\" cho dịch vụ đang chờ (PENDING)");
+        setStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", actor, null);
+        setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, "Thực hiện tại phòng khám");
+        return assembler.toServiceDetail(c.detail());
+    }
+
+    @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ServiceDetailResponse cancel(Long detailId, String reason) {
         Long actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), true);
+        ServiceCategory category = c.detail().getService().getCategory();
+        if (category == ServiceCategory.EXAMINATION) {
+            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS,
+                    "Không hủy riêng phí khám: dùng \"Hủy ca / Chuyển viện\" khi khách không tiếp tục khám");
+        }
+        if (!category.isParaclinical()) {
+            // Dịch vụ tại phòng: chỉ Bác sĩ được gán, khi ca đang khám và chưa bị khóa
+            support.assertAssignedTo(c.visit(), actor);
+            support.assertStatus(c.visit(), VisitStatus.IN_PROGRESS, "Chỉ hủy được dịch vụ tại phòng khi ca đang khám (IN_PROGRESS)");
+        }
         if (!ServiceDetailStatus.OPEN.contains(c.detail().getStatus())) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS,
                     "Chỉ hủy được chỉ định đang chờ hoặc đang thực hiện");

@@ -50,6 +50,13 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success("Đã bắt đầu thực hiện", paraclinicService.start(id)));
     }
 
+    /** FR-30: Bác sĩ ghi nhận dịch vụ tại phòng "Đã thực hiện" (tiêm phòng, tẩy giun, thủ thuật...). */
+    @PostMapping("/service-details/{id}/perform")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<ServiceDetailResponse>> perform(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã ghi nhận thực hiện dịch vụ", paraclinicService.perform(id)));
+    }
+
     /** EX-08: hủy chỉ định (khách xin hủy, thiết bị sự cố, hoặc Bác sĩ đổi hướng xử lý). */
     @PostMapping("/service-details/{id}/cancel")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN','VETERINARIAN')")

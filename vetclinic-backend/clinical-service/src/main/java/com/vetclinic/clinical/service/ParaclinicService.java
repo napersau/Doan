@@ -31,6 +31,12 @@ public interface ParaclinicService {
     /** UC-25/26: thú cưng đã vào phòng, bắt đầu thực hiện. PENDING -> IN_PROGRESS. */
     ServiceDetailResponse start(Long detailId);
 
+    /**
+     * FR-30: Bác sĩ bấm "Đã thực hiện" cho dịch vụ tại phòng (PENDING -> COMPLETED; ghi lịch sử START_PROCESSING rồi COMPLETED).
+     * Chỉ Bác sĩ được gán, khi ca đang khám (IN_PROGRESS) và chưa khóa.
+     */
+    ServiceDetailResponse perform(Long detailId);
+
     /** EX-08: khách xin hủy giữa chừng, hoặc thiết bị gặp sự cố. Dịch vụ hủy không bao giờ tính tiền. */
     ServiceDetailResponse cancel(Long detailId, String reason);
 
