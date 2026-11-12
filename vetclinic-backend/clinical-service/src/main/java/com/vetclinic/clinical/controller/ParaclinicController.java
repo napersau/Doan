@@ -43,6 +43,34 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success(paraclinicService.queue(ServiceCategory.IMAGING)));
     }
 
+    /** BR-34: gọi số tiếp theo của phòng Lab (chưa đổi trạng thái chỉ định). */
+    @PostMapping("/lab-queue/call-next")
+    @PreAuthorize("hasRole('LAB_TECHNICIAN')")
+    public ResponseEntity<ApiResponse<QueueItemResponse>> labCallNext() {
+        return ResponseEntity.ok(ApiResponse.success("Đã gọi số tiếp theo", paraclinicService.callNext(ServiceCategory.LABORATORY)));
+    }
+
+    /** BR-34: gọi số tiếp theo của phòng CĐHA. */
+    @PostMapping("/imaging-queue/call-next")
+    @PreAuthorize("hasRole('IMAGING_TECHNICIAN')")
+    public ResponseEntity<ApiResponse<QueueItemResponse>> imagingCallNext() {
+        return ResponseEntity.ok(ApiResponse.success("Đã gọi số tiếp theo", paraclinicService.callNext(ServiceCategory.IMAGING)));
+    }
+
+    /** BR-34 / EX-06: khách vắng khi gọi số -> "Đẩy lùi 1 bậc" rồi gọi ngay người kế tiếp. */
+    @PostMapping("/service-details/{id}/skip")
+    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
+    public ResponseEntity<ApiResponse<QueueItemResponse>> skip(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã đẩy lùi 1 bậc", paraclinicService.skip(id)));
+    }
+
+    /** Phòng Lab: đã lấy mẫu xong (huy hiệu liên phòng cho CĐHA). */
+    @PostMapping("/service-details/{id}/sample-collected")
+    @PreAuthorize("hasRole('LAB_TECHNICIAN')")
+    public ResponseEntity<ApiResponse<ServiceDetailResponse>> sampleCollected(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã ghi nhận lấy mẫu", paraclinicService.sampleCollected(id)));
+    }
+
     /** Thú cưng đã vào phòng, bắt đầu thực hiện. */
     @PostMapping("/service-details/{id}/start")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
@@ -72,8 +100,18 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success(paraclinicService.labForm(id)));
     }
 
-    /** UC-25: nhập chỉ số xét nghiệm; hệ thống tự đối chiếu khoảng tham chiếu của loài. */
-    @PostMapping("/service-details/{id}/lab-results")
+    /** Kết quả xét nghiệm đã nhập của một chỉ định (có nhãn LOW / NORMAL / HIGH). */
+    @GetMapping("/lab-results/{id}")
+    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','VETERINARIAN','ADMIN')")
+    public ResponseEntity<ApiResponse<List<com.vetclinic.clinical.dto.response.LabResultResponse>>> getLabResults(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(paraclinicService.labResults(id)));
+    }
+
+    /**
+     * UC-25: nhập chỉ số xét nghiệm; hệ thống tự đối chiếu khoảng tham chiếu của loài. Body {@code {"results":[{"labTestItemId","resultValue"}]}}.
+     * Đường dẫn cũ {@code /service-details/{id}/lab-results} còn giữ tạm cho tới khi FE đổi (Phase 6).
+     */
+    @PostMapping({"/lab-results/{id}", "/service-details/{id}/lab-results"})
     @PreAuthorize("hasRole('LAB_TECHNICIAN')")
     public ResponseEntity<ApiResponse<ServiceDetailResponse>> labResults(@PathVariable Long id,
                                                                          @Valid @RequestBody LabResultRequest request) {
@@ -81,7 +119,7 @@ public class ParaclinicController {
     }
 
     /** UC-26: multipart/form-data gồm description, conclusion và một hoặc nhiều tệp ảnh trong phần "files". */
-    @PostMapping(path = "/service-details/{id}/imaging-result", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(path = {"/imaging-results/{id}", "/service-details/{id}/imaging-result"}, consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('IMAGING_TECHNICIAN')")
     public ResponseEntity<ApiResponse<ServiceDetailResponse>> imagingResult(
             @PathVariable Long id,

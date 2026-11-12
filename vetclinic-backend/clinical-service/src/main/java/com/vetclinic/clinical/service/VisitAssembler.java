@@ -76,6 +76,11 @@ public class VisitAssembler {
                 imagingResults.stream().map(r -> toImaging(r, attachments.getOrDefault(r.getId(), List.of()))).toList());
     }
 
+    /** Kết quả xét nghiệm của MỘT chỉ định (kèm nhãn LOW / NORMAL / HIGH tính khi hiển thị). */
+    public List<LabResultResponse> labResultsOf(Long detailId) {
+        return labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(List.of(detailId)).stream().map(this::toLab).toList();
+    }
+
     public ServiceDetailResponse toServiceDetail(VisitServiceDetail d) {
         return toServiceDetail(d, invoiceRepository.findByVisitServiceDetailId(d.getId()).orElse(null));
     }

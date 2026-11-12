@@ -1,6 +1,12 @@
 package com.vetclinic.clinical.service.impl;
 
+import com.vetclinic.clinical.client.AuthClient;
+import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.repository.ServiceLabTestItemRepository;
+import com.vetclinic.clinical.service.QueueOrders;
+import com.vetclinic.common.dto.ApiResponse;
+import com.vetclinic.common.event.PatientCalledEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.vetclinic.clinical.dto.response.ReferenceRangeResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.LabEvaluation;
@@ -45,6 +51,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -65,7 +73,17 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     private static final int MAX_FILES = 10;
 
+    private static final String ACTION_SAMPLE_COLLECTED = "SAMPLE_COLLECTED";
+    private static final String ACTION_START = "START_PROCESSING";
+    private static final String ACTION_SKIPPED = "SKIPPED";
+    private static final String CALLED = "CALLED";
+    private static final String PUSHED_BACK = "PUSHED_BACK";
+
     private final VisitServiceDetailRepository detailRepository;
+    private final VisitServiceDetailHistoryRepository detailHistoryRepository;
+    private final AuthClient authClient;
+    private final ApplicationEventPublisher eventPublisher;
+    private final Clock clock;
     private final PetVisitRepository visitRepository;
     private final LabTestItemRepository labTestItemRepository;
     private final LabTestReferenceRangeRepository rangeRepository;
@@ -79,6 +97,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     private final TransactionTemplate readCommittedTemplate;
 
     public ParaclinicServiceImpl(VisitServiceDetailRepository detailRepository,
+                                 VisitServiceDetailHistoryRepository detailHistoryRepository, AuthClient authClient,
+                                 ApplicationEventPublisher eventPublisher, Clock clock,
                                  PetVisitRepository visitRepository, LabTestItemRepository labTestItemRepository,
                                  LabTestReferenceRangeRepository rangeRepository,
                                  ServiceLabTestItemRepository serviceLabItemRepository,
@@ -88,6 +108,10 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                                  VisitAssembler assembler, ImagingStorage storage,
                                  PlatformTransactionManager transactionManager) {
         this.detailRepository = detailRepository;
+        this.detailHistoryRepository = detailHistoryRepository;
+        this.authClient = authClient;
+        this.eventPublisher = eventPublisher;
+        this.clock = clock;
         this.visitRepository = visitRepository;
         this.labTestItemRepository = labTestItemRepository;
         this.rangeRepository = rangeRepository;
@@ -110,10 +134,18 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     @Transactional(readOnly = true)
     public List<QueueItemResponse> queue(ServiceCategory category) {
+        requireParaclinical(category);
+        return toItems(category, detailRepository.findQueue(category, ServiceDetailStatus.OPEN));
+    }
+
+    private static void requireParaclinical(ServiceCategory category) {
         if (!category.isParaclinical()) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Chỉ có hàng đợi cho xét nghiệm và chẩn đoán hình ảnh");
         }
-        List<VisitServiceDetail> details = detailRepository.findQueue(category, ServiceDetailStatus.OPEN);
+    }
+
+    /** Giữ nguyên thứ tự của {@code details} (truy vấn đã xếp theo hàng đợi). */
+    private List<QueueItemResponse> toItems(ServiceCategory category, List<VisitServiceDetail> details) {
         if (details.isEmpty()) {
             return List.of();
         }
@@ -122,8 +154,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                 .collect(Collectors.toMap(PetVisit::getId, v -> v));
         Map<Long, List<VisitServiceDetail>> siblings = detailRepository.findByVisitIdInOrderByIdAsc(visitIds).stream()
                 .collect(Collectors.groupingBy(VisitServiceDetail::getVisitId));
+        Map<Long, String> latestAction = latestActions(siblings.values().stream().flatMap(List::stream)
+                .map(VisitServiceDetail::getId).toList());
 
-        ServiceCategory other = category == ServiceCategory.LABORATORY ? ServiceCategory.IMAGING : ServiceCategory.LABORATORY;
         return details.stream()
                 .filter(d -> visits.containsKey(d.getVisitId()))
                 .map(d -> {
@@ -131,26 +164,148 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     return new QueueItemResponse(d.getId(), v.getId(), v.getVisitCode(), v.getPet().getId(),
                             v.getPet().getName(), v.getPet().getSpecies().getName(), d.getService().getId(),
                             d.getService().getName(), category, v.isEmergency(), d.getStatus(), d.getSkipCount(),
-                            otherRoomStatus(other, siblings.getOrDefault(d.getVisitId(), List.of())),
+                            category == ServiceCategory.LABORATORY ? labStage(d, latestAction.get(d.getId())) : null,
+                            category == ServiceCategory.IMAGING
+                                    ? labBadge(siblings.getOrDefault(d.getVisitId(), List.of()), latestAction) : null,
                             d.getNotes(), d.getCreatedAt());
                 })
-                .toList();   // đã đúng thứ tự hàng đợi từ truy vấn: (cấp cứu chưa bị lùi) rồi queue_order
+                .toList();
     }
 
-    /** FR-36: huy hiệu liên phòng, vd. "LAB_IN_PROGRESS" khi thú cưng đang lấy máu bên phòng Lab. */
-    private static String otherRoomStatus(ServiceCategory other, List<VisitServiceDetail> siblings) {
-        List<VisitServiceDetail> inOtherRoom = siblings.stream().filter(s -> s.getService().getCategory() == other).toList();
-        if (inOtherRoom.isEmpty()) {
+    /** action mới nhất của từng chỉ định (lịch sử luôn có dòng ORDERED đầu tiên). */
+    private Map<Long, String> latestActions(List<Long> detailIds) {
+        Map<Long, String> latest = new java.util.HashMap<>();
+        for (VisitServiceDetailHistory h : detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(detailIds)) {
+            latest.put(h.getVisitServiceDetailId(), h.getAction());   // đã sắp theo id tăng dần: dòng cuối thắng
+        }
+        return latest;
+    }
+
+    /** Trạng thái con của dịch vụ Lab: QUEUED (ORDERED/SKIPPED) / SAMPLING (START_PROCESSING) / ANALYZING (SAMPLE_COLLECTED). */
+    static String labStage(VisitServiceDetail d, String latestAction) {
+        if (d.getStatus() == ServiceDetailStatus.PENDING) {
+            return "QUEUED";
+        }
+        if (d.getStatus() != ServiceDetailStatus.IN_PROGRESS) {
             return null;
         }
-        String prefix = other == ServiceCategory.LABORATORY ? "LAB" : "IMAGING";
-        if (inOtherRoom.stream().anyMatch(s -> s.getStatus() == ServiceDetailStatus.IN_PROGRESS)) {
-            return prefix + "_IN_PROGRESS";
+        return ACTION_SAMPLE_COLLECTED.equals(latestAction) ? "ANALYZING" : "SAMPLING";
+    }
+
+    /**
+     * EX-09 / FR-36: huy hiệu liên phòng trên hàng đợi CĐHA. SAMPLING nếu có dịch vụ Lab của ca đang lấy mẫu; SAMPLE_COLLECTED nếu
+     * các dịch vụ Lab đang làm đều đã lấy mẫu xong (sẵn sàng chụp); null nếu không có dịch vụ Lab IN_PROGRESS.
+     */
+    static String labBadge(List<VisitServiceDetail> siblings, Map<Long, String> latestAction) {
+        boolean anyLab = false;
+        for (VisitServiceDetail s : siblings) {
+            if (s.getService().getCategory() == ServiceCategory.LABORATORY && s.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
+                anyLab = true;
+                if (!ACTION_SAMPLE_COLLECTED.equals(latestAction.getOrDefault(s.getId(), ACTION_START))) {
+                    return "SAMPLING";
+                }
+            }
         }
-        if (inOtherRoom.stream().anyMatch(s -> s.getStatus() == ServiceDetailStatus.PENDING)) {
-            return prefix + "_PENDING";
+        return anyLab ? "SAMPLE_COLLECTED" : null;
+    }
+
+    // ================================================================== Gọi số / Đẩy lùi (BR-34)
+
+    @Override
+    public QueueItemResponse callNext(ServiceCategory category) {
+        requireParaclinical(category);
+        Long actor = SecurityUtils.getCurrentUserId();
+        assertTechnicianOf(category);
+        String room = roomOf(actor);   // Feign NGOÀI transaction
+        return readCommittedTemplate.execute(tx -> {
+            List<VisitServiceDetail> pending = detailRepository.findQueue(category, List.of(ServiceDetailStatus.PENDING));
+            if (pending.isEmpty()) {
+                throw new AppException(ErrorCode.QUEUE_EMPTY);
+            }
+            VisitServiceDetail head = pending.get(0);
+            publishCalled(head, visitWithPet(head.getVisitId()), CALLED, actor, room, category);   // chưa đổi trạng thái (Q3)
+            return toItems(category, List.of(head)).get(0);
+        });
+    }
+
+    @Override
+    public QueueItemResponse skip(Long detailId) {
+        Long actor = SecurityUtils.getCurrentUserId();
+        VisitServiceDetail preview = detailRepository.findById(detailId)
+                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
+        ServiceCategory category = preview.getService().getCategory();
+        requireParaclinical(category);
+        assertTechnicianOf(category);
+        String room = roomOf(actor);
+        return readCommittedTemplate.execute(tx -> {
+            VisitServiceDetail detail = detailRepository.findByIdForUpdate(detailId)   // khóa dòng chống hai người cùng đẩy lùi
+                    .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
+            requireDetailStatus(detail, ServiceDetailStatus.PENDING, "Chỉ đẩy lùi được chỉ định đang chờ trong hàng đợi (PENDING)");
+            List<VisitServiceDetail> queue = detailRepository.findQueue(category, List.of(ServiceDetailStatus.PENDING));
+            int index = indexOf(queue, detailId);
+            Map<Long, PetVisit> visits = visitRepository.findWithPetByIdIn(
+                            queue.stream().map(VisitServiceDetail::getVisitId).distinct().toList()).stream()
+                    .collect(Collectors.toMap(PetVisit::getId, v -> v));
+            Long newOrder = QueueOrders.afterPushBack(queue.stream()
+                    .map(q -> new QueueOrders.Entry(q.getQueueOrder(),
+                            visits.get(q.getVisitId()).isEmergency() && q.getSkipCount() == 0)).toList(), index);
+
+            detail.setSkipCount(detail.getSkipCount() + 1);   // không giới hạn số lần; ca cấp cứu đã bị lùi xếp như ca thường
+            if (newOrder != null) {
+                detail.setQueueOrder(newOrder);
+            }
+            detailRepository.save(detail);
+            // Dịch vụ giữ PENDING (khách quay lại chỉ chờ tới lượt); ghi vết để biết đã bị lùi
+            support.recordDetail(detailId, ServiceDetailStatus.PENDING, ServiceDetailStatus.PENDING, ACTION_SKIPPED, actor,
+                    "Vắng mặt khi gọi số: đẩy lùi 1 bậc");
+            publishCalled(detail, visits.get(detail.getVisitId()), PUSHED_BACK, actor, room, category);
+
+            if (newOrder == null) {
+                return toItems(category, List.of(detail)).get(0);   // không còn ai phía sau: giữ nguyên vị trí
+            }
+            VisitServiceDetail next = queue.get(index + 1);   // người kế tiếp lên đầu và được gọi ngay
+            publishCalled(next, visits.get(next.getVisitId()), CALLED, actor, room, category);
+            return toItems(category, List.of(next)).get(0);
+        });
+    }
+
+    private static int indexOf(List<VisitServiceDetail> queue, Long detailId) {
+        for (int i = 0; i < queue.size(); i++) {
+            if (queue.get(i).getId().equals(detailId)) {
+                return i;
+            }
         }
-        return prefix + "_DONE";
+        throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ định này không nằm trong hàng đợi");
+    }
+
+    private PetVisit visitWithPet(Long visitId) {
+        return visitRepository.findWithPetById(visitId).orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
+    }
+
+    private void publishCalled(VisitServiceDetail d, PetVisit v, String action, Long actor, String room, ServiceCategory category) {
+        eventPublisher.publishEvent(new PatientCalledEvent(UUID.randomUUID(), clock.instant(), actor, action,
+                category == ServiceCategory.LABORATORY ? "LAB" : "IMAGING", v.getId(), v.getVisitCode(), v.getPet().getId(),
+                v.getDoctorId(), d.getId(), room, d.getSkipCount()));
+    }
+
+    /** Số phòng của kỹ thuật viên để hiển thị khi gọi số; không tra được thì bỏ trống, không làm hỏng việc gọi số. */
+    private String roomOf(Long userId) {
+        try {
+            ApiResponse<UserSummaryResponse> response = authClient.getUser(userId);
+            return response == null || response.getData() == null ? null : response.getData().roomNumber();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Chỉ kỹ thuật viên của đúng phòng mới gọi số / đẩy lùi trong hàng đợi phòng đó. */
+    private static void assertTechnicianOf(ServiceCategory category) {
+        RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+        boolean ok = (category == ServiceCategory.LABORATORY && role == RoleCode.LAB_TECHNICIAN)
+                || (category == ServiceCategory.IMAGING && role == RoleCode.IMAGING_TECHNICIAN);
+        if (!ok) {
+            throw new AppException(ErrorCode.ACCESS_DENIED);
+        }
     }
 
     // ================================================================== thao tác trên một chỉ định
@@ -164,6 +319,26 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         requireDetailStatus(c.detail(), ServiceDetailStatus.PENDING, "Chỉ bắt đầu thực hiện được chỉ định đang chờ (PENDING)");
         requireVisitWaitingResults(c.visit());
         setStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", actor, null);
+        return assembler.toServiceDetail(c.detail());
+    }
+
+    @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ServiceDetailResponse sampleCollected(Long detailId) {
+        Long actor = SecurityUtils.getCurrentUserId();
+        Ctx c = lockForAction(detailId);
+        assertOperator(c.detail(), false);
+        if (c.detail().getService().getCategory() != ServiceCategory.LABORATORY) {
+            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ xét nghiệm mới có bước lấy mẫu");
+        }
+        requireDetailStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "Phải bắt đầu thực hiện (lấy mẫu) trước khi ghi nhận đã lấy mẫu");
+        requireVisitWaitingResults(c.visit());
+        if (ACTION_SAMPLE_COLLECTED.equals(latestActions(List.of(detailId)).get(detailId))) {
+            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Đã ghi nhận lấy mẫu cho chỉ định này rồi");
+        }
+        // Trạng thái vẫn IN_PROGRESS; "đang phân tích" suy ra từ action mới nhất
+        support.recordDetail(detailId, ServiceDetailStatus.IN_PROGRESS, ServiceDetailStatus.IN_PROGRESS, ACTION_SAMPLE_COLLECTED,
+                actor, null);
         return assembler.toServiceDetail(c.detail());
     }
 
@@ -239,6 +414,17 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<com.vetclinic.clinical.dto.response.LabResultResponse> labResults(Long detailId) {
+        VisitServiceDetail detail = detailRepository.findById(detailId)
+                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
+        if (detail.getService().getCategory() != ServiceCategory.LABORATORY) {
+            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ định này không phải xét nghiệm");
+        }
+        return assembler.labResultsOf(detailId);
+    }
+
+    @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ServiceDetailResponse submitLabResults(Long detailId, LabResultRequest request) {
         Long actor = SecurityUtils.getCurrentUserId();
@@ -251,7 +437,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                 "Phải bắt đầu thực hiện (IN_PROGRESS) trước khi nhập kết quả");
         requireVisitWaitingResults(c.visit());
 
-        List<Long> itemIds = request.items().stream().map(LabResultItemRequest::labTestItemId).toList();
+        List<Long> itemIds = request.results().stream().map(LabResultItemRequest::labTestItemId).toList();
         if (new HashSet<>(itemIds).size() != itemIds.size()) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Mỗi chỉ số chỉ được nhập một lần");
         }
@@ -263,7 +449,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         Long speciesId = c.visit().getPet().getSpecies().getId();
 
         List<LabTestResult> results = new ArrayList<>();
-        for (LabResultItemRequest item : request.items()) {
+        for (LabResultItemRequest item : request.results()) {
             LabTestItem labItem = items.get(item.labTestItemId());
             if (labItem == null) {
                 throw new AppException(ErrorCode.LAB_ITEM_NOT_FOUND);
@@ -278,13 +464,22 @@ public class ParaclinicServiceImpl implements ParaclinicService {
             results.add(LabTestResult.builder()
                     .visitServiceDetailId(detailId)
                     .labTestItem(labItem)
-                    .resultValue(item.value())
+                    .resultValue(item.resultValue())
                     // BR-24: snapshot khoảng tham chiếu để kết quả cũ không đổi nếu Admin chỉnh cấu hình về sau
                     .minValueSnapshot(range.getMinValue())
                     .maxValueSnapshot(range.getMaxValue())
                     .performedBy(actor)
                     .notes(blankToNull(item.notes()))
                     .build());
+        }
+        // Gói xét nghiệm có chỉ số nào thì phải nhập đủ chỉ số đó (dịch vụ chưa cấu hình gói thì không áp dụng)
+        Set<Long> missing = new HashSet<>(allowed);
+        missing.removeAll(items.keySet());
+        if (!missing.isEmpty()) {
+            String codes = labTestItemRepository.findAllById(missing).stream().map(LabTestItem::getCode).sorted()
+                    .collect(Collectors.joining(", "));
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Phải nhập đủ các chỉ số của gói xét nghiệm, còn thiếu: "
+                    + (codes.isEmpty() ? missing.toString() : codes));
         }
         labResultRepository.saveAll(results);
 

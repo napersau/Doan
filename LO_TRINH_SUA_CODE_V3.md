@@ -12,7 +12,7 @@
 | **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
 | **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
 | **Phase 2** `appointment-service` | ✅ **ĐÃ XONG** (12/11/2026) | Khối A + B xong; 68 test pass + chạy thật trên schema v3.0 |
-| Phase 3 `clinical-service` | 🟨 **ĐANG LÀM** — **Khối A ✅ xong (12/11)**; **Khối B: 3.B1–3.B5 ✅ xong (12/11)**, 3.B6–3.B14 chưa | **Bước kế tiếp: 3.B6 (hàng đợi Lab/CĐHA: call-next, skip, sample-collected, huy hiệu `labStatus`)** |
+| Phase 3 `clinical-service` | 🟨 **ĐANG LÀM** — **Khối A ✅ xong (12/11)**; **Khối B: 3.B1–3.B8 ✅ xong (12/11)**, 3.B9–3.B14 chưa | **Bước kế tiếp: 3.B9 (T06: `WAITING_RESULTS → RESULTS_READY` + Q5 + `ParaclinicalResultsReadyEvent`)** |
 | Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
 | Phase 5 `notification-service` | ⬜ chưa làm | |
 | Phase 6 Gateway + FE | ⬜ chưa làm | |
@@ -155,6 +155,7 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 > - **3.B6:** `postpone`/`recall` và `QueueState` đã bị xóa ở 3.A3; bước này chỉ còn **thêm** `call-next`, `skip` (`SKIPPED`), `sample-collected`, huy hiệu `labStatus`. `VisitServiceDetailRepository.findQueue` đã sắp đúng `(cấp cứu chưa lùi) DESC, queue_order`.
 > - **3.B8:** phần lõi đã làm ở 3.A5 (`cancelInvoiceOf`, `CLIN_1310`); bước này còn lại: API hủy dịch vụ tại phòng và test EX-08 qua API.
 > - **3.B9 / 3.B10:** `VisitSupport.evaluateParaclinicalCompletion` vẫn phát `DoctorPriorityCallbackEvent` và `closeVisit`/`abandon` vẫn phát `VisitClosedToPaymentEvent` + `reopen` vẫn gọi `BillingClient` (cả ba là v2, billing v2 chưa chạy được trên schema mới cho tới Phase 4). Đổi sang `ParaclinicalResultsReadyEvent` (kèm Q5: `queue_order = MIN − 1`) và bỏ gọi billing ở các bước này.
+> - **3.B6–3.B8 (đã làm):** `POST /lab-queue/call-next`, `/imaging-queue/call-next`, `POST /service-details/{id}/skip` (Q4, `action=SKIPPED`, chỉ định giữ `PENDING`), `POST /service-details/{id}/sample-collected` (action `SAMPLE_COLLECTED`, trạng thái vẫn `IN_PROGRESS`). `QueueItemResponse` đổi `otherRoomStatus` → `stage` (chỉ Lab: `QUEUED/SAMPLING/ANALYZING`, suy ra từ action mới nhất) + `labStatus` (chỉ hàng đợi CĐHA: `SAMPLING/SAMPLE_COLLECTED`). Kết quả: `POST/GET /lab-results/{detailId}` (body `{results:[{labTestItemId, resultValue}]}`, vẫn nhận `items`/`value`; gói đã cấu hình phải đủ chỉ số, thiếu → `SYS_1001`) và `POST /imaging-results/{detailId}` (multipart). **Đường dẫn cũ `/service-details/{id}/lab-results` và `/imaging-result` còn giữ làm bí danh** tới khi FE đổi (Phase 6/7.1 xóa). 3.B8 (hủy CLS kèm hóa đơn, `CLIN_1310`) đã xong từ Khối A.
 > - **3.B1:** `CheckInRequest` vẫn dùng trường `emergency` và chưa có `doctorId`; `VisitCheckedInEvent` chưa có `doctorId`.
 > - **FE (Phase 6) bị ảnh hưởng bởi hình dạng response mới:** `VisitResponse` (bỏ `callbackPostponed`, `scheduledAt`; thêm `skipCount`, `queueOrder`), `QueueItemResponse` (`queueState` → `skipCount`), `ServiceDetailResponse` (thêm `vatRate`, `invoiceId`, `invoiceCode`, `paymentStatus`), `ServiceResponse`/request dịch vụ (thêm `vatRate`), request thú cưng (bỏ `weight`, response vẫn có `weight` suy ra).
 
@@ -167,9 +168,9 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 | [x] **3.B3** | Gọi số + Đẩy lùi (phòng khám) | `POST /call-next` (`CLIN_1302`/`CLIN_1303`, `PatientCalledEvent`), `POST /{id}/skip` — công thức Q4 (3 trường hợp), dùng `@Version` | Task 3.3.2c–d; test đủ 3 trường hợp công thức |
 | [x] **3.B4** | Bắt đầu khám (T02) | kiểm tra đúng bác sĩ được gán (`CLIN_1311`), không có ca `IN_PROGRESS`; tự tạo dịch vụ `EXAM_GEN` + hóa đơn; `PUT /{id}/clinical-info` | Task 3.3.3–3.3.4 |
 | [x] **3.B5** | Chỉ định CLS (T04) + dịch vụ tại phòng | `paraclinical-orders`: kiểm `weight/temperature` (`CLIN_1308`), dịch vụ tại phòng xong (`CLIN_1309`); `in-room-services`; `service-details/{id}/perform`; ca → `WAITING_RESULTS` | Task 3.4 |
-| [ ] **3.B6** | Hàng đợi Lab/CĐHA | `lab-queue`/`imaging-queue` sắp theo `queue_order`; `call-next`, `service-details/{id}/skip` (`action=SKIPPED`), `start`, `sample-collected`, huy hiệu liên phòng `labStatus`; **xóa** `postpone`/`recall`/tab hoãn | Task 3.5, 3.6 |
-| [ ] **3.B7** | Kết quả CLS | Lab: bắt buộc đủ chỉ số của gói (`service_lab_test_items`); CĐHA multipart giữ nguyên | Task 3.5, 3.6 |
-| [ ] **3.B8** | Hủy dịch vụ CLS (EX-08) | hủy dịch vụ ⇒ hóa đơn `CANCELLED` cùng giao dịch; `CLIN_1310` nếu hóa đơn đã `PAID` | Task 3.5/EX-08 |
+| [x] **3.B6** | Hàng đợi Lab/CĐHA | `lab-queue`/`imaging-queue` sắp theo `queue_order`; `call-next`, `service-details/{id}/skip` (`action=SKIPPED`), `start`, `sample-collected`, huy hiệu liên phòng `labStatus`; **xóa** `postpone`/`recall`/tab hoãn | Task 3.5, 3.6 |
+| [x] **3.B7** | Kết quả CLS | Lab: bắt buộc đủ chỉ số của gói (`service_lab_test_items`); CĐHA multipart giữ nguyên | Task 3.5, 3.6 |
+| [x] **3.B8** | Hủy dịch vụ CLS (EX-08) | hủy dịch vụ ⇒ hóa đơn `CANCELLED` cùng giao dịch; `CLIN_1310` nếu hóa đơn đã `PAID` | Task 3.5/EX-08 |
 | [ ] **3.B9** | `WAITING_RESULTS → RESULTS_READY` (T06, Q5) | **khóa dòng `pet_visits` trước rồi mới đếm** (bài học đua); đặt `queue_order = MIN − 1`, `skip_count = 0`, history `changed_by = NULL`; phát `ParaclinicalResultsReadyEvent` | Task 3.7 |
 | [ ] **3.B10** | GĐ 2 + chốt ca | `start-phase2` (T07); `close-visit` (T05/T09): chỉ validate, ghi lịch sử, **bỏ** gọi billing và `VisitClosedToPaymentEvent` | Task 3.8 |
 | [ ] **3.B11** | Thoát ca | `abandon` (T08/T12: hủy CLS `PENDING` kèm hóa đơn, giữ công nợ), `cancel-exam` (T11, guard chưa có dịch vụ tại phòng `COMPLETED`), `cancel` (T03), `reopen` (T14: bác sĩ **hoặc ADMIN**, bỏ Feign hủy hóa đơn billing) | Task 3.8, EX-03/11 |

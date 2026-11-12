@@ -7,7 +7,11 @@ import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.LabResultItemRequest;
 import com.vetclinic.clinical.dto.request.LabResultRequest;
+import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.dto.response.QueueItemResponse;
+import com.vetclinic.clinical.dto.response.UserSummaryResponse;
+import com.vetclinic.common.dto.ApiResponse;
+import com.vetclinic.common.event.PatientCalledEvent;
 import com.vetclinic.clinical.dto.response.ServiceDetailResponse;
 import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.entity.ImagingResult;
@@ -107,6 +111,8 @@ class ParaclinicServiceImplTest {
     private ImagingStorage storage;
     @Mock
     private ApplicationEventPublisher publisher;
+    @Mock
+    private AuthClient authClient;
 
     private ParaclinicServiceImpl service;
 
@@ -118,7 +124,8 @@ class ParaclinicServiceImplTest {
                 attachmentRepository, invoiceRepository, new VisitTimeline(historyRepository));
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new ParaclinicServiceImpl(detailRepository, visitRepository,
+        service = new ParaclinicServiceImpl(detailRepository, detailHistoryRepository, authClient, publisher, CLOCK,
+                visitRepository,
                 labTestItemRepository, rangeRepository, serviceLabItemRepository, labResultRepository, imagingResultRepository,
                 attachmentRepository, support, assembler, storage, tm);
     }
@@ -131,38 +138,250 @@ class ParaclinicServiceImplTest {
     // ================================================================== hàng đợi
 
     @Test
-    void queue_keepsTheRepositoryOrder_exposesSkipCountAndShowsTheCrossRoomBadge() {
+    void queue_keepsTheRepositoryOrder_exposesSkipCountAndTheLabStage() {
         PetVisit normal = visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR);
         PetVisit emergency = visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR);
         emergency.setEmergency(true);
         PetVisit pushedBack = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
 
-        VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.PENDING);
+        VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.IN_PROGRESS);
         VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
         VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
         d3.setSkipCount(2);   // đã bị "Đẩy lùi 1 bậc" hai lần: vẫn nằm trong hàng đợi, chỉ hiển thị số lần
-        // Cùng đợt khám 10 còn có chỉ định siêu âm đang thực hiện bên phòng CĐHA
-        VisitServiceDetail imagingSibling = detail(9L, 10L, ULTRASOUND, ServiceDetailStatus.IN_PROGRESS);
 
         // Thứ tự do truy vấn quyết định ((cấp cứu AND skip_count = 0) DESC, queue_order ASC): service giữ nguyên, không tự sắp lại
         when(detailRepository.findQueue(ServiceCategory.LABORATORY, ServiceDetailStatus.OPEN)).thenReturn(List.of(d2, d1, d3));
         when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(normal, emergency, pushedBack));
-        when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(d1, d2, d3, imagingSibling));
+        when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(d1, d2, d3));
+        // d1 đã lấy mẫu xong (đang phân tích); d2, d3 mới chỉ định / đã bị đẩy lùi
+        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
+                history(1L, "ORDERED"), history(2L, "ORDERED"), history(3L, "ORDERED"), history(1L, "START_PROCESSING"),
+                history(3L, "SKIPPED"), history(1L, "SAMPLE_COLLECTED")));
 
         List<QueueItemResponse> queue = service.queue(ServiceCategory.LABORATORY);
 
         assertThat(queue).extracting(QueueItemResponse::serviceDetailId).containsExactly(2L, 1L, 3L);
         assertThat(queue).extracting(QueueItemResponse::skipCount).containsExactly(0, 0, 2);
         assertThat(queue.get(0).emergency()).isTrue();
-        // Huy hiệu liên phòng (FR-36): ca 10 đang được siêu âm bên phòng CĐHA
-        assertThat(queue.stream().filter(i -> i.serviceDetailId() == 1L).findFirst().orElseThrow().otherRoomStatus())
-                .isEqualTo("IMAGING_IN_PROGRESS");
-        assertThat(queue.stream().filter(i -> i.serviceDetailId() == 2L).findFirst().orElseThrow().otherRoomStatus()).isNull();
+        assertThat(queue).extracting(QueueItemResponse::stage).containsExactly("QUEUED", "ANALYZING", "QUEUED");
+        assertThat(queue).extracting(QueueItemResponse::labStatus).containsOnlyNulls();   // huy hiệu liên phòng chỉ có ở hàng đợi CĐHA
+    }
+
+    private static VisitServiceDetailHistory history(long detailId, String action) {
+        return VisitServiceDetailHistory.builder().visitServiceDetailId(detailId).action(action)
+                .toStatus(ServiceDetailStatus.PENDING).changedByUserId(LAB_TECH).build();
+    }
+
+    @Test
+    void imagingQueue_showsTheCrossRoomLabBadge_samplingThenSampleCollected_EX09() {
+        PetVisit sampling = visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        PetVisit collected = visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        PetVisit noLab = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        VisitServiceDetail img1 = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        VisitServiceDetail img2 = detail(2L, 11L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        VisitServiceDetail img3 = detail(3L, 12L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        VisitServiceDetail lab1 = detail(4L, 10L, CBC, ServiceDetailStatus.IN_PROGRESS);
+        VisitServiceDetail lab2 = detail(5L, 11L, CBC, ServiceDetailStatus.IN_PROGRESS);
+        when(detailRepository.findQueue(ServiceCategory.IMAGING, ServiceDetailStatus.OPEN)).thenReturn(List.of(img1, img2, img3));
+        when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(sampling, collected, noLab));
+        when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(img1, img2, img3, lab1, lab2));
+        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
+                history(4L, "START_PROCESSING"), history(5L, "START_PROCESSING"), history(5L, "SAMPLE_COLLECTED")));
+
+        List<QueueItemResponse> queue = service.queue(ServiceCategory.IMAGING);
+
+        assertThat(queue).extracting(QueueItemResponse::labStatus).containsExactly("SAMPLING", "SAMPLE_COLLECTED", null);
+        assertThat(queue).extracting(QueueItemResponse::stage).containsOnlyNulls();   // stage chỉ dành cho phòng Lab
     }
 
     @Test
     void queue_ofANonParaclinicalCategory_isRejected() {
         assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.queue(ServiceCategory.VACCINATION));
+    }
+
+    // ================================================================== Gọi số / Đẩy lùi (BR-34)
+
+    private List<PetVisit> stubQueue(ServiceCategory category, List<VisitServiceDetail> queue, PetVisit... visits) {
+        when(detailRepository.findQueue(category, List.of(ServiceDetailStatus.PENDING))).thenReturn(queue);
+        when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(visits));
+        lenient().when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(queue);
+        lenient().when(authClient.getUser(LAB_TECH)).thenReturn(ApiResponse.success(
+                new UserSummaryResponse(LAB_TECH, "KTV Minh", "0922222222", RoleCode.LAB_TECHNICIAN, "P201", "ACTIVE")));
+        return List.of(visits);
+    }
+
+    private PatientCalledEvent[] publishedCalls(int expected) {
+        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+        verify(publisher, org.mockito.Mockito.times(expected)).publishEvent(events.capture());
+        return events.getAllValues().stream().map(PatientCalledEvent.class::cast).toArray(PatientCalledEvent[]::new);
+    }
+
+    @Test
+    void callNext_picksTheHeadOfThePendingQueue_publishesTheCall_andDoesNotChangeStatus() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.PENDING);
+        VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
+        stubQueue(ServiceCategory.LABORATORY, List.of(d1, d2), visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR),
+                visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR));
+        when(visitRepository.findWithPetById(10L)).thenReturn(Optional.of(visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR)));
+
+        QueueItemResponse called = service.callNext(ServiceCategory.LABORATORY);
+
+        assertThat(called.serviceDetailId()).isEqualTo(1L);
+        assertThat(d1.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);   // Q3: gọi trước, đổi trạng thái sau (khi bấm "Bắt đầu")
+        PatientCalledEvent event = publishedCalls(1)[0];
+        assertThat(event.action()).isEqualTo("CALLED");
+        assertThat(event.station()).isEqualTo("LAB");
+        assertThat(event.serviceDetailId()).isEqualTo(1L);
+        assertThat(event.roomNumber()).isEqualTo("P201");
+        assertThat(event.doctorId()).isEqualTo(DOCTOR);
+        verify(detailHistoryRepository, never()).save(any());
+    }
+
+    @Test
+    void callNext_emptyQueue_CLIN_1303_andWrongRoleIsDenied() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        when(detailRepository.findQueue(ServiceCategory.LABORATORY, List.of(ServiceDetailStatus.PENDING))).thenReturn(List.of());
+        assertError(ErrorCode.QUEUE_EMPTY, () -> service.callNext(ServiceCategory.LABORATORY));
+        // Kỹ thuật viên Lab không gọi số phòng CĐHA, và ngược lại
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.callNext(ServiceCategory.IMAGING));
+        loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.callNext(ServiceCategory.LABORATORY));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.callNext(ServiceCategory.VACCINATION));
+        verify(publisher, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void skip_inTheMiddle_pushesBackBetweenTheNextTwo_keepsPending_logsSkipped_andCallsTheNextOne() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.PENDING);
+        VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
+        VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
+        long o2 = d2.getQueueOrder();
+        long o3 = d3.getQueueOrder();
+        stubQueue(ServiceCategory.LABORATORY, List.of(d1, d2, d3), visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR),
+                visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR), visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR));
+        when(detailRepository.findById(1L)).thenReturn(Optional.of(d1));
+        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d1));
+
+        QueueItemResponse called = service.skip(1L);
+
+        assertThat(d1.getSkipCount()).isEqualTo(1);
+        assertThat(d1.getQueueOrder()).isEqualTo((o2 + o3) / 2);   // Q4: trung bình cộng của hai người kế tiếp
+        assertThat(d1.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);
+        assertThat(called.serviceDetailId()).isEqualTo(2L);   // gọi ngay người kế tiếp
+        ArgumentCaptor<VisitServiceDetailHistory> audit = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
+        verify(detailHistoryRepository).save(audit.capture());
+        assertThat(audit.getValue().getAction()).isEqualTo("SKIPPED");
+        assertThat(audit.getValue().getFromStatus()).isEqualTo(ServiceDetailStatus.PENDING);
+        assertThat(audit.getValue().getToStatus()).isEqualTo(ServiceDetailStatus.PENDING);
+        PatientCalledEvent[] events = publishedCalls(2);
+        assertThat(events[0].action()).isEqualTo("PUSHED_BACK");
+        assertThat(events[0].serviceDetailId()).isEqualTo(1L);
+        assertThat(events[0].skipCount()).isEqualTo(1);
+        assertThat(events[1].action()).isEqualTo("CALLED");
+        assertThat(events[1].serviceDetailId()).isEqualTo(2L);
+    }
+
+    @Test
+    void skip_nobodyBehind_keepsThePosition_butStillCountsTheSkip() {
+        loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
+        VisitServiceDetail d1 = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        long before = d1.getQueueOrder();
+        stubQueue(ServiceCategory.IMAGING, List.of(d1), visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR));
+        when(detailRepository.findById(1L)).thenReturn(Optional.of(d1));
+        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d1));
+
+        QueueItemResponse result = service.skip(1L);
+
+        assertThat(d1.getSkipCount()).isEqualTo(1);
+        assertThat(d1.getQueueOrder()).isEqualTo(before);   // không còn ai phía sau: giữ nguyên vị trí
+        assertThat(result.serviceDetailId()).isEqualTo(1L);
+        PatientCalledEvent[] events = publishedCalls(1);
+        assertThat(events[0].action()).isEqualTo("PUSHED_BACK");
+        assertThat(events[0].station()).isEqualTo("IMAGING");
+    }
+
+    @Test
+    void skip_emergencyHeadWhoseNextIsAnotherUnskippedEmergency_goesJustBeforeTheFirstRegular() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        PetVisit e1 = visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        e1.setEmergency(true);
+        PetVisit e2 = visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        e2.setEmergency(true);
+        PetVisit r1 = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.PENDING);
+        VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
+        VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
+        stubQueue(ServiceCategory.LABORATORY, List.of(d1, d2, d3), e1, e2, r1);
+        when(detailRepository.findById(1L)).thenReturn(Optional.of(d1));
+        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d1));
+
+        service.skip(1L);
+
+        assertThat(d1.getQueueOrder()).isEqualTo(d3.getQueueOrder() - 1);   // ca cấp cứu bị lùi mất ưu tiên: xếp ngay trước ca thường đầu tiên
+        assertThat(d1.getSkipCount()).isEqualTo(1);
+    }
+
+    @Test
+    void skip_refusedWhenNotPending_orForTheWrongRoom() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        VisitServiceDetail started = detail(1L, 10L, CBC, ServiceDetailStatus.IN_PROGRESS);
+        when(detailRepository.findById(1L)).thenReturn(Optional.of(started));
+        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(started));
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.skip(1L));   // đã vào phòng thì không đẩy lùi
+
+        VisitServiceDetail imaging = detail(2L, 11L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        when(detailRepository.findById(2L)).thenReturn(Optional.of(imaging));
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.skip(2L));   // KTV Lab không đẩy lùi hàng đợi CĐHA
+
+        VisitServiceDetail inRoom = detail(3L, 12L, DEWORM_SVC, ServiceDetailStatus.PENDING);
+        when(detailRepository.findById(3L)).thenReturn(Optional.of(inRoom));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.skip(3L));   // dịch vụ tại phòng không có hàng đợi
+        assertError(ErrorCode.SERVICE_DETAIL_NOT_FOUND, () -> service.skip(99L));
+        verify(publisher, never()).publishEvent(any(Object.class));
+    }
+
+    // ================================================================== lấy mẫu (phòng Lab)
+
+    private static final ClinicService DEWORM_SVC = service(4L, "DEWORM", ServiceCategory.DEWORMING, "50000.00");
+
+    @Test
+    void sampleCollected_logsTheActionWithoutChangingTheStatus() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        VisitServiceDetail d = stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
+        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(List.of(1L)))
+                .thenReturn(List.of(history(1L, "ORDERED"), history(1L, "START_PROCESSING")));
+
+        service.sampleCollected(1L);
+
+        assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
+        ArgumentCaptor<VisitServiceDetailHistory> audit = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
+        verify(detailHistoryRepository).save(audit.capture());
+        assertThat(audit.getValue().getAction()).isEqualTo("SAMPLE_COLLECTED");
+        assertThat(audit.getValue().getFromStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
+        assertThat(audit.getValue().getToStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void sampleCollected_refusedForTheWrongRoleKindStateOrWhenAlreadyCollected() {
+        loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
+        stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.sampleCollected(1L));
+
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        // Chưa vào phòng (PENDING)
+        stubLocks(detail(2L, 101L, CBC, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.sampleCollected(2L));
+        // Ca không còn chờ kết quả
+        stubLocks(detail(3L, 102L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_PAYMENT);
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.sampleCollected(3L));
+        // Đã lấy mẫu rồi
+        stubLocks(detail(4L, 103L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
+        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(List.of(4L)))
+                .thenReturn(List.of(history(4L, "START_PROCESSING"), history(4L, "SAMPLE_COLLECTED")));
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.sampleCollected(4L));
+        verify(detailHistoryRepository, never()).save(any());
     }
 
     // ================================================================== bắt đầu thực hiện
@@ -294,6 +513,63 @@ class ParaclinicServiceImplTest {
         assertThat(LabEvaluation.of(lowPlt.getResultValue(), lowPlt.getMinValueSnapshot(), lowPlt.getMaxValueSnapshot()))
                 .isEqualTo(LabEvaluation.LOW);
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
+    }
+
+    @Test
+    void submitLab_aConfiguredPackageRequiresEveryItem_andListsTheMissingOnes() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
+        LabTestItem wbc = labItem(1L, "WBC");
+        LabTestItem plt = labItem(4L, "PLT");
+        when(serviceLabItemRepository.findItemIdsByServiceId(5L)).thenReturn(List.of(1L, 4L));   // gói CBC gồm WBC + PLT
+        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
+        when(labTestItemRepository.findAllById(Set.of(4L))).thenReturn(List.of(plt));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+
+        var ex = org.junit.jupiter.api.Assertions.assertThrows(com.vetclinic.common.exception.AppException.class,
+                () -> service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null)))));
+
+        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT_DATA);   // SYS_1001
+        assertThat(ex.getMessage()).contains("PLT");
+        verify(labResultRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    void submitLab_aCompletePackageIsAccepted() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        VisitServiceDetail d = stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
+        LabTestItem wbc = labItem(1L, "WBC");
+        LabTestItem plt = labItem(4L, "PLT");
+        when(serviceLabItemRepository.findItemIdsByServiceId(5L)).thenReturn(List.of(1L, 4L));
+        when(labTestItemRepository.findAllById(List.of(4L, 1L))).thenReturn(List.of(wbc, plt));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId(4L, 1L)).thenReturn(Optional.of(range(plt, "200.00", "500.00")));
+        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+
+        service.submitLabResults(1L, new LabResultRequest(List.of(
+                new LabResultItemRequest(4L, new BigDecimal("300.00"), null), new LabResultItemRequest(1L, new BigDecimal("9.00"), null))));
+
+        assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
+        verify(labResultRepository).saveAll(anyList());
+    }
+
+    @Test
+    void labResults_returnsTheSavedValuesOfALabDetail_andRejectsOtherKinds() {
+        VisitServiceDetail lab = detail(1L, 100L, CBC, ServiceDetailStatus.COMPLETED);
+        when(detailRepository.findById(1L)).thenReturn(Optional.of(lab));
+        LabTestItem wbc = labItem(1L, "WBC");
+        LabTestResult saved = LabTestResult.builder().id(9L).visitServiceDetailId(1L).labTestItem(wbc)
+                .resultValue(new BigDecimal("21.00")).minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00"))
+                .performedBy(LAB_TECH).build();
+        when(labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(List.of(1L))).thenReturn(List.of(saved));
+
+        var results = service.labResults(1L);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).evaluation()).isEqualTo(LabEvaluation.HIGH);
+        when(detailRepository.findById(2L)).thenReturn(Optional.of(detail(2L, 100L, ULTRASOUND, ServiceDetailStatus.COMPLETED)));
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.labResults(2L));
+        assertError(ErrorCode.SERVICE_DETAIL_NOT_FOUND, () -> service.labResults(99L));
     }
 
     @Test

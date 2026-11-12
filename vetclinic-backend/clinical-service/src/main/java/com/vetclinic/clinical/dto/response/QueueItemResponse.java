@@ -7,8 +7,13 @@ import java.time.Instant;
 
 /**
  * Một dòng trong hàng đợi phòng Lab / CĐHA, đã xếp theo (cấp cứu chưa bị lùi) rồi queue_order. skipCount là số lần bị
- * "Đẩy lùi 1 bậc" để nhân viên nhận biết (FR-39). otherRoomStatus: tình trạng dịch vụ cùng đợt khám ở phòng còn lại
- * (huy hiệu liên phòng FR-36), vd. LAB_IN_PROGRESS, LAB_PENDING, LAB_DONE, IMAGING_PENDING...
+ * "Đẩy lùi 1 bậc" để nhân viên nhận biết (FR-39).
+ * <ul>
+ *   <li>stage (chỉ phòng Lab, SUY RA từ action mới nhất của lịch sử chỉ định, không có cột riêng): QUEUED (ORDERED/SKIPPED),
+ *       SAMPLING (START_PROCESSING: đang lấy mẫu), ANALYZING (SAMPLE_COLLECTED: đã lấy mẫu, đang phân tích).</li>
+ *   <li>labStatus (chỉ hàng đợi CĐHA, EX-09 / FR-36): SAMPLING nếu cùng ca còn dịch vụ Lab đang lấy mẫu, SAMPLE_COLLECTED nếu đã
+ *       lấy mẫu xong (sẵn sàng chụp); null nếu ca không có dịch vụ Lab đang thực hiện.</li>
+ * </ul>
  */
 public record QueueItemResponse(
         Long serviceDetailId,
@@ -23,7 +28,8 @@ public record QueueItemResponse(
         boolean emergency,
         ServiceDetailStatus status,
         int skipCount,
-        String otherRoomStatus,
+        String stage,
+        String labStatus,
         String notes,
         Instant orderedAt
 ) {
