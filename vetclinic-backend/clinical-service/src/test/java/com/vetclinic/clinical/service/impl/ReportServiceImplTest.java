@@ -5,7 +5,10 @@ import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.OperationsReportResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
+import com.vetclinic.clinical.dto.response.RevenueReportResponse;
+import com.vetclinic.clinical.repository.InvoiceAmountRow;
 import com.vetclinic.clinical.repository.PetVisitRepository;
+import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.ErrorCode;
@@ -19,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -41,6 +45,8 @@ class ReportServiceImplTest {
     @Mock
     private VisitServiceDetailRepository detailRepository;
     @Mock
+    private ServiceInvoiceRepository invoiceRepository;
+    @Mock
     private AuthClient authClient;
 
     private ReportServiceImpl service;
@@ -49,7 +55,61 @@ class ReportServiceImplTest {
     void setUp() {
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new ReportServiceImpl(visitRepository, detailRepository, authClient, CLOCK, tm);
+        service = new ReportServiceImpl(visitRepository, detailRepository, invoiceRepository, authClient, CLOCK, tm);
+    }
+
+    private static InvoiceAmountRow row(ServiceCategory c, long visitId, int qty, String unit, String vat, String discount) {
+        return new InvoiceAmountRow(c, visitId, qty, new BigDecimal(unit), new BigDecimal(vat), new BigDecimal(discount));
+    }
+
+    @Test
+    void revenue_groupsPaidInvoicesByServiceCategory_roundsPerInvoiceLikeTheView_andSumsTheDebt() {
+        when(invoiceRepository.findPaidBetween(any(), any())).thenReturn(List.of(
+                row(ServiceCategory.EXAMINATION, 1L, 1, "100000.00", "0.00", "0.00"),
+                row(ServiceCategory.LABORATORY, 1L, 1, "250000.00", "0.00", "0.00"),
+                // 200.000 x 1,05 - giảm 10.000 = 200.000 (VAT 10.000)
+                row(ServiceCategory.LABORATORY, 2L, 1, "200000.00", "0.05", "10000.00"),
+                row(ServiceCategory.VACCINATION, 3L, 2, "150000.00", "0.00", "0.00")));
+        when(invoiceRepository.findDebt()).thenReturn(List.of(
+                row(ServiceCategory.LABORATORY, 7L, 1, "250000.00", "0.00", "0.00"),
+                row(ServiceCategory.IMAGING, 7L, 1, "180000.00", "0.00", "30000.00"),
+                row(ServiceCategory.EXAMINATION, 8L, 1, "100000.00", "0.00", "0.00")));
+
+        RevenueReportResponse report = service.revenue(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 30));
+
+        assertThat(report.paidInvoiceCount()).isEqualTo(4);
+        assertThat(report.totalPaid()).isEqualByComparingTo("850000.00");   // 100.000 + 250.000 + 200.000 + 300.000
+        RevenueReportResponse.CategoryRevenue lab = report.byCategory().stream()
+                .filter(c -> c.category() == ServiceCategory.LABORATORY).findFirst().orElseThrow();
+        assertThat(lab.invoiceCount()).isEqualTo(2);
+        assertThat(lab.amountBeforeVat()).isEqualByComparingTo("450000.00");
+        assertThat(lab.vatAmount()).isEqualByComparingTo("10000.00");
+        assertThat(lab.discountAmount()).isEqualByComparingTo("10000.00");
+        assertThat(lab.payableAmount()).isEqualByComparingTo("450000.00");
+        assertThat(report.byCategory()).extracting(RevenueReportResponse.CategoryRevenue::category)
+                .containsExactly(ServiceCategory.EXAMINATION, ServiceCategory.VACCINATION, ServiceCategory.LABORATORY);   // chỉ nhóm có doanh thu, theo thứ tự khai báo enum
+        // Công nợ: 250.000 + (180.000 - 30.000) + 100.000 của 2 ca
+        assertThat(report.debt().visitCount()).isEqualTo(2);
+        assertThat(report.debt().invoiceCount()).isEqualTo(3);
+        assertThat(report.debt().amount()).isEqualByComparingTo("500000.00");
+    }
+
+    @Test
+    void revenue_usesTheClinicsLocalDayBoundariesAndTheSameRangeRules() {
+        when(invoiceRepository.findPaidBetween(any(), any())).thenReturn(List.of());
+        when(invoiceRepository.findDebt()).thenReturn(List.of());
+
+        RevenueReportResponse report = service.revenue(LocalDate.of(2026, 10, 30), LocalDate.of(2026, 10, 30));
+
+        ArgumentCaptor<Instant> start = ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<Instant> end = ArgumentCaptor.forClass(Instant.class);
+        verify(invoiceRepository).findPaidBetween(start.capture(), end.capture());
+        assertThat(start.getValue()).isEqualTo(Instant.parse("2026-10-29T17:00:00Z"));   // 00:00 giờ VN
+        assertThat(end.getValue()).isEqualTo(Instant.parse("2026-10-30T17:00:00Z"));
+        assertThat(report.byCategory()).isEmpty();
+        assertThat(report.totalPaid()).isEqualByComparingTo("0");
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.revenue(LocalDate.of(2026, 11, 2), LocalDate.of(2026, 11, 1)));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.revenue(LocalDate.of(2024, 1, 1), LocalDate.of(2026, 1, 1)));
     }
 
     @Test

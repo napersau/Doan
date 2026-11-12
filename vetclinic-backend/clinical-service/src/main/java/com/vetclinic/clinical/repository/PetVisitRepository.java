@@ -57,6 +57,14 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
             + "group by v.doctorId")
     List<Object[]> countWaitingByDoctor();
 
+    /** Ca COMPLETED còn hóa đơn dịch vụ PENDING (khách bỏ về, công nợ), mới nhất trước. */
+    @EntityGraph(attributePaths = {"pet", "pet.species"})
+    @Query("select v from PetVisit v where v.status = com.vetclinic.clinical.constant.VisitStatus.COMPLETED "
+            + "and exists (select 1 from ServiceInvoice i, VisitServiceDetail d where d.id = i.visitServiceDetailId "
+            + "and d.visitId = v.id and i.paymentStatus = com.vetclinic.clinical.constant.PaymentStatus.PENDING) "
+            + "order by v.id desc")
+    List<PetVisit> findCompletedWithDebt();
+
     /** Q5: queue_order nhỏ nhất trong hàng đợi của Bác sĩ (không tính ca {@code excludeId}); null nếu hàng đợi trống. */
     @Query("select min(v.queueOrder) from PetVisit v where v.doctorId = :doctorId and v.status in :statuses and v.id <> :excludeId")
     Long findMinQueueOrder(@Param("doctorId") Long doctorId, @Param("statuses") Collection<VisitStatus> statuses,

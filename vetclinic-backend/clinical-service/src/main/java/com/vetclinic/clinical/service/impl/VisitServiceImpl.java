@@ -15,7 +15,6 @@ import com.vetclinic.clinical.dto.request.ReasonRequest;
 import com.vetclinic.clinical.dto.request.ServiceOrderItem;
 import com.vetclinic.clinical.dto.request.StartExamRequest;
 import com.vetclinic.clinical.dto.response.AppointmentSummaryResponse;
-import com.vetclinic.clinical.dto.response.BillableServiceResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.dto.response.VisitHistoryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
@@ -598,27 +597,6 @@ public class VisitServiceImpl implements VisitService {
     }
 
     // ================================================================== không cần người dùng đăng nhập
-
-    /**
-     * TẠM (xóa ở bước 3.B13): billing v2 vẫn gọi endpoint này. Giá lấy từ hóa đơn dịch vụ đã snapshot lúc chỉ định
-     * (visit_service_details không còn unit_price / subtotal).
-     */
-    @Override
-    @Transactional(readOnly = true)
-    public List<BillableServiceResponse> billableServices(Long visitId) {
-        if (!visitRepository.existsById(visitId)) {
-            throw new AppException(ErrorCode.VISIT_NOT_FOUND);
-        }
-        List<VisitServiceDetail> done = detailRepository.findByVisitIdAndStatusOrderByIdAsc(visitId, ServiceDetailStatus.COMPLETED);
-        var invoices = support.invoicesOf(done.stream().map(VisitServiceDetail::getId).toList());
-        return done.stream().map(d -> {
-            var invoice = invoices.get(d.getId());
-            var unitPrice = invoice != null ? invoice.getUnitPrice() : d.getService().getPrice();
-            return new BillableServiceResponse(d.getService().getId(), d.getService().getCode(), d.getService().getName(),
-                    d.getService().getCategory(), d.getQuantity(), unitPrice,
-                    unitPrice.multiply(java.math.BigDecimal.valueOf(d.getQuantity())));
-        }).toList();
-    }
 
     @Override
     @Transactional(readOnly = true)

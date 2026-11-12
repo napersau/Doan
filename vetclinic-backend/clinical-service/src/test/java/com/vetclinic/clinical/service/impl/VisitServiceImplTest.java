@@ -917,40 +917,6 @@ class VisitServiceImplTest {
         verify(historyRepository, never()).save(any());
     }
 
-    // ================================================================== dịch vụ tính tiền (tạm, billing v2 còn gọi tới 3.B13)
-
-    @Test
-    void billableServices_onlyIncludesCompletedLines() {
-        ClinicService exam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
-        when(visitRepository.existsById(100L)).thenReturn(true);
-        when(detailRepository.findByVisitIdAndStatusOrderByIdAsc(100L, ServiceDetailStatus.COMPLETED))
-                .thenReturn(List.of(detail(1L, 100L, exam, ServiceDetailStatus.COMPLETED)));
-
-        var lines = service.billableServices(100L);
-
-        assertThat(lines).hasSize(1);
-        assertThat(lines.get(0).code()).isEqualTo("EXAM_GEN");
-        assertThat(lines.get(0).subtotal()).isEqualByComparingTo("100000.00");
-    }
-
-    @Test
-    void billableServices_usesTheInvoiceSnapshotPrice_notTheCurrentCatalogPrice() {
-        // Admin đã tăng giá từ 100.000 lên 120.000 SAU khi chỉ định: hóa đơn giữ giá snapshot lúc chỉ định (BR-25)
-        ClinicService exam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "120000.00");
-        VisitServiceDetail line = detail(1L, 100L, exam, ServiceDetailStatus.COMPLETED);
-        line.setQuantity(2);
-        when(visitRepository.existsById(100L)).thenReturn(true);
-        when(detailRepository.findByVisitIdAndStatusOrderByIdAsc(100L, ServiceDetailStatus.COMPLETED)).thenReturn(List.of(line));
-        when(invoiceRepository.findByVisitServiceDetailIdIn(List.of(1L))).thenReturn(List.of(
-                com.vetclinic.clinical.entity.ServiceInvoice.builder().id(50L).visitServiceDetailId(1L)
-                        .unitPrice(new BigDecimal("100000.00")).vatRate(BigDecimal.ZERO).build()));
-
-        var lines = service.billableServices(100L);
-
-        assertThat(lines.get(0).unitPrice()).isEqualByComparingTo("100000.00");
-        assertThat(lines.get(0).subtotal()).isEqualByComparingTo("200000.00");   // = số lượng × đơn giá snapshot (tính khi hiển thị)
-    }
-
     // ================================================================== fixtures
 
     private void stubSaveVisit() {

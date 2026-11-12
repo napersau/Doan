@@ -8,7 +8,6 @@ import com.vetclinic.clinical.dto.request.OrderServicesRequest;
 import com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest;
 import com.vetclinic.clinical.dto.request.ReasonRequest;
 import com.vetclinic.clinical.dto.request.StartExamRequest;
-import com.vetclinic.clinical.dto.response.BillableServiceResponse;
 import com.vetclinic.clinical.dto.response.VisitHistoryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.dto.response.VisitSummaryResponse;
@@ -102,9 +101,6 @@ public interface VisitService {
     List<VisitResponse> myVisits();
 
     // ------------------------------------------------------------------ không cần người dùng đăng nhập
-
-    /** Cho billing-pharmacy-service lập hóa đơn: chỉ dịch vụ COMPLETED. */
-    List<BillableServiceResponse> billableServices(Long visitId);
 
     /** Cho billing-pharmacy-service: thông tin rút gọn của một đợt khám. */
     VisitSummaryResponse summary(Long visitId);

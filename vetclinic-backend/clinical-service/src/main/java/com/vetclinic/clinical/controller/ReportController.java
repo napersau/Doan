@@ -1,6 +1,7 @@
 package com.vetclinic.clinical.controller;
 
 import com.vetclinic.clinical.dto.response.OperationsReportResponse;
+import com.vetclinic.clinical.dto.response.RevenueReportResponse;
 import com.vetclinic.clinical.service.ReportService;
 import com.vetclinic.common.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
@@ -28,5 +29,14 @@ public class ReportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
         return ResponseEntity.ok(ApiResponse.success(reportService.operations(fromDate, toDate)));
+    }
+
+    /** FR-69: doanh thu hóa đơn dịch vụ đã thu theo nhóm dịch vụ + công nợ hiện tại. Doanh thu thuốc lấy ở billing-pharmacy-service. */
+    @GetMapping("/revenue")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<RevenueReportResponse>> revenue(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
+        return ResponseEntity.ok(ApiResponse.success(reportService.revenue(fromDate, toDate)));
     }
 }
