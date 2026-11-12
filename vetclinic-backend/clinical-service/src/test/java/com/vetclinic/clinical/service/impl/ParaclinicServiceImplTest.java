@@ -36,7 +36,6 @@ import com.vetclinic.clinical.service.ImagingStorage;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.clinical.service.VisitTimeline;
-import com.vetclinic.common.event.DoctorPriorityCallbackEvent;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -618,16 +617,12 @@ class ParaclinicServiceImplTest {
         assertThat(history.getValue().getChangedByUserId()).isNull();   // T06: hệ thống tự chuyển
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher, org.mockito.Mockito.times(2)).publishEvent(event.capture());
+        verify(publisher, org.mockito.Mockito.times(1)).publishEvent(event.capture());   // chỉ visit.results_ready (v3.0)
         ParaclinicalResultsReadyEvent ready = event.getAllValues().stream().filter(ParaclinicalResultsReadyEvent.class::isInstance)
                 .map(ParaclinicalResultsReadyEvent.class::cast).findFirst().orElseThrow();
         assertThat(ready.visitId()).isEqualTo(100L);
         assertThat(ready.doctorId()).isEqualTo(DOCTOR);
         assertThat(ready.actorUserId()).isNull();
-        // v2 còn phát song song tới Phase 5/7.1
-        DoctorPriorityCallbackEvent callback = event.getAllValues().stream().filter(DoctorPriorityCallbackEvent.class::isInstance)
-                .map(DoctorPriorityCallbackEvent.class::cast).findFirst().orElseThrow();
-        assertThat(callback.doctorId()).isEqualTo(DOCTOR);
     }
 
     @Test
@@ -741,7 +736,6 @@ class ParaclinicServiceImplTest {
         assertThat(response.status()).isEqualTo(ServiceDetailStatus.CANCELLED);
         assertThat(lastDetailHistory().getReason()).isEqualTo("Thú cưng quá hung dữ");
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
-        verify(publisher).publishEvent(any(DoctorPriorityCallbackEvent.class));
         verify(publisher).publishEvent(any(ParaclinicalResultsReadyEvent.class));
     }
 
@@ -815,7 +809,6 @@ class ParaclinicServiceImplTest {
 
         assertThat(response.status()).isEqualTo(ServiceDetailStatus.COMPLETED);
         verify(attachmentRepository).saveAll(anyList());
-        verify(publisher).publishEvent(any(DoctorPriorityCallbackEvent.class));
         verify(publisher).publishEvent(any(ParaclinicalResultsReadyEvent.class));
         verify(storage, never()).deleteQuietly(any());
     }

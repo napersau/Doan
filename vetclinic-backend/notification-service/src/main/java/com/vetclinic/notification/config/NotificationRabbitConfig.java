@@ -13,31 +13,35 @@ import org.springframework.context.annotation.Configuration;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Queue của notification-service: &lt;service&gt;.&lt;routing-key&gt;, bền vững, mỗi queue có DLQ; nghe cả 6 sự kiện. */
+/** Queue của notification-service: &lt;service&gt;.&lt;routing-key&gt;, bền vững, mỗi queue có DLQ; nghe 9 sự kiện v3.0 (Kiến trúc §5.2). */
 @Configuration
 public class NotificationRabbitConfig {
 
     public static final String SERVICE_NAME = "notification-service";
     // Phải là hằng số compile-time (dùng trong @RabbitListener)
-    public static final String APPOINTMENT_CREATED_QUEUE = SERVICE_NAME + "." + EventRouting.APPOINTMENT_CREATED;
+    public static final String APPOINTMENT_BOOKED_QUEUE = SERVICE_NAME + "." + EventRouting.APPOINTMENT_BOOKED;
     public static final String APPOINTMENT_STATUS_QUEUE = SERVICE_NAME + "." + EventRouting.APPOINTMENT_STATUS_CHANGED;
+    public static final String APPOINTMENT_NO_SHOW_QUEUE = SERVICE_NAME + "." + EventRouting.APPOINTMENT_NO_SHOW;
     public static final String VISIT_CHECKED_IN_QUEUE = SERVICE_NAME + "." + EventRouting.VISIT_CHECKED_IN;
-    public static final String PRIORITY_CALLBACK_QUEUE = SERVICE_NAME + "." + EventRouting.DOCTOR_PRIORITY_CALLBACK;
-    public static final String VISIT_CLOSED_QUEUE = SERVICE_NAME + "." + EventRouting.VISIT_CLOSED_TO_PAYMENT;
-    public static final String PAYMENT_COMPLETED_QUEUE = SERVICE_NAME + "." + EventRouting.PAYMENT_COMPLETED;
-    public static final String LOW_STOCK_QUEUE = SERVICE_NAME + "." + EventRouting.STOCK_LOW_ALERT;
+    public static final String PATIENT_CALLED_QUEUE = SERVICE_NAME + "." + EventRouting.VISIT_PATIENT_CALLED;
+    public static final String RESULTS_READY_QUEUE = SERVICE_NAME + "." + EventRouting.VISIT_RESULTS_READY;
+    public static final String VISIT_COMPLETED_QUEUE = SERVICE_NAME + "." + EventRouting.VISIT_COMPLETED;
+    public static final String MEDICINE_INVOICE_PAID_QUEUE = SERVICE_NAME + "." + EventRouting.PHARMACY_MEDICINE_INVOICE_PAID;
+    public static final String LOW_STOCK_QUEUE = SERVICE_NAME + "." + EventRouting.PHARMACY_LOW_STOCK;
 
     @Bean
     public Declarables notificationQueues(TopicExchange clinicEventsExchange, DirectExchange clinicEventsDeadLetterExchange) {
         List<Object> declarations = new ArrayList<>();
         String[][] queues = {
-                {APPOINTMENT_CREATED_QUEUE, EventRouting.APPOINTMENT_CREATED},
+                {APPOINTMENT_BOOKED_QUEUE, EventRouting.APPOINTMENT_BOOKED},
                 {APPOINTMENT_STATUS_QUEUE, EventRouting.APPOINTMENT_STATUS_CHANGED},
+                {APPOINTMENT_NO_SHOW_QUEUE, EventRouting.APPOINTMENT_NO_SHOW},
                 {VISIT_CHECKED_IN_QUEUE, EventRouting.VISIT_CHECKED_IN},
-                {PRIORITY_CALLBACK_QUEUE, EventRouting.DOCTOR_PRIORITY_CALLBACK},
-                {VISIT_CLOSED_QUEUE, EventRouting.VISIT_CLOSED_TO_PAYMENT},
-                {PAYMENT_COMPLETED_QUEUE, EventRouting.PAYMENT_COMPLETED},
-                {LOW_STOCK_QUEUE, EventRouting.STOCK_LOW_ALERT},
+                {PATIENT_CALLED_QUEUE, EventRouting.VISIT_PATIENT_CALLED},
+                {RESULTS_READY_QUEUE, EventRouting.VISIT_RESULTS_READY},
+                {VISIT_COMPLETED_QUEUE, EventRouting.VISIT_COMPLETED},
+                {MEDICINE_INVOICE_PAID_QUEUE, EventRouting.PHARMACY_MEDICINE_INVOICE_PAID},
+                {LOW_STOCK_QUEUE, EventRouting.PHARMACY_LOW_STOCK},
         };
         for (String[] entry : queues) {
             String queueName = entry[0];

@@ -10,7 +10,6 @@ import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
-import com.vetclinic.common.event.DoctorPriorityCallbackEvent;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
@@ -195,9 +194,6 @@ public class VisitSupport {
         visitRepository.save(visit);
         Long petId = visit.getPet().getId();
         eventPublisher.publishEvent(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), clock.instant(), null,
-                visit.getId(), visit.getVisitCode(), doctorId, petId));
-        // v2: còn phát song song tới khi notification-service đổi listener (Phase 5); xóa ở bước 7.1
-        eventPublisher.publishEvent(new DoctorPriorityCallbackEvent(UUID.randomUUID(), clock.instant(), actorId,
                 visit.getId(), visit.getVisitCode(), doctorId, petId));
         log.info("Đợt khám {} đã có đủ kết quả cận lâm sàng (RESULTS_READY), lên đầu hàng đợi bác sĩ", visit.getVisitCode());
     }

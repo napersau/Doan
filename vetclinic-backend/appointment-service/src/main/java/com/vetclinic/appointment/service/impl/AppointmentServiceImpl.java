@@ -25,7 +25,6 @@ import com.vetclinic.appointment.service.SlotPolicy;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.event.AppointmentBookedEvent;
-import com.vetclinic.common.event.AppointmentCreatedEvent;
 import com.vetclinic.common.event.AppointmentNoShowEvent;
 import com.vetclinic.common.event.AppointmentStatusChangedEvent;
 import com.vetclinic.common.exception.AppException;
@@ -184,11 +183,7 @@ public class AppointmentServiceImpl implements AppointmentService {
                         : "Chủ nuôi gửi yêu cầu đặt lịch qua cổng trực tuyến");
 
         // Chỉ được gửi sang RabbitMQ SAU KHI commit (DomainEventRabbitPublisher)
-        eventPublisher.publishEvent(new AppointmentCreatedEvent(UUID.randomUUID(), now, actor.id(),
-                appointment.getId(), appointment.getAppointmentCode(), booking.ownerId(),
-                appointment.getPetId(), date, start, appointment.getStatus().name()));
-        // Danh mục sự kiện v3.0: appointment.booked thay appointment.created. TẠM phát song song cho tới khi notification-service nghe
-        // appointment.booked (LO_TRINH_SUA_CODE_V3.md bước 5.1); khi đó xóa AppointmentCreatedEvent (bước 7.1).
+        // Danh mục sự kiện v3.0: appointment.booked (thay appointment.created, đã ngừng phát từ Phase 5)
         eventPublisher.publishEvent(new AppointmentBookedEvent(UUID.randomUUID(), now, actor.id(),
                 appointment.getId(), appointment.getAppointmentCode(), booking.ownerId(),
                 appointment.getPetId(), date, start, appointment.getStatus().name()));
@@ -501,14 +496,12 @@ public class AppointmentServiceImpl implements AppointmentService {
         appointment.setStatus(to);
         appointmentRepository.save(appointment);
         recordHistory(appointment.getId(), from, to, actorId, note);
-        // CHECKED_IN đã có thông báo riêng từ clinical-service (visit.checked_in); hành động của chính chủ nuôi không cần báo lại
-        boolean ownerNotifiable = to == AppointmentStatus.CONFIRMED || to == AppointmentStatus.CANCELLED || to == AppointmentStatus.NO_SHOW;
+        // CHECKED_IN đã có thông báo riêng từ clinical-service (visit.checked_in); hành động của chính chủ nuôi không cần báo lại.
+        // NO_SHOW có sự kiện riêng (appointment.no_show) nên KHÔNG phát thêm status_changed (nếu không chủ nuôi nhận hai thông báo).
+        boolean ownerNotifiable = to == AppointmentStatus.CONFIRMED || to == AppointmentStatus.CANCELLED;
         if (ownerNotifiable && (ownerId == null || !ownerId.equals(actorId))) {
             notifyOwner(appointment, ownerId, actorId, false, reason);
         }
-        // Danh mục sự kiện v3.0 có sự kiện riêng cho vắng mặt (appointment.no_show). TẠM phát song song với status_changed cho tới khi
-        // notification-service nghe appointment.no_show (LO_TRINH_SUA_CODE_V3.md bước 5.2); khi đó phải NGỪNG phát status_changed cho
-        // NO_SHOW ở đây để chủ nuôi không nhận hai thông báo.
         if (to == AppointmentStatus.NO_SHOW) {
             publishNoShow(appointment, ownerId, actorId);
         }

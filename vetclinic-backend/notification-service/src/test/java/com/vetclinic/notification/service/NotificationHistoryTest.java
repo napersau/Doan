@@ -20,7 +20,7 @@ class NotificationHistoryTest {
 
     private static NotificationMessage message(String title, long second) {
         return new NotificationMessage(java.util.UUID.randomUUID(), NotificationType.LOW_STOCK, Severity.INFO, title, "",
-                Map.of(), Instant.parse("2026-10-30T02:00:00Z").plusSeconds(second));
+                Map.of(), Instant.parse("2026-10-30T02:00:00Z").plusSeconds(second), false);
     }
 
     private static NotificationHistory history(int capacity) {
@@ -58,6 +58,28 @@ class NotificationHistoryTest {
                 .containsExactly("m5", "m4", "m3");   // cũ nhất bị loại
         assertThat(history.recent(7L, RoleCode.ADMIN, 2)).hasSize(2);
         assertThat(history.recent(7L, RoleCode.ADMIN, 0)).isEmpty();
+    }
+
+    @Test
+    void markRead_isPerUser_idempotent_andOnlyForMessagesTheUserCanSee() {
+        NotificationHistory history = history(10);
+        NotificationMessage personal = message("riêng", 1);
+        NotificationMessage shared = message("chung", 2);
+        history.addForUser(7L, personal);
+        history.addForRole(RoleCode.RECEPTIONIST, shared);
+
+        assertThat(history.recent(7L, RoleCode.RECEPTIONIST, 10)).extracting(NotificationMessage::read).containsOnly(false);
+        assertThat(history.markRead(7L, RoleCode.RECEPTIONIST, shared.id())).isTrue();
+        assertThat(history.markRead(7L, RoleCode.RECEPTIONIST, shared.id())).isTrue();   // idempotent
+        assertThat(history.recent(7L, RoleCode.RECEPTIONIST, 10)).extracting(NotificationMessage::title, NotificationMessage::read)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("chung", true), org.assertj.core.groups.Tuple.tuple("riêng", false));
+
+        // thông báo chung của vai trò có trạng thái đọc riêng từng người
+        assertThat(history.recent(8L, RoleCode.RECEPTIONIST, 10)).extracting(NotificationMessage::read).containsOnly(false);
+
+        // không đánh dấu được thông báo của người khác / vai trò khác / id lạ
+        assertThat(history.markRead(8L, RoleCode.ADMIN, personal.id())).isFalse();
+        assertThat(history.markRead(7L, RoleCode.RECEPTIONIST, java.util.UUID.randomUUID())).isFalse();
     }
 
     @Test

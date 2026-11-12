@@ -19,7 +19,6 @@ import com.vetclinic.appointment.repository.AppointmentStatusHistoryRepository;
 import com.vetclinic.appointment.service.SlotLockService;
 import com.vetclinic.appointment.service.SlotPolicy;
 import com.vetclinic.common.dto.ApiResponse;
-import com.vetclinic.common.event.AppointmentCreatedEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -143,20 +142,12 @@ class AppointmentServiceImplTest {
         assertThat(history.getChangedByUserId()).isEqualTo(OWNER);
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, org.mockito.Mockito.times(2)).publishEvent(event.capture());
-        AppointmentCreatedEvent created = event.getAllValues().stream().filter(AppointmentCreatedEvent.class::isInstance)
-                .map(AppointmentCreatedEvent.class::cast).findFirst().orElseThrow();
-        // v3.0: appointment.booked (tạm phát song song với appointment.created tới bước 5.1)
-        com.vetclinic.common.event.AppointmentBookedEvent booked = event.getAllValues().stream()
-                .filter(com.vetclinic.common.event.AppointmentBookedEvent.class::isInstance)
-                .map(com.vetclinic.common.event.AppointmentBookedEvent.class::cast).findFirst().orElseThrow();
+        verify(eventPublisher, org.mockito.Mockito.times(1)).publishEvent(event.capture());   // chỉ appointment.booked (v3.0)
+        com.vetclinic.common.event.AppointmentBookedEvent booked = (com.vetclinic.common.event.AppointmentBookedEvent) event.getValue();
         assertThat(booked.routingKey()).isEqualTo("appointment.booked");
         assertThat(booked.appointmentId()).isEqualTo(100L);
         assertThat(booked.ownerId()).isEqualTo(OWNER);
         assertThat(booked.status()).isEqualTo("PENDING");
-        assertThat(created.appointmentId()).isEqualTo(100L);
-        assertThat(created.ownerId()).isEqualTo(OWNER);
-        assertThat(created.status()).isEqualTo("PENDING");
     }
 
     @Test
@@ -483,15 +474,16 @@ class AppointmentServiceImplTest {
     }
 
     @Test
-    void systemNoShow_notifiesTheOwnerWithNoActor() {
+    void systemNoShow_publishesOnlyTheDedicatedNoShowEvent_neverStatusChanged() {
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, LocalDate.of(2026, 10, 29), LocalTime.of(8, 0));
         lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
         lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
-        var event = publishedStatusEvent();
-        assertThat(event.status()).isEqualTo("NO_SHOW");
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, org.mockito.Mockito.times(1)).publishEvent(captor.capture());   // không để chủ nuôi nhận hai thông báo
+        var event = (com.vetclinic.common.event.AppointmentNoShowEvent) captor.getValue();
         assertThat(event.actorUserId()).isNull();
     }
 

@@ -4,17 +4,15 @@ import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.SecurityUtils;
-import com.vetclinic.notification.dto.SendEmailRequest;
 import com.vetclinic.notification.model.NotificationMessage;
-import com.vetclinic.notification.service.EmailService;
 import com.vetclinic.notification.service.NotificationHistory;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/notifications")
@@ -24,7 +22,6 @@ public class NotificationController {
     private static final int MAX_LIMIT = 100;
 
     private final NotificationHistory history;
-    private final EmailService emailService;
 
     /**
      * Thông báo gần nhất của người đăng nhập (riêng + chung của vai trò), mới nhất trước. Dùng khi vừa đăng nhập hoặc
@@ -38,11 +35,18 @@ public class NotificationController {
         return ResponseEntity.ok(ApiResponse.success(history.recent(userId, role, Math.min(Math.max(limit, 1), MAX_LIMIT))));
     }
 
-    /** Quản trị viên gửi thư thủ công (vd. thông báo đến chủ nuôi). */
-    @PostMapping("/send-email")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<Void>> sendEmail(@Valid @RequestBody SendEmailRequest request) {
-        emailService.send(request.to().trim(), request.subject().trim(), request.content());
-        return ResponseEntity.ok(ApiResponse.success("Đã gửi email", null));
+    /**
+     * Đánh dấu một thông báo là đã đọc (idempotent, trạng thái đọc riêng từng người dùng). Id không thuộc thông báo người đăng nhập
+     * nhìn thấy được thì trả 404. v3.0 không còn API gửi email công khai: email chỉ do sự kiện RabbitMQ kích hoạt.
+     */
+    @PostMapping("/{id}/read")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> markRead(@PathVariable UUID id) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        var role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
+        if (!history.markRead(userId, role, id)) {
+            throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy thông báo");
+        }
+        return ResponseEntity.ok(ApiResponse.<Void>success("Đã đánh dấu đã đọc", null));
     }
 }

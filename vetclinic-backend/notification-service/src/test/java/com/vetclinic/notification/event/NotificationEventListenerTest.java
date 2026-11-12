@@ -1,11 +1,13 @@
 package com.vetclinic.notification.event;
 
-import com.vetclinic.common.event.AppointmentCreatedEvent;
-import com.vetclinic.common.event.DoctorPriorityCallbackEvent;
-import com.vetclinic.common.event.LowStockEvent;
-import com.vetclinic.common.event.PaymentAndDispenseCompletedEvent;
+import com.vetclinic.common.event.AppointmentBookedEvent;
+import com.vetclinic.common.event.AppointmentNoShowEvent;
+import com.vetclinic.common.event.MedicineInvoicePaidEvent;
+import com.vetclinic.common.event.MedicineLowStockEvent;
+import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
+import com.vetclinic.common.event.PatientCalledEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
-import com.vetclinic.common.event.VisitClosedToPaymentEvent;
+import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -76,8 +78,8 @@ class NotificationEventListenerTest {
         return new VisitSummary(7L, "VIS-2026-7", 11L, "Lu", OWNER, DOCTOR);
     }
 
-    private static AppointmentCreatedEvent appointment(String status) {
-        return new AppointmentCreatedEvent(UUID.randomUUID(), NOW, OWNER, 3L, "APT-20261030-00003", OWNER, 11L,
+    private static AppointmentBookedEvent appointment(String status) {
+        return new AppointmentBookedEvent(UUID.randomUUID(), NOW, OWNER, 3L, "APT-20261030-00003", OWNER, 11L,
                 LocalDate.of(2026, 10, 31), LocalTime.of(9, 30), status);
     }
 
@@ -93,16 +95,22 @@ class NotificationEventListenerTest {
         return captor.getValue();
     }
 
-    // ================================================================== appointment.created
+    private java.util.List<NotificationMessage> captureUser(long userId, int times) {
+        ArgumentCaptor<NotificationMessage> captor = ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(dispatcher, times(times)).toUser(eq(userId), captor.capture());
+        return captor.getAllValues();
+    }
+
+    // ================================================================== appointment.booked
 
     @Test
-    void appointmentCreated_pendingNotifiesReceptionAndOwnerAndEmailsTheOwner() {
+    void appointmentBooked_pendingNotifiesReceptionAndOwnerAndEmailsTheOwner() {
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
-        listener.onAppointmentCreated(appointment("PENDING"));
+        listener.onAppointmentBooked(appointment("PENDING"));
 
         NotificationMessage forReception = captureRole(RoleCode.RECEPTIONIST);
-        assertThat(forReception.type()).isEqualTo(NotificationType.APPOINTMENT_CREATED);
+        assertThat(forReception.type()).isEqualTo(NotificationType.APPOINTMENT_BOOKED);
         assertThat(forReception.body()).contains("APT-20261030-00003", "09:30 ngày 31/10/2026");
         assertThat(forReception.data()).containsEntry("appointmentId", 3L);
         assertThat(captureUser(OWNER).title()).isEqualTo("Đã ghi nhận lịch hẹn");
@@ -113,10 +121,10 @@ class NotificationEventListenerTest {
     }
 
     @Test
-    void appointmentCreated_confirmedBookingByReceptionDoesNotPingReception() {
+    void appointmentBooked_confirmedBookingByReceptionDoesNotPingReception() {
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
-        listener.onAppointmentCreated(appointment("CONFIRMED"));
+        listener.onAppointmentBooked(appointment("CONFIRMED"));
 
         verify(dispatcher, never()).toRole(any(), any());   // lễ tân tự đặt thì không cần báo lại cho lễ tân
         assertThat(captureUser(OWNER).title()).isEqualTo("Lịch hẹn đã được xác nhận");
@@ -167,22 +175,22 @@ class NotificationEventListenerTest {
     }
 
     @Test
-    void appointmentCreated_ownerWithoutEmailStillGetsTheInAppNotification() {
+    void appointmentBooked_ownerWithoutEmailStillGetsTheInAppNotification() {
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Khách", "  ", null));
 
-        listener.onAppointmentCreated(appointment("PENDING"));
+        listener.onAppointmentBooked(appointment("PENDING"));
 
         verify(dispatcher).toUser(eq(OWNER), any());
         verifyNoInteractions(emailService);
     }
 
     @Test
-    void appointmentCreated_redeliveredEventDoesNotNotifyTwice() {
+    void appointmentBooked_redeliveredEventDoesNotNotifyTwice() {
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Khách", "a@example.com", null));
-        AppointmentCreatedEvent event = appointment("PENDING");
+        AppointmentBookedEvent event = appointment("PENDING");
 
-        listener.onAppointmentCreated(event);
-        listener.onAppointmentCreated(event);
+        listener.onAppointmentBooked(event);
+        listener.onAppointmentBooked(event);
 
         verify(dispatcher, times(1)).toUser(eq(OWNER), any());
         verify(dispatcher, times(1)).toRole(eq(RoleCode.RECEPTIONIST), any());
@@ -190,13 +198,13 @@ class NotificationEventListenerTest {
     }
 
     @Test
-    void appointmentCreated_smtpFailureIsRethrownForRetry_andTheRetryOnlyRedoesTheEmail() {
+    void appointmentBooked_smtpFailureIsRethrownForRetry_andTheRetryOnlyRedoesTheEmail() {
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Khách", "a@example.com", null));
         doThrow(new AppException(ErrorCode.SERVICE_UNAVAILABLE)).doNothing().when(emailService).send(anyString(), anyString(), anyString());
-        AppointmentCreatedEvent event = appointment("PENDING");
+        AppointmentBookedEvent event = appointment("PENDING");
 
-        assertThatThrownBy(() -> listener.onAppointmentCreated(event)).isInstanceOf(AppException.class);
-        listener.onAppointmentCreated(event);   // lần giao lại của RabbitMQ
+        assertThatThrownBy(() -> listener.onAppointmentBooked(event)).isInstanceOf(AppException.class);
+        listener.onAppointmentBooked(event);   // lần giao lại của RabbitMQ
 
         verify(dispatcher, times(1)).toUser(eq(OWNER), any());   // thông báo trong ứng dụng không bị lặp
         verify(emailService, times(2)).send(anyString(), anyString(), anyString());
@@ -237,103 +245,224 @@ class NotificationEventListenerTest {
         verify(dispatcher, never()).toUser(anyLong(), any());   // không biết chủ nuôi thì không báo chủ nuôi
     }
 
-    // ================================================================== doctor.priority_callback
-
     @Test
-    void priorityCallback_popsUpOnTheRightDoctorWithRoomAndPetName() {
+    void checkedIn_assignedVisitAlsoRefreshesTheDoctorsOwnQueue() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
-        when(people.findUser(DOCTOR)).thenReturn(Optional.of(new UserSummary(DOCTOR, "BS Lan", null, "P01")));
 
-        listener.onPriorityCallback(new DoctorPriorityCallbackEvent(UUID.randomUUID(), NOW, 30L, 7L, "VIS-2026-7", DOCTOR, 11L));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, null, false, DOCTOR));
 
-        NotificationMessage popup = captureUser(DOCTOR);
-        assertThat(popup.type()).isEqualTo(NotificationType.PRIORITY_CALLBACK);
-        assertThat(popup.severity()).isEqualTo(Severity.CRITICAL);
-        assertThat(popup.body()).contains("Lu", "VIS-2026-7", "phòng P01");
-        assertThat(popup.data()).containsEntry("visitId", 7L).containsEntry("doctorId", DOCTOR)
-                .containsEntry("action", "INVITE_PATIENT");
-        assertThat(captureRole(RoleCode.RECEPTIONIST).body()).contains("BS Lan", "ưu tiên gọi lại");
+        assertThat(captureRole(RoleCode.RECEPTIONIST).body()).contains("đã vào hàng đợi của bác sĩ");
+        verify(dispatcher).toUser(eq(DOCTOR), any());   // hàng đợi riêng của bác sĩ
         verify(dispatcher).toUser(eq(OWNER), any());
     }
 
+    // ================================================================== appointment.no_show
+
     @Test
-    void priorityCallback_stillPopsUpWhenOtherServicesAreDown() {
+    void noShow_warnsTheOwnerInAppAndByEmail() {
+        when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
+
+        listener.onAppointmentNoShow(new AppointmentNoShowEvent(UUID.randomUUID(), NOW, null, 3L, "APT-20261030-00003", OWNER, 11L,
+                LocalDate.of(2026, 10, 30), LocalTime.of(9, 0)));
+
+        NotificationMessage message = captureUser(OWNER);
+        assertThat(message.type()).isEqualTo(NotificationType.APPOINTMENT_NO_SHOW);
+        assertThat(message.severity()).isEqualTo(Severity.WARNING);
+        assertThat(message.body()).contains("APT-20261030-00003", "09:00 ngày 30/10/2026");
+        verify(emailService).send(eq("a@example.com"), contains("APT-20261030-00003"), contains("Nguyễn Văn A"));
+    }
+
+    @Test
+    void noShow_redeliveryDoesNotNotifyTwice() {
+        when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Khách", "a@example.com", null));
+        var event = new AppointmentNoShowEvent(UUID.randomUUID(), NOW, null, 3L, "APT-20261030-00003", OWNER, 11L,
+                LocalDate.of(2026, 10, 30), LocalTime.of(9, 0));
+
+        listener.onAppointmentNoShow(event);
+        listener.onAppointmentNoShow(event);
+
+        verify(dispatcher, times(1)).toUser(eq(OWNER), any());
+        verify(emailService, times(1)).send(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void statusChanged_noShowIsIgnoredBecauseItHasItsOwnEvent() {
+        listener.onAppointmentStatusChanged(statusChanged("NO_SHOW", false, null));
+
+        verifyNoInteractions(dispatcher, emailService);   // nếu không chủ nuôi nhận hai thông báo
+    }
+
+    // ================================================================== visit.patient_called
+
+    private static PatientCalledEvent called(String action, String station, Long doctorId, String room, int skipCount) {
+        return new PatientCalledEvent(UUID.randomUUID(), NOW, DOCTOR, action, station, 7L, "VIS-2026-7", 11L, doctorId,
+                "LAB".equals(station) || "IMAGING".equals(station) ? 55L : null, room, skipCount);
+    }
+
+    @Test
+    void patientCalled_doctorRoomInvitesTheOwnerWithRoomAndNumber_andRefreshesTheDoctor() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+
+        listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101", 0));
+
+        NotificationMessage forOwner = captureUser(OWNER);
+        assertThat(forOwner.type()).isEqualTo(NotificationType.PATIENT_CALLED);
+        assertThat(forOwner.severity()).isEqualTo(Severity.CRITICAL);
+        assertThat(forOwner.title()).contains("phòng khám bác sĩ", "P101");
+        assertThat(forOwner.body()).contains("VIS-2026-7", "Lu");
+        assertThat(forOwner.data()).containsEntry("station", "DOCTOR_ROOM").containsEntry("roomNumber", "P101");
+        verify(dispatcher).toUser(eq(DOCTOR), any());
+    }
+
+    @Test
+    void patientCalled_labAndImagingGoToTheRightTechnicianRole() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+
+        listener.onPatientCalled(called("CALLED", "LAB", null, "P201", 0));
+        listener.onPatientCalled(called("CALLED", "IMAGING", null, "P202", 0));
+
+        assertThat(captureUser(OWNER, 2).get(0).title()).contains("Xét nghiệm", "P201");
+        assertThat(captureUser(OWNER, 2).get(1).title()).contains("Chẩn đoán hình ảnh", "P202");
+        verify(dispatcher).toRole(eq(RoleCode.LAB_TECHNICIAN), any());
+        verify(dispatcher).toRole(eq(RoleCode.IMAGING_TECHNICIAN), any());
+    }
+
+    @Test
+    void patientCalled_pushedBackTellsTheOwnerTheyWereMissedAndJustNeedToWait() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+
+        listener.onPatientCalled(called("PUSHED_BACK", "DOCTOR_ROOM", DOCTOR, "P101", 1));
+
+        NotificationMessage forOwner = captureUser(OWNER);
+        assertThat(forOwner.severity()).isEqualTo(Severity.WARNING);
+        assertThat(forOwner.body()).contains("lùi một lượt", "chờ tới lượt");
+        assertThat(forOwner.data()).containsEntry("action", "PUSHED_BACK").containsEntry("skipCount", 1);
+    }
+
+    @Test
+    void patientCalled_clinicalDownStillRefreshesStaffButCannotReachTheOwner() {
+        when(people.findVisit(7L)).thenReturn(Optional.empty());
+
+        listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, null, 0));
+
+        verify(dispatcher, never()).toUser(eq(OWNER), any());
+        verify(dispatcher).toUser(eq(DOCTOR), any());
+    }
+
+    @Test
+    void patientCalled_redeliveryDoesNotCallTwice() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        var event = called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101", 0);
+
+        listener.onPatientCalled(event);
+        listener.onPatientCalled(event);
+
+        verify(dispatcher, times(1)).toUser(eq(OWNER), any());
+    }
+
+    // ================================================================== visit.results_ready
+
+    @Test
+    void resultsReady_flagsTheRightDoctorAndTellsTheOwnerToComeBack() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findUser(DOCTOR)).thenReturn(Optional.of(new UserSummary(DOCTOR, "BS Lan", null, "P01")));
+
+        listener.onResultsReady(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), NOW, null, 7L, "VIS-2026-7", DOCTOR, 11L));
+
+        ArgumentCaptor<NotificationMessage> captor = ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(dispatcher).toUser(eq(DOCTOR), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo(NotificationType.RESULTS_READY);
+        assertThat(captor.getValue().body()).contains("VIS-2026-7", "Lu", "đầu hàng đợi");
+        assertThat(captor.getValue().data()).containsEntry("visitId", 7L).containsEntry("doctorId", DOCTOR);
+        assertThat(captureUser(OWNER).body()).contains("Lu", "phòng khám P01", "bác sĩ gọi số");
+    }
+
+    @Test
+    void resultsReady_stillNotifiesTheDoctorWhenOtherServicesAreDown() {
         when(people.findVisit(7L)).thenReturn(Optional.empty());
         when(people.findUser(DOCTOR)).thenReturn(Optional.empty());
 
-        listener.onPriorityCallback(new DoctorPriorityCallbackEvent(UUID.randomUUID(), NOW, 30L, 7L, "VIS-2026-7", DOCTOR, 11L));
+        listener.onResultsReady(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), NOW, null, 7L, "VIS-2026-7", DOCTOR, 11L));
 
-        assertThat(captureUser(DOCTOR).body()).contains("VIS-2026-7", "phòng của bạn");
+        assertThat(captureUser(DOCTOR).body()).contains("VIS-2026-7", "thú cưng");
+        verify(dispatcher, never()).toUser(eq(OWNER), any());
     }
 
-    // ================================================================== visit.closed_to_payment
+    // ================================================================== visit.completed
 
     @Test
-    void visitClosed_tellsReceptionToCollectPayment() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
-
-        listener.onVisitClosed(new VisitClosedToPaymentEvent(UUID.randomUUID(), NOW, DOCTOR, 7L, "VIS-2026-7", 11L, DOCTOR, false));
-
-        NotificationMessage message = captureRole(RoleCode.RECEPTIONIST);
-        assertThat(message.type()).isEqualTo(NotificationType.PAYMENT_PENDING);
-        assertThat(message.severity()).isEqualTo(Severity.INFO);
-        assertThat(message.body()).contains("VIS-2026-7", "Lu", "thanh toán");
-    }
-
-    @Test
-    void visitClosed_abandonedVisitIsAWarningAboutDebt() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
-
-        listener.onVisitClosed(new VisitClosedToPaymentEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, DOCTOR, true));
-
-        NotificationMessage message = captureRole(RoleCode.RECEPTIONIST);
-        assertThat(message.severity()).isEqualTo(Severity.WARNING);
-        assertThat(message.title()).contains("ghi nợ");
-    }
-
-    // ================================================================== payment.completed
-
-    @Test
-    void paymentCompleted_notifiesReceptionAndOwnerAndEmailsReceipt() {
+    void visitCompleted_notifiesReceptionAndOwnerAndEmailsTheElectronicReceipt() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
-        listener.onPaymentCompleted(new PaymentAndDispenseCompletedEvent(UUID.randomUUID(), NOW, 9L, 7L, 40L, 3L));
+        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, false));
 
-        assertThat(captureRole(RoleCode.RECEPTIONIST).body()).contains("VIS-2026-7", "phát thuốc");
+        NotificationMessage forReception = captureRole(RoleCode.RECEPTIONIST);
+        assertThat(forReception.severity()).isEqualTo(Severity.INFO);
+        assertThat(forReception.body()).contains("VIS-2026-7", "thanh toán đủ");
         assertThat(captureUser(OWNER).title()).isEqualTo("Thanh toán hoàn tất");
-        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(emailService).send(eq("a@example.com"), contains("VIS-2026-7"), body.capture());
-        assertThat(body.getValue()).contains("#40", "Đơn thuốc đã được cấp phát");
+        verify(emailService).send(eq("a@example.com"), contains("VIS-2026-7"), contains("thu đủ viện phí dịch vụ"));
     }
 
     @Test
-    void paymentCompleted_visitWithoutPrescriptionDoesNotMentionMedicine() {
+    void visitCompleted_abandonedIsADebtWarningForReceptionAndNoReceiptEmail() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
-        when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
-        listener.onPaymentCompleted(new PaymentAndDispenseCompletedEvent(UUID.randomUUID(), NOW, 9L, 7L, 40L, null));
+        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, true));
 
-        assertThat(captureRole(RoleCode.RECEPTIONIST).body()).doesNotContain("thuốc");
-        verify(emailService).send(anyString(), anyString(), org.mockito.ArgumentMatchers.argThat(b -> !b.contains("thuốc")));
+        NotificationMessage forReception = captureRole(RoleCode.RECEPTIONIST);
+        assertThat(forReception.severity()).isEqualTo(Severity.WARNING);
+        assertThat(forReception.title()).contains("ghi nợ");
+        assertThat(captureUser(OWNER).body()).contains("chưa thanh toán");
+        verifyNoInteractions(emailService);   // chưa thu đủ thì không gửi phiếu thu
     }
 
     @Test
-    void paymentCompleted_unknownOwnerSkipsTheEmailButStillNotifiesReception() {
+    void visitCompleted_unknownOwnerSkipsTheEmailButStillNotifiesReception() {
         when(people.findVisit(7L)).thenReturn(Optional.empty());
 
-        listener.onPaymentCompleted(new PaymentAndDispenseCompletedEvent(UUID.randomUUID(), NOW, 9L, 7L, 40L, null));
+        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, 9L, 7L, "VIS-2026-7", 11L, false));
 
         verify(dispatcher).toRole(eq(RoleCode.RECEPTIONIST), any());
         verifyNoInteractions(emailService);
         verify(people, never()).requireUser(anyLong());
     }
 
-    // ================================================================== stock.low_alert
+    // ================================================================== pharmacy.medicine_invoice_paid
+
+    @Test
+    void medicineInvoicePaid_tellsTheOwnerAndEmailsTheReceiptWithAmount() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
+
+        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, 9L, 4L, "MINV-2026-0004", 3L, 7L,
+                new java.math.BigDecimal("157500.00")));
+
+        NotificationMessage forOwner = captureUser(OWNER);
+        assertThat(forOwner.type()).isEqualTo(NotificationType.MEDICINE_INVOICE_PAID);
+        assertThat(forOwner.body()).contains("MINV-2026-0004", "Lu", "157.500đ");
+        assertThat(forOwner.data()).containsEntry("invoiceCode", "MINV-2026-0004");
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailService).send(eq("a@example.com"), contains("MINV-2026-0004"), body.capture());
+        assertThat(body.getValue()).contains("157.500đ", "Nguyễn Văn A");
+        verify(dispatcher, never()).toRole(any(), any());
+    }
+
+    @Test
+    void medicineInvoicePaid_unknownOwnerSendsNothing() {
+        when(people.findVisit(7L)).thenReturn(Optional.empty());
+
+        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, 9L, 4L, "MINV-2026-0004", 3L, 7L,
+                new java.math.BigDecimal("157500.00")));
+
+        verifyNoInteractions(dispatcher, emailService);
+    }
+
+    // ================================================================== pharmacy.low_stock
 
     @Test
     void lowStock_isARedAlertForAdmins() {
-        listener.onLowStock(new LowStockEvent(UUID.randomUUID(), NOW, 9L, 1L, "MED_AMOX", "Clavamox 250mg", 8, 20));
+        listener.onLowStock(new MedicineLowStockEvent(UUID.randomUUID(), NOW, 9L, 1L, "MED_AMOX", "Clavamox 250mg", 8, 20));
 
         NotificationMessage alert = captureRole(RoleCode.ADMIN);
         assertThat(alert.type()).isEqualTo(NotificationType.LOW_STOCK);

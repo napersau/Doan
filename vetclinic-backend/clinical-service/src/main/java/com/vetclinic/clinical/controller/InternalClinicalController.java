@@ -1,9 +1,7 @@
 package com.vetclinic.clinical.controller;
 
 import com.vetclinic.clinical.dto.response.PetSummaryResponse;
-import com.vetclinic.clinical.dto.response.VisitSummaryResponse;
 import com.vetclinic.clinical.service.PetService;
-import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.common.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -25,7 +23,6 @@ import java.util.List;
 public class InternalClinicalController {
 
     private final PetService petService;
-    private final VisitService visitService;
 
     /** appointment-service kiểm tra thú cưng tồn tại và thuộc đúng chủ nuôi khi đặt lịch. */
     @GetMapping("/pets/{id}")
@@ -46,14 +43,5 @@ public class InternalClinicalController {
     @GetMapping(value = "/pets", params = "ownerId")
     public ResponseEntity<ApiResponse<List<PetSummaryResponse>>> petsOfOwner(@RequestParam("ownerId") Long ownerId) {
         return ResponseEntity.ok(ApiResponse.success(petService.getSummariesByOwner(ownerId)));
-    }
-
-    /**
-     * billing-pharmacy-service kiểm tra trạng thái, bác sĩ phụ trách và chủ nuôi của đợt khám (kê đơn, xem đơn). Đường dẫn chuẩn v3.0 là
-     * {@code /internal/pet-visits/{id}/summary}; đường dẫn này giữ tạm cho notification-service v2 tới Phase 5 (xóa ở bước 7.1).
-     */
-    @GetMapping("/visits/{id}")
-    public ResponseEntity<ApiResponse<VisitSummaryResponse>> visit(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success(visitService.summary(id)));
     }
 }
