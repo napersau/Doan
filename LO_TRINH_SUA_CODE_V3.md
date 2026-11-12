@@ -15,8 +15,8 @@
 | Phase 3 `clinical-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (3.B1–3.B14); 183 unit test clinical; **đã chạy kiểm chứng thật trên MySQL** (luồng chính + đẩy lùi Lab + T11/T12/T14 + thu tiền T10 + công nợ + báo cáo doanh thu: 100% đạt, phát hiện và sửa 1 lỗi lazy ở `skip` phòng Lab) | |
 | Phase 4 `billing-pharmacy-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (4.B1–4.B6); 56 unit test billing (+183 clinical vẫn đạt); **đã chạy kiểm chứng thật trên MySQL** (kê đơn + `stockWarnings`, khóa đơn `PHARM_1411`, lập/sửa/hủy hóa đơn thuốc, thu tiền + trừ kho nguyên tử, EX-15 rollback rồi sửa hóa đơn thu lại, EX-16 kể cả 3 yêu cầu song song, nhập/cân chỉnh kho, mở lại hồ sơ T14, báo cáo doanh thu thuốc, bệnh án ghép đơn: 65/65 đạt) | |
 | Phase 5 `notification-service` | ✅ **ĐÃ XONG (12/11/2026)** — 5.1–5.5; 45 unit test notification (+ appointment 68, clinical 183, billing 56 vẫn đạt); **đã chạy kiểm chứng thật** với RabbitMQ + Mailpit + 5 service (gọi số / đẩy lùi / có kết quả / hoàn tất / bán thuốc / tồn kho thấp / đặt lịch / duyệt / vắng mặt, 5 loại email, `POST /{id}/read`, 9 queue + DLQ rỗng) | |
-| Phase 6 Gateway + FE | ✅ **ĐÃ XONG (12/11/2026)** — 6.1 + 6.2①–⑧; `npm run build` sạch (CI=true), 22 test FE đạt; **chạy kiểm chứng thật bằng Chrome headless qua Gateway :8080** (`e2e/fe_smoke_v3.mjs`, 69/69 đạt, 0 lỗi console/mạng) | **Bước kế tiếp: Phase 7 (dọn dẹp + kiểm thử cuối)** |
-| Phase 7 Dọn dẹp + kiểm thử cuối | ⬜ chưa làm | |
+| Phase 6 Gateway + FE | ✅ **ĐÃ XONG (12/11/2026)** — 6.1 + 6.2①–⑧; `npm run build` sạch (CI=true), 22 test FE đạt; **chạy kiểm chứng thật bằng Chrome headless qua Gateway :8080** (`e2e/fe_smoke_v3.mjs`, 69/69 đạt, 0 lỗi console/mạng) | |
+| Phase 7 Dọn dẹp + kiểm thử cuối | ✅ **ĐÃ XONG (12/11/2026)** — 7.1–7.6; **380 unit test đạt** (28+68+183+56+45); `docker compose up -d --build` từ CSDL sạch → 11 container `healthy`; e2e v3 trên chính stack Docker: backend 45/45, notification 25/25, giao diện (Chrome headless) 69/69 | **MIGRATION v2 → v3.0 HOÀN TẤT** — còn lại việc không chặn demo, xem ghi chú sau Phase 7 |
 
 **Quy ước:** `[x]` = đã làm **và đã kiểm tra**; `[ ]` = chưa làm. Phase chỉ đổi sang ✅ khi mọi bước của nó là `[x]`. Branch làm việc: `develop` (mốc quay lại: tag `v2-baseline`). Mỗi bước = 1 commit.
 
@@ -254,12 +254,23 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ## PHASE 7 — Dọn dẹp và kiểm thử cuối
 
-- [ ] **7.1** Xóa event cũ khỏi `common-library` và listener cũ ở `notification` (`appointment.created`, `doctor.priority_callback`, `visit.closed_to_payment`, `payment.completed`, `stock.low_alert`).
-- [ ] **7.2** `mvn clean install` toàn bộ; `docker compose down -v && docker compose up -d --build` → mọi service `healthy`.
-- [ ] **7.3** Chạy luồng Task 5.4 (9 bước) trên trình duyệt; đối chiếu `v_service_invoice_amounts` = 530.000 và `v_medicine_invoice_amounts` = 157.500.
-- [ ] **7.4** Test các luồng dễ lỗi: EX-15, EX-16, đua `RESULTS_READY`, đặt lịch đồng thời, refresh token tái sử dụng, 3 trường hợp công thức Đẩy lùi, ca có kết quả đứng đầu, thu hóa đơn cuối ⇒ `COMPLETED`, công nợ.
-- [ ] **7.5** Viết lại `e2e/` ngắn gọn theo Task 5.4–5.5 (script cũ nhắm v2, bỏ).
-- [ ] **7.6** Cập nhật `CLAUDE.md` §9 (đánh dấu phần đã xong), §11.
+- [x] **7.1** Xóa event cũ khỏi `common-library` và listener cũ ở `notification` (`appointment.created`, `doctor.priority_callback`, `visit.closed_to_payment`, `payment.completed`, `stock.low_alert`).
+- [x] **7.2** `mvn clean install` toàn bộ; `docker compose down -v && docker compose up -d --build` → mọi service `healthy`.
+- [x] **7.3** Chạy luồng Task 5.4 (9 bước) trên trình duyệt; đối chiếu `v_service_invoice_amounts` = 530.000 và `v_medicine_invoice_amounts` = 157.500.
+- [x] **7.4** Test các luồng dễ lỗi: EX-15, EX-16, đua `RESULTS_READY`, đặt lịch đồng thời, refresh token tái sử dụng, 3 trường hợp công thức Đẩy lùi, ca có kết quả đứng đầu, thu hóa đơn cuối ⇒ `COMPLETED`, công nợ.
+- [x] **7.5** Viết lại `e2e/` ngắn gọn theo Task 5.4–5.5 (script cũ nhắm v2, bỏ).
+- [x] **7.6** Cập nhật `CLAUDE.md` §9 (đánh dấu phần đã xong), §11.
+
+
+> **Ghi chú kết quả Phase 7 (12/11/2026):**
+> - **7.1:** `common-library` đã xóa 5 event v2 (`AppointmentCreatedEvent`, `DoctorPriorityCallbackEvent`, `VisitClosedToPaymentEvent`, `PaymentAndDispenseCompletedEvent`, `LowStockEvent`), 5 routing key v2 và 4 mã lỗi v2 không còn dùng (`INVALID_PRESCRIPTION_STATUS`, `INVOICE_NOT_PAID`, `INVALID_INVOICE_STATUS`, `VISIT_NOT_READY_FOR_INVOICE`). Listener/queue v2 của notification đã bỏ từ Phase 5. Còn `PRESCRIPTION_ALREADY_EXISTS` (PHARM_1413) và `MEDICINE_CODE_ALREADY_EXISTS` (PHARM_1414), `INVALID_STOCK_ADJUSTMENT` (PHARM_1412): mã chỉ có trong code, giữ nguyên.
+> - **7.2:** `mvn -o clean install` toàn bộ **BUILD SUCCESS, 380 test**; `docker compose build` dựng 8 image; `docker compose down -v && up -d --wait` → api-gateway, appointment, auth, billing-pharmacy, clinical, frontend, notification, service-registry, mysql, rabbitmq, mailpit đều `healthy`. Lần đầu mất ~10 phút vì 4 JVM (auth/appointment/clinical/billing) tranh CPU lúc khởi động (mỗi JVM ~200% CPU, `mem_limit` 512m đủ dùng, không bị OOM).
+> - **7.3:** `e2e/backend_v3.mjs` chạy luồng chuẩn Task 5.4 và đối chiếu bằng truy vấn trực tiếp: `v_service_invoice_amounts` = **530.000**, `v_medicine_invoice_amounts` = **157.500**, Clavamox **200 → 190**, `SUM(inventory_transactions.quantity) = stock_quantity`, thu hóa đơn cuối → `COMPLETED` cùng giao dịch. Luồng giao diện: `e2e/fe_smoke_v3.mjs` (Chrome headless, cả khi giao diện chạy bằng nginx của compose) 69/69, 0 lỗi console/mạng.
+> - **7.4:** trong `backend_v3.mjs`: EX-15 (409 `PHARM_1406`, kho/nhật ký/trạng thái không đổi, sửa 10 → 5 rồi thu lại), EX-16 (409 `BILL_1403`; 5 yêu cầu song song → đúng 1 thành công, kho trừ một lần), đua `RESULTS_READY` (2 KTV hoàn tất cùng lúc, 3 vòng, không ca nào kẹt), Đẩy lùi 1 bậc (xếp giữa người kế tiếp và sau nữa; lùi tiếp; ca cuối giữ vị trí; `skip_count` tăng), công nợ (bỏ về → `COMPLETED`, thu bù sau), đặt lịch đồng thời (9 yêu cầu vào khung 6 chỗ → 6 thành công + 3 `APPT_1203`), refresh token dùng lại (401 và thu hồi token mới), `/internal/**` bị chặn ở Gateway, phân quyền. Trường hợp công thức Đẩy lùi "người kế tiếp là ca cấp cứu chưa bị lùi" được phủ bởi unit test (Phase 3), không dựng được ở e2e vì ca cấp cứu luôn đứng đầu hàng đợi.
+> - **7.5:** xóa `appointment.sh`, `clinical.sh`, `billing.sh`, `features.py`, `notification.py`, `fe_smoke.mjs`, `reset_data.sh` (nhắm v2). Còn `auth.sh` (auth không đổi) và 3 script mới + `run_all.sh`, `README.md` viết lại. Kiểm tra email trong `notification_v3.mjs` chỉ chạy khi Mailpit truy cập được (cổng 8025 chỉ mở ở `docker-compose.dev.yml`); email đã được kiểm chứng riêng ở Phase 5 (5 loại thư đến Mailpit).
+> - **7.6:** `CLAUDE.md` viết lại phần đầu (migration hoàn tất, số liệu kiểm chứng, việc còn mở), §9 đánh dấu đã đóng, §11 lệnh chạy cập nhật (RabbitMQ đăng nhập `vetclinic/vetclinic_dev`, không phải `guest`).
+> - **Seed demo:** `docs/seed_demo_data.sql` thêm 5 chủ nuôi (id 9–13) và 12 thú cưng (id 3–14); cố ý KHÔNG thêm lịch hẹn/đợt khám/hóa đơn/kho để các ID cố định trong Lộ trình (đợt khám #1, lịch hẹn #1, hóa đơn thuốc #1, Clavamox tồn 200) vẫn đúng. Kế hoạch ban đầu "~100 dòng" chỉ đạt ~30 dòng vì lý do đó.
+> - **Việc còn mở, không chặn demo:** bảng giá dịch vụ công khai và màn hình sảnh (`/topic/lobby`); Rate Limiting ở Gateway (CLAUDE.md §10 #14); sửa 3 file docs còn nội dung cũ + cột Tình trạng trong Bảng tổng hợp (§10 #15–#16, file của nhóm nên chưa tự sửa); xóa `fe/legacy-mock`; `update.md` ở gốc repo là báo cáo v2, lỗi thời; chưa chạy kiểm thử tải (NFR) và responsive FE (việc của Linh, Tuần 12).
 
 ---
 
