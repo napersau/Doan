@@ -194,22 +194,52 @@ function PrescriptionTab({ visit }) {
   </Panel>;
 }
 
-function CloseTab({ visit, onClosed }) {
-  const [form, setForm] = useState({ diagnosis: visit.diagnosis || '', treatmentPlan: visit.treatmentPlan || '', doctorAdvice: visit.doctorAdvice || '', clinicalNotes: visit.clinicalNotes || '' });
-  const [confirming, setConfirming] = useState(false);
-  const [error, setError] = useState('');
-  const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
-  return <Panel title="Chốt chuyên môn" subtitle="Sau khi chốt, hồ sơ bị khóa (không sửa chẩn đoán, dịch vụ, đơn thuốc) và ca chuyển sang chờ thanh toán. Hóa đơn dịch vụ đã có sẵn cho thu ngân; thuốc bán theo đơn nếu khách chọn mua.">
+/** Bản nháp kết luận giữ ở trang cha (và sessionStorage) để không mất khi đổi tab hoặc tải lại; chỉ gửi lên máy chủ lúc chốt ca. */
+const DRAFT_KEY = (visitId) => `vetclinic.conclusion.${visitId}`;
+function loadDraft(visit) {
+  const base = { diagnosis: visit.diagnosis || '', treatmentPlan: visit.treatmentPlan || '', doctorAdvice: visit.doctorAdvice || '' };
+  try { const saved = JSON.parse(sessionStorage.getItem(DRAFT_KEY(visit.id)) || 'null'); if (saved) return { ...base, ...saved }; } catch (problem) { /* không có sessionStorage: dùng dữ liệu máy chủ */ }
+  return base;
+}
+
+/** Kết luận chuyên môn: nhập SAU khi có kết quả khám / cận lâm sàng, TRƯỚC khi kê đơn thuốc. */
+function ConclusionTab({ draft, setDraft, onNext }) {
+  const set = (key) => (event) => setDraft({ ...draft, [key]: event.target.value });
+  return <Panel title="Kết luận" subtitle="Ghi chẩn đoán, phác đồ và lời dặn dựa trên kết quả khám và cận lâm sàng. Bước tiếp theo là kê đơn thuốc, cuối cùng mới chốt ca. Bản nháp được giữ khi bạn đổi tab; chỉ được ghi vào hồ sơ lúc chốt ca.">
     <div className="ui-stack" style={{ gap: 14 }}>
-      {error && <div className="ui-alert error" role="alert"><span>{error}</span></div>}
-      <Field label="Chẩn đoán *"><Textarea value={form.diagnosis} onChange={set('diagnosis')} maxLength={2000} autoFocus /></Field>
-      <Field label="Phác đồ điều trị"><Textarea value={form.treatmentPlan} onChange={set('treatmentPlan')} maxLength={2000} /></Field>
-      <Field label="Lời dặn cho chủ nuôi"><Textarea value={form.doctorAdvice} onChange={set('doctorAdvice')} maxLength={2000} /></Field>
-      <Field label="Ghi chú lâm sàng"><Textarea value={form.clinicalNotes} onChange={set('clinicalNotes')} maxLength={2000} rows={2} /></Field>
-      <div><Button variant="primary" onClick={() => { if (!form.diagnosis.trim()) setError('Chẩn đoán là bắt buộc để chốt ca.'); else { setError(''); setConfirming(true); } }}>Chốt ca và chuyển thanh toán</Button></div>
+      <Field label="Chẩn đoán *"><Textarea value={draft.diagnosis} onChange={set('diagnosis')} maxLength={2000} rows={3} autoFocus /></Field>
+      <Field label="Phác đồ điều trị"><Textarea value={draft.treatmentPlan} onChange={set('treatmentPlan')} maxLength={2000} rows={3} /></Field>
+      <Field label="Lời dặn cho chủ nuôi"><Textarea value={draft.doctorAdvice} onChange={set('doctorAdvice')} maxLength={2000} rows={3} /></Field>
+      <div><Button variant="primary" onClick={onNext}>Tiếp tục: kê đơn thuốc</Button></div>
     </div>
-    {confirming && <ConfirmDialog title="Chốt ca khám" confirmLabel="Chốt ca" onClose={() => setConfirming(false)} onConfirm={async () => { await visitsApi.closeVisit(visit.id, { diagnosis: form.diagnosis.trim(), treatmentPlan: blankToNull(form.treatmentPlan), doctorAdvice: blankToNull(form.doctorAdvice), clinicalNotes: blankToNull(form.clinicalNotes) }); onClosed(); }}>
-      Hồ sơ sẽ bị khóa. Hãy chắc chắn đã lưu đơn thuốc và hoàn tất / hủy các dịch vụ tại phòng. Cần có diagnosis, cân nặng và thân nhiệt.</ConfirmDialog>}
+  </Panel>;
+}
+
+/** Chốt ca: xem lại kết luận + dịch vụ + đơn thuốc rồi chốt và chuyển thanh toán. */
+function CloseTab({ visit, draft, onClosed, goTo }) {
+  const prescription = useAsync(() => pharmacyApi.prescriptionByVisit(visit.id).catch((problem) => { if (problem.status === 404) return null; throw problem; }), [visit.id]);
+  const [confirming, setConfirming] = useState(false);
+  const diagnosis = draft.diagnosis.trim();
+  const unfinished = (visit.services || []).filter((row) => ['PENDING', 'IN_PROGRESS'].includes(row.status) && !['LABORATORY', 'IMAGING'].includes(row.category) && row.category !== 'EXAMINATION');
+  const noVitals = !visit.weightAtVisit || !visit.temperature;
+  const medicines = prescription.data?.items?.length || 0;
+  return <Panel title="Chốt ca" subtitle="Bước cuối: sau khi chốt, hồ sơ bị khóa (không sửa kết luận, dịch vụ, đơn thuốc) và ca chuyển sang chờ thanh toán. Hóa đơn dịch vụ đã có sẵn cho thu ngân; thuốc bán theo đơn nếu khách chọn mua.">
+    <div className="ui-stack" style={{ gap: 14 }}>
+      {!diagnosis && <div className="ui-alert error" role="alert"><span>Chưa có chẩn đoán — bắt buộc để chốt ca. Nhập ở tab Kết luận.</span><Button className="small" onClick={() => goTo('conclusion')}>Đến tab Kết luận</Button></div>}
+      {noVitals && <div className="ui-alert error" role="alert"><span>Chưa có cân nặng / thân nhiệt. Nhập ở tab Sinh hiệu.</span><Button className="small" onClick={() => goTo('vitals')}>Đến tab Sinh hiệu</Button></div>}
+      {unfinished.length > 0 && <div className="ui-alert warning" role="status"><span>Còn dịch vụ tại phòng chưa xong: {unfinished.map((row) => row.serviceName).join(', ')}. Hãy bấm “Đã thực hiện” hoặc hủy trước khi chốt.</span></div>}
+      <Facts items={[['Chẩn đoán', diagnosis || null], ['Phác đồ điều trị', draft.treatmentPlan], ['Lời dặn cho chủ nuôi', draft.doctorAdvice], ['Đơn thuốc', prescription.loading ? 'Đang tải…' : (medicines ? `Đã kê ${medicines} loại thuốc` : 'Chưa kê đơn (không bán thuốc theo đơn)')]]} />
+      <div className="ui-actions">
+        <Button onClick={() => goTo('conclusion')}>Sửa kết luận</Button>
+        <Button onClick={() => goTo('prescription')}>Sửa đơn thuốc</Button>
+        <Button variant="primary" onClick={() => setConfirming(true)} disabled={!diagnosis}>Chốt ca và chuyển thanh toán</Button>
+      </div>
+    </div>
+    {confirming && <ConfirmDialog title="Chốt ca khám" confirmLabel="Chốt ca" onClose={() => setConfirming(false)} onConfirm={async () => {
+      await visitsApi.closeVisit(visit.id, { diagnosis, treatmentPlan: blankToNull(draft.treatmentPlan), doctorAdvice: blankToNull(draft.doctorAdvice), clinicalNotes: blankToNull(visit.clinicalNotes) });
+      try { sessionStorage.removeItem(DRAFT_KEY(visit.id)); } catch (problem) { /* bỏ qua */ }
+      onClosed();
+    }}>Hồ sơ sẽ bị khóa. Hãy chắc chắn đã lưu đơn thuốc và hoàn tất / hủy các dịch vụ tại phòng. Cần có chẩn đoán, cân nặng và thân nhiệt.</ConfirmDialog>}
   </Panel>;
 }
 
@@ -219,16 +249,19 @@ export default function VisitPage() {
   const navigate = useNavigate();
   const visit = useAsync(() => visitsApi.get(visitId), [visitId]);
   const [tab, setTab] = useState('vitals');
+  const [draft, setDraftState] = useState(null);
   const [dialog, setDialog] = useState(null);
   const action = useAction();
   usePolling(visit.refresh, 15000);
   const backToQueue = () => navigate('/vet/today', { replace: true });
+  const setDraft = (next) => { setDraftState(next); try { sessionStorage.setItem(DRAFT_KEY(visitId), JSON.stringify(next)); } catch (problem) { /* không lưu được thì giữ trong bộ nhớ */ } };
 
   return <StaffLayout area="vet" title="Hồ sơ khám">
     <AsyncView state={visit}>
       {(v) => {
         const mine = String(v.doctorId) === String(user.id);
         const hasResults = v.labResults?.length > 0 || v.imagingResults?.length > 0;
+        const conclusion = draft || loadDraft(v);
         return <>
           <PageHead eyebrow={v.visitCode} title={`${v.petName} (${v.speciesName})`} actions={<><Link className="ui-button" to="/vet/today">← Hàng đợi</Link><Link className="ui-button" to={`/vet/history?petId=${v.petId}`}>Bệnh án trước đây</Link></>}>
             Tiếp nhận {formatDateTime(v.checkedInAt)}{v.emergency ? ' · CẤP CỨU' : ''} · Phòng {v.assignedRoom || '—'}
@@ -245,11 +278,12 @@ export default function VisitPage() {
           </>}
 
           {mine && v.status === 'IN_PROGRESS' && <>
-            <Tabs value={tab} onChange={setTab} tabs={[{ key: 'vitals', label: 'Sinh hiệu' }, { key: 'services', label: 'Dịch vụ & cận lâm sàng' }, { key: 'prescription', label: 'Đơn thuốc' }, { key: 'close', label: 'Chốt ca' }]} />
+            <Tabs value={tab} onChange={setTab} tabs={[{ key: 'vitals', label: 'Sinh hiệu' }, { key: 'services', label: 'Dịch vụ & cận lâm sàng' }, { key: 'conclusion', label: 'Kết luận' }, { key: 'prescription', label: 'Đơn thuốc' }, { key: 'close', label: 'Chốt ca' }]} />
             {tab === 'vitals' && <VitalsTab visit={v} onChanged={visit.refresh} />}
             {tab === 'services' && <ServicesTab visit={v} onChanged={visit.refresh} />}
+            {tab === 'conclusion' && <ConclusionTab draft={conclusion} setDraft={setDraft} onNext={() => setTab('prescription')} />}
             {tab === 'prescription' && <PrescriptionTab visit={v} />}
-            {tab === 'close' && <CloseTab visit={v} onClosed={backToQueue} />}
+            {tab === 'close' && <CloseTab visit={v} draft={conclusion} onClosed={backToQueue} goTo={setTab} />}
             <div className="ui-actions" style={{ marginTop: 18 }}><Button variant="danger" onClick={() => setDialog('cancel-exam')}>Hủy ca / chuyển viện (không thu phí)</Button></div>
           </>}
 

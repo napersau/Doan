@@ -292,6 +292,7 @@ async function main() {
     await b.click('Gọi số tiếp theo'); await b.click('Bắt đầu giai đoạn 2');
     check('bắt đầu giai đoạn 2', await b.waitFor('location.pathname.startsWith("/vet/visits/")', 10000));
     check('thấy kết quả xét nghiệm có đánh giá (WBC cao)', await b.hasText('Cao') && await b.hasText('Bạch cầu'));
+    await b.click('Kết luận', '[role=tab]'); await b.fill('Chẩn đoán', 'Viêm dạ dày ruột cấp');
     await b.click('Đơn thuốc', '[role=tab]');
     await b.waitFor('document.querySelectorAll("select.ui-input option").length > 2');
     await b.fill('Thuốc', 'Clavamox'); await b.fill('Số lượng', '999'); await b.fill('Liều dùng', '1 viên/lần'); await b.fill('Tần suất', '2 lần/ngày');
@@ -299,7 +300,7 @@ async function main() {
     check('kê vượt tồn kho: vẫn lưu, chỉ cảnh báo', await b.hasText('Cảnh báo tồn kho') && await b.hasText('Đã lưu đơn thuốc'), (await b.text()).slice(0, 400));
     await b.fill('Số lượng', '10'); await b.click('Cập nhật đơn thuốc');
     check('sửa lại số lượng hợp lệ', await b.hasText('Đã lưu đơn thuốc'));
-    await b.click('Chốt ca', '[role=tab]'); await b.fill('Chẩn đoán', 'Viêm dạ dày ruột cấp');
+    await b.click('Chốt ca', '[role=tab]');
     await b.click('Chốt ca và chuyển thanh toán'); await b.click('Chốt ca', 'button[type=submit]');
     check('chốt ca, về hàng đợi', await b.waitFor('location.pathname === "/vet/today"', 12000), (await b.text()).slice(0, 300));
 
