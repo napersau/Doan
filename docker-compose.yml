@@ -58,10 +58,12 @@ services:
       - mysql-data:/var/lib/mysql
       # Script chỉ chạy khi volume còn trống -> sửa schema thì phải `docker compose down -v`
       - ./docs/schema_init.sql:/docker-entrypoint-initdb.d/01-schema_init.sql:ro
+      # Dữ liệu demo cố định (id 2-8, thú cưng #1 #2) cho mọi curl trong Lộ trình; chạy sau schema_init.sql
+      - ./docs/seed_demo_data.sql:/docker-entrypoint-initdb.d/02-seed_demo_data.sql:ro
     healthcheck:
-      # Ping qua TCP (127.0.0.1) và kiểm tra bảng cuối cùng của script: trong lúc init, MySQL chỉ mở socket,
-      # nên `mysqladmin ping` sẽ báo healthy quá sớm khi schema chưa tạo xong.
-      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD -e 'SELECT 1 FROM pet_clinic_billing_pharmacy_db.invoice_items LIMIT 1' >/dev/null 2>&1"]
+      # Ping qua TCP (127.0.0.1) và kiểm tra dữ liệu của script cuối cùng (02-seed_demo_data.sql: bảng pets có >= 2 dòng):
+      # trong lúc init, MySQL chỉ mở socket, nên `mysqladmin ping` sẽ báo healthy quá sớm khi schema/seed chưa nạp xong.
+      test: ["CMD-SHELL", "n=$$(mysql -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD -N -e 'SELECT COUNT(*) FROM pet_clinic_clinical_db.pets' 2>/dev/null); [ \"$${n:-0}\" -ge 2 ]"]
       <<: *healthcheck-timing
     networks: [vetclinic-net]
 

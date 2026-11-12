@@ -35,6 +35,10 @@
 -- - Giá trị tiền thanh toán KHÔNG lưu, được tính bằng VIEW (xem cuối mỗi phần).
 -- ==============================================================================
 
+-- [12/11] Bắt buộc: client mysql trong entrypoint Docker mặc định dùng latin1,
+-- thiếu dòng này tiếng Việt trong seed bị mã hóa 2 lần.
+SET NAMES utf8mb4;
+
 
 -- ==============================================================================
 -- PHẦN 1: PET_CLINIC_AUTH_DB (AUTH-SERVICE :8081)
@@ -88,9 +92,9 @@ INSERT INTO roles (code, name, description) VALUES
 ('IMAGING_TECHNICIAN', 'Bác sĩ / KTV Chẩn đoán hình ảnh', 'Siêu âm, chụp X-quang, tải tệp ảnh và kết luận hình thái học'),
 ('PET_OWNER', 'Chủ thú cưng', 'Đặt lịch trực tuyến, theo dõi hồ sơ bệnh án và đơn thuốc');
 
--- Tài khoản Admin mặc định (mật khẩu: Admin@123 - cần kiểm tra lại hash trước khi demo)
+-- Tài khoản Admin mặc định (mật khẩu: Admin@123, BCrypt strength 12 - đã kiểm tra bằng bcrypt.checkpw ngày 12/11)
 INSERT INTO users (role_id, username, password_hash, full_name, phone_number, email, status) VALUES
-(1, 'admin', '$2a$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Quản trị viên hệ thống', '0901234567', 'admin@vetclinic.com', 'ACTIVE');
+(1, 'admin', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Quản trị viên hệ thống', '0901234567', 'admin@vetclinic.com', 'ACTIVE');
 
 
 -- ==============================================================================

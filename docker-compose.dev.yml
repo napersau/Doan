@@ -4,7 +4,8 @@
 services:
   mysql-server:
     ports:
-      - "3306:3306"
+      # Máy đã có MySQL chiếm 3306 thì đặt MYSQL_HOST_PORT=3307 (khi đó chạy service trong IDE với DB_PORT=3307)
+      - "${MYSQL_HOST_PORT:-3306}:3306"
   rabbitmq-broker:
     ports:
       - "5672:5672"

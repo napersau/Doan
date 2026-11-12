@@ -5,6 +5,25 @@
 
 ---
 
+## ▶ TRẠNG THÁI HIỆN TẠI (cập nhật sau MỖI phase/bước — Claude đọc mục này trước khi làm tiếp)
+
+| Phase | Trạng thái | Ghi chú |
+|---|---|---|
+| **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
+| Phase 1 `common-library` | ⬜ chưa làm | **Bước kế tiếp: 1.1 (đánh số lại `ErrorCode`)** |
+| Phase 2 `appointment-service` | ⬜ chưa làm | |
+| Phase 3 `clinical-service` | ⬜ chưa làm | |
+| Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
+| Phase 5 `notification-service` | ⬜ chưa làm | |
+| Phase 6 Gateway + FE | ⬜ chưa làm | |
+| Phase 7 Dọn dẹp + kiểm thử cuối | ⬜ chưa làm | |
+
+**Quy ước:** `[x]` = đã làm **và đã kiểm tra**; `[ ]` = chưa làm. Phase chỉ đổi sang ✅ khi mọi bước của nó là `[x]`. Branch làm việc: `develop` (mốc quay lại: tag `v2-baseline`). Mỗi bước = 1 commit.
+
+**Môi trường dev đã dùng (để tái lập):** JDK 21 (`export JAVA_HOME="C:/Program Files/Java/jdk-21.0.6"`; máy mặc định là JDK 22); MySQL của Docker chạy ở cổng **3307** vì máy host đã có `mysqld` chiếm 3306 → bật hạ tầng bằng `MYSQL_HOST_PORT=3307 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mysql-server rabbitmq-broker mailpit` và chạy service trong IDE/jar với `DB_PORT=3307 DB_HOST=localhost DB_USERNAME=root DB_PASSWORD=<MYSQL_ROOT_PASSWORD trong .env> RABBITMQ_HOST=localhost TZ=UTC` (+ `JWT_SECRET`). **Quên `DB_PORT=3307` thì service sẽ nối nhầm vào MySQL của máy host.**
+
+---
+
 ## 0. Kết luận: KHÔNG viết lại từ đầu
 
 | Module | Dòng main | Mức phải đụng | Ghi chú |
@@ -54,12 +73,14 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ## PHASE 0 — Chuẩn bị (không đụng logic)
 
-- [ ] **0.1** `git init`, commit nguyên trạng, tag `v2-baseline`.
-- [ ] **0.2** Sửa `docs/schema_init.sql` (nhóm đồng ý): thêm `SET NAMES utf8mb4;` đầu file; thay hash BCrypt(12) của `admin` cho đúng `Admin@123`. (CLAUDE.md §10 #1)
-- [ ] **0.3** Viết `seed_demo_data.sql` theo bảng ID cố định Task 1.2.3 (id 2–8 + 2 thú cưng) — mọi `curl` kiểm thử đều dùng ID này.
-- [ ] **0.4** `docker compose down -v` → chỉ chạy `mysql-server rabbitmq-broker mailpit service-registry` (file dev) → chạy truy vấn kiểm tra của Task 1.2: **25 bảng, 2 view, 25 FK**.
-- [ ] **0.5** Ghi lại baseline: `mvn clean install -DskipTests` thành công; số test (288).
-- [ ] **0.6 (xác nhận chạy thật):** khởi động riêng `auth-service` trên schema mới, đăng nhập `admin` → **phải chạy ngay không sửa gì**. Đây là bằng chứng cho phương pháp sửa dần.
+> **PHASE 0 = ✅ ĐÃ XONG ngày 12/11/2026.**
+
+- [x] **0.1** `git init`, commit nguyên trạng (729 file, không có `.env`), tag `v2-baseline`, tạo nhánh `develop`. Thêm `build/`, `__pycache__/` vào `.gitignore`.
+- [x] **0.2** Sửa `docs/schema_init.sql`: thêm `SET NAMES utf8mb4;`; hash cũ xác nhận **không khớp** `Admin@123`, đã thay bằng hash BCrypt(12) mới (đã `checkpw`). → CLAUDE.md §10 #1 **đã đóng**.
+- [x] **0.3** Tạo `docs/seed_demo_data.sql` (id 2–8 + thú cưng #1 Lu, #2 Milo; **mật khẩu chung mọi tài khoản demo = `Admin@123`**), mount vào `docker-compose.yml` làm `02-seed_demo_data.sql`. → CLAUDE.md §10 #2 **đã đóng** (phần ~100 dòng mở rộng vẫn là việc của Khởi, Phase 7).
+- [x] **0.4** `down -v` (không có volume nào trước đó) → dựng hạ tầng → kiểm tra thật: **25 bảng (3+2+14+6), 2 view, 25 FK, tồn kho = SUM(quantity) (200/50/40/100), tiếng Việt lưu đúng**. Phát sinh 2 lỗi nền đã sửa: (a) healthcheck MySQL trong `docker-compose.yml` trỏ vào bảng `invoice_items` đã bỏ ở v3.0 → MySQL không bao giờ `healthy`; đổi sang kiểm tra bảng `pets` có ≥ 2 dòng (đợi cả schema lẫn seed); (b) cổng 3306 bị `mysqld` của máy host chiếm → `docker-compose.dev.yml` dùng biến `MYSQL_HOST_PORT` (mặc định 3306).
+- [x] **0.5** `mvn clean install -DskipTests` (JDK 21): **BUILD SUCCESS** 8/8 module (~2 phút). Baseline `mvn test`: **288 test, 0 lỗi** (auth 28 · appointment 54 · clinical 103 · billing 68 · notification 35).
+- [x] **0.6** Chạy riêng `auth-service` (jar v2, không sửa code) trên schema v3.0: khởi động ~28 giây, `POST /api/v1/auth/login` `admin`/`Admin@123` → `200`, có access + refresh token. **Phương pháp sửa dần được xác nhận.**
 
 ---
 
