@@ -7,8 +7,8 @@ import java.time.LocalDate;
 public interface ReportService {
 
     /**
-     * FR-69 / UC-08: doanh thu theo ngày / tuần / tháng / quý trong khoảng tùy chọn (mặc định 30 ngày gần nhất, tối đa
-     * 366 ngày). Ngày tính theo giờ phòng khám.
+     * FR-69, phần doanh thu thuốc: hóa đơn thuốc PAID theo ngày thu tiền (giờ phòng khám), nhóm theo ngày / tuần / tháng / quý.
+     * Hóa đơn CANCELLED không tính.
      */
     RevenueReportResponse revenue(LocalDate fromDate, LocalDate toDate, RevenuePeriods.Granularity groupBy);
 }

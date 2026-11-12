@@ -3,9 +3,8 @@ package com.vetclinic.billing.service;
 import com.vetclinic.billing.config.BillingProperties;
 import com.vetclinic.billing.constant.PaymentStatus;
 import com.vetclinic.billing.dto.response.RevenueReportResponse;
-import com.vetclinic.billing.repository.InvoiceRepository;
-import com.vetclinic.billing.repository.RevenueRow;
-import com.vetclinic.billing.repository.StatusRow;
+import com.vetclinic.billing.repository.MedicineInvoiceRepository;
+import com.vetclinic.billing.repository.MedicineRevenueRow;
 import com.vetclinic.billing.service.RevenuePeriods.Granularity;
 import com.vetclinic.billing.service.impl.ReportServiceImpl;
 import com.vetclinic.common.exception.ErrorCode;
@@ -20,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Collections;
 
 import static com.vetclinic.billing.testsupport.TestData.CLOCK;
 import static com.vetclinic.billing.testsupport.TestData.assertError;
@@ -32,20 +32,25 @@ import static org.mockito.Mockito.when;
 class RevenueReportTest {
 
     @Mock
-    private InvoiceRepository invoiceRepository;
+    private MedicineInvoiceRepository invoiceRepository;
 
     private ReportServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        BillingProperties properties = new BillingProperties(
-                new BillingProperties.Vat(BigDecimal.ZERO, BigDecimal.ZERO), "Asia/Ho_Chi_Minh");
-        service = new ReportServiceImpl(invoiceRepository, properties, CLOCK);
+        service = new ReportServiceImpl(invoiceRepository, new BillingProperties("Asia/Ho_Chi_Minh"), CLOCK);
     }
 
-    private static RevenueRow paid(String instant, String service, String medicine, String vat, String discount) {
-        BigDecimal s = new BigDecimal(service), m = new BigDecimal(medicine), v = new BigDecimal(vat), d = new BigDecimal(discount);
-        return new RevenueRow(Instant.parse(instant), s, m, v, d, s.add(m).add(v).subtract(d));
+    /** gross = trước VAT + VAT (đã chưa làm tròn như JPQL SUM trả về). */
+    private static MedicineRevenueRow paid(String instant, String beforeVat, String vat, String discount) {
+        BigDecimal b = new BigDecimal(beforeVat), v = new BigDecimal(vat);
+        return new MedicineRevenueRow(Instant.parse(instant), new BigDecimal(discount), b, v, b.add(v));
+    }
+
+    private static List<Object[]> statusRows(Object[]... rows) {
+        List<Object[]> list = new java.util.ArrayList<>();
+        Collections.addAll(list, rows);
+        return list;
     }
 
     // ================================================================== kỳ báo cáo
@@ -72,41 +77,41 @@ class RevenueReportTest {
                 .containsExactly(LocalDate.of(2026, 10, 26), LocalDate.of(2026, 11, 2));
     }
 
-    // ================================================================== báo cáo doanh thu
+    // ================================================================== báo cáo doanh thu thuốc
 
     @Test
-    void revenue_groupsPaidInvoicesByClinicDayAndSplitsServiceFromMedicine() {
+    void revenue_groupsPaidMedicineInvoicesByClinicDay() {
         // 17:30 UTC ngày 28/10 = 00:30 ngày 29/10 giờ Việt Nam -> thuộc ngày 29/10
         when(invoiceRepository.findPaidRevenueRows(any(), any())).thenReturn(List.of(
-                paid("2026-10-28T03:00:00Z", "250000", "45000", "0", "0"),
-                paid("2026-10-28T17:30:00Z", "100000", "0", "10000", "20000"),
-                paid("2026-10-29T03:00:00Z", "150000", "90000", "0", "0")));
-        when(invoiceRepository.summarizeByStatus(any(), any())).thenReturn(List.of(
-                new StatusRow(PaymentStatus.PAID, 3L, new BigDecimal("625000")),
-                new StatusRow(PaymentStatus.PENDING, 2L, new BigDecimal("300000"))));
+                paid("2026-10-28T03:00:00Z", "150000", "7500", "0"),
+                paid("2026-10-28T17:30:00Z", "90000", "4500", "10000"),
+                paid("2026-10-29T03:00:00Z", "45000", "2250", "0")));
+        when(invoiceRepository.countByStatus(any(), any())).thenReturn(statusRows(
+                new Object[]{PaymentStatus.PAID, 3L}, new Object[]{PaymentStatus.PENDING, 2L}));
 
         RevenueReportResponse report = service.revenue(LocalDate.of(2026, 10, 28), LocalDate.of(2026, 10, 30), Granularity.DAY);
 
-        assertThat(report.periods()).extracting(RevenueReportResponse.Period::label).containsExactly("2026-10-28", "2026-10-29", "2026-10-30");
-        assertThat(report.periods().get(0).finalAmount()).isEqualByComparingTo("295000");
+        assertThat(report.periods()).extracting(RevenueReportResponse.Period::label)
+                .containsExactly("2026-10-28", "2026-10-29", "2026-10-30");
+        assertThat(report.periods().get(0).payableAmount()).isEqualByComparingTo("157500");
         assertThat(report.periods().get(1).invoiceCount()).isEqualTo(2);
-        assertThat(report.periods().get(1).serviceAmount()).isEqualByComparingTo("250000");
-        assertThat(report.periods().get(1).medicineAmount()).isEqualByComparingTo("90000");
+        assertThat(report.periods().get(1).amountBeforeVat()).isEqualByComparingTo("135000");
+        assertThat(report.periods().get(1).discountAmount()).isEqualByComparingTo("10000");
+        assertThat(report.periods().get(1).payableAmount()).isEqualByComparingTo("131750");   // 94500 + 47250 - 10000
         assertThat(report.periods().get(2).invoiceCount()).isZero();      // ngày không có doanh thu vẫn có dòng
         assertThat(report.totals().invoiceCount()).isEqualTo(3);
-        assertThat(report.totals().serviceAmount()).isEqualByComparingTo("500000");
-        assertThat(report.totals().medicineAmount()).isEqualByComparingTo("135000");
-        assertThat(report.totals().vatAmount()).isEqualByComparingTo("10000");
-        assertThat(report.totals().discountAmount()).isEqualByComparingTo("20000");
-        assertThat(report.totals().finalAmount()).isEqualByComparingTo("625000");   // 500000 + 135000 + 10000 - 20000
-        assertThat(report.byStatus().get("PENDING").finalAmount()).isEqualByComparingTo("300000");   // công nợ
-        assertThat(report.byStatus().get("CANCELLED").invoiceCount()).isZero();   // đủ ba trạng thái
+        assertThat(report.totals().amountBeforeVat()).isEqualByComparingTo("285000");
+        assertThat(report.totals().vatAmount()).isEqualByComparingTo("14250");
+        assertThat(report.totals().discountAmount()).isEqualByComparingTo("10000");
+        assertThat(report.totals().payableAmount()).isEqualByComparingTo("289250");   // 285000 + 14250 - 10000
+        assertThat(report.byStatus()).containsEntry("PAID", 3L).containsEntry("PENDING", 2L)
+                .containsEntry("CANCELLED", 0L);   // đủ ba trạng thái
     }
 
     @Test
     void revenue_queriesTheClinicDayBoundariesNotUtc() {
         when(invoiceRepository.findPaidRevenueRows(any(), any())).thenReturn(List.of());
-        when(invoiceRepository.summarizeByStatus(any(), any())).thenReturn(List.of());
+        when(invoiceRepository.countByStatus(any(), any())).thenReturn(List.of());
 
         service.revenue(LocalDate.of(2026, 10, 28), LocalDate.of(2026, 10, 28), Granularity.DAY);
 
@@ -120,9 +125,9 @@ class RevenueReportTest {
     @Test
     void revenue_groupsByMonthAndQuarter() {
         when(invoiceRepository.findPaidRevenueRows(any(), any())).thenReturn(List.of(
-                paid("2026-10-15T03:00:00Z", "100000", "0", "0", "0"),
-                paid("2026-11-15T03:00:00Z", "200000", "0", "0", "0")));
-        when(invoiceRepository.summarizeByStatus(any(), any())).thenReturn(List.of());
+                paid("2026-10-15T03:00:00Z", "100000", "0", "0"),
+                paid("2026-11-15T03:00:00Z", "200000", "0", "0")));
+        when(invoiceRepository.countByStatus(any(), any())).thenReturn(List.of());
 
         RevenueReportResponse months = service.revenue(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 11, 30), Granularity.MONTH);
         RevenueReportResponse quarter = service.revenue(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 11, 30), Granularity.QUARTER);
@@ -130,13 +135,13 @@ class RevenueReportTest {
         assertThat(months.periods()).extracting(RevenueReportResponse.Period::label).containsExactly("2026-10", "2026-11");
         assertThat(quarter.periods()).hasSize(1);
         assertThat(quarter.periods().get(0).label()).isEqualTo("2026-Q4");
-        assertThat(quarter.periods().get(0).finalAmount()).isEqualByComparingTo("300000");
+        assertThat(quarter.periods().get(0).payableAmount()).isEqualByComparingTo("300000");
     }
 
     @Test
     void revenue_defaultsToTheLast30DaysUpToToday() {
         when(invoiceRepository.findPaidRevenueRows(any(), any())).thenReturn(List.of());
-        when(invoiceRepository.summarizeByStatus(any(), any())).thenReturn(List.of());
+        when(invoiceRepository.countByStatus(any(), any())).thenReturn(List.of());
 
         RevenueReportResponse report = service.revenue(null, null, null);
 

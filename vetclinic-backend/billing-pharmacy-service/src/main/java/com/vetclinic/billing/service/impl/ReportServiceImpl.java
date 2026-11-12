@@ -3,9 +3,9 @@ package com.vetclinic.billing.service.impl;
 import com.vetclinic.billing.config.BillingProperties;
 import com.vetclinic.billing.constant.PaymentStatus;
 import com.vetclinic.billing.dto.response.RevenueReportResponse;
-import com.vetclinic.billing.repository.InvoiceRepository;
-import com.vetclinic.billing.repository.RevenueRow;
-import com.vetclinic.billing.repository.StatusRow;
+import com.vetclinic.billing.repository.MedicineInvoiceRepository;
+import com.vetclinic.billing.repository.MedicineRevenueRow;
+import com.vetclinic.billing.service.MedicineInvoiceAmounts;
 import com.vetclinic.billing.service.ReportService;
 import com.vetclinic.billing.service.RevenuePeriods;
 import com.vetclinic.billing.service.RevenuePeriods.Granularity;
@@ -33,26 +33,24 @@ public class ReportServiceImpl implements ReportService {
     private static final int DEFAULT_DAYS = 30;
     private static final long MAX_DAYS = 366;
 
-    private final InvoiceRepository invoiceRepository;
+    private final MedicineInvoiceRepository invoiceRepository;
     private final BillingProperties properties;
     private final Clock clock;
 
-    /** Cộng dồn tiền của một nhóm hóa đơn. */
+    /** Cộng dồn tiền của một nhóm hóa đơn (đã làm tròn từng hóa đơn như VIEW v_medicine_invoice_amounts). */
     private static final class Sum {
         long count;
-        BigDecimal service = BigDecimal.ZERO;
-        BigDecimal medicine = BigDecimal.ZERO;
+        BigDecimal beforeVat = BigDecimal.ZERO;
         BigDecimal vat = BigDecimal.ZERO;
         BigDecimal discount = BigDecimal.ZERO;
-        BigDecimal total = BigDecimal.ZERO;
+        BigDecimal payable = BigDecimal.ZERO;
 
-        void add(RevenueRow row) {
+        void add(MedicineRevenueRow row) {
             count++;
-            service = service.add(row.serviceAmount());
-            medicine = medicine.add(row.medicineAmount());
-            vat = vat.add(row.vatAmount());
+            beforeVat = beforeVat.add(MedicineInvoiceAmounts.money(row.amountBeforeVat()));
+            vat = vat.add(MedicineInvoiceAmounts.money(row.vatAmount()));
             discount = discount.add(row.discountAmount());
-            total = total.add(row.finalAmount());
+            payable = payable.add(MedicineInvoiceAmounts.money(row.grossAmount().subtract(row.discountAmount())));
         }
     }
 
@@ -75,26 +73,26 @@ public class ReportServiceImpl implements ReportService {
         Map<LocalDate, Sum> buckets = new TreeMap<>();
         RevenuePeriods.between(from, to, granularity).forEach(p -> buckets.put(p, new Sum()));
         Sum total = new Sum();
-        for (RevenueRow row : invoiceRepository.findPaidRevenueRows(start, end)) {
+        for (MedicineRevenueRow row : invoiceRepository.findPaidRevenueRows(start, end)) {
             LocalDate paidDay = row.paidAt().atZone(zone).toLocalDate();
             buckets.computeIfAbsent(RevenuePeriods.start(paidDay, granularity), k -> new Sum()).add(row);
             total.add(row);
         }
 
         List<RevenueReportResponse.Period> periods = buckets.entrySet().stream().map(e -> new RevenueReportResponse.Period(
-                RevenuePeriods.label(e.getKey(), granularity), e.getKey(), e.getValue().count, e.getValue().service,
-                e.getValue().medicine, e.getValue().vat, e.getValue().discount, e.getValue().total)).toList();
+                RevenuePeriods.label(e.getKey(), granularity), e.getKey(), e.getValue().count, e.getValue().beforeVat,
+                e.getValue().vat, e.getValue().discount, e.getValue().payable)).toList();
 
-        Map<String, RevenueReportResponse.StatusTotal> byStatus = new LinkedHashMap<>();
+        Map<String, Long> byStatus = new LinkedHashMap<>();
         for (PaymentStatus status : PaymentStatus.values()) {
-            byStatus.put(status.name(), new RevenueReportResponse.StatusTotal(0, BigDecimal.ZERO));
+            byStatus.put(status.name(), 0L);
         }
-        for (StatusRow row : invoiceRepository.summarizeByStatus(start, end)) {
-            byStatus.put(row.status().name(), new RevenueReportResponse.StatusTotal(row.invoiceCount(), row.finalAmount()));
+        for (Object[] row : invoiceRepository.countByStatus(start, end)) {
+            byStatus.put(((PaymentStatus) row[0]).name(), (Long) row[1]);
         }
 
         return new RevenueReportResponse(from, to, granularity.name(),
-                new RevenueReportResponse.Totals(total.count, total.service, total.medicine, total.vat, total.discount,
-                        total.total), periods, byStatus);
+                new RevenueReportResponse.Totals(total.count, total.beforeVat, total.vat, total.discount, total.payable),
+                periods, byStatus);
     }
 }

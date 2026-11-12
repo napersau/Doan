@@ -2,20 +2,23 @@ package com.vetclinic.billing.repository;
 
 import com.vetclinic.billing.entity.Prescription;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface PrescriptionRepository extends JpaRepository<Prescription, Long>, JpaSpecificationExecutor<Prescription> {
+public interface PrescriptionRepository extends JpaRepository<Prescription, Long> {
 
-    /** Khóa dòng khi xuất thuốc / hủy đơn: hai lần bấm đồng thời chỉ một lần thắng (EX-16). */
+    /** Khóa dòng khi sửa đơn / lập hóa đơn thuốc: hai thao tác đồng thời trên cùng một đơn được xếp hàng. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Prescription p where p.id = :id")
     Optional<Prescription> findByIdForUpdate(@Param("id") Long id);
@@ -27,8 +30,9 @@ public interface PrescriptionRepository extends JpaRepository<Prescription, Long
     @EntityGraph(attributePaths = {"items", "items.medicine"})
     Optional<Prescription> findWithItemsByVisitId(Long visitId);
 
-    /** Cho tra cứu bệnh án: đơn của nhiều đợt khám cùng lúc (không gồm đơn đã hủy). */
+    /** Cho tra cứu bệnh án: đơn của nhiều đợt khám cùng lúc. */
     @EntityGraph(attributePaths = {"items", "items.medicine"})
-    java.util.List<Prescription> findWithItemsByVisitIdInAndStatusNot(java.util.Collection<Long> visitIds,
-                                                                      com.vetclinic.billing.constant.PrescriptionStatus status);
+    List<Prescription> findWithItemsByVisitIdIn(Collection<Long> visitIds);
+
+    Page<Prescription> findByVisitId(Long visitId, Pageable pageable);
 }

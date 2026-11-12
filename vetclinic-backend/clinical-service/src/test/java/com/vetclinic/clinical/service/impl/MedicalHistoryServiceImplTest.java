@@ -93,7 +93,7 @@ class MedicalHistoryServiceImplTest {
     }
 
     private static PrescriptionSummary prescription(long visitId) {
-        return new PrescriptionSummary(3L, visitId, "DISPENSED", null, BigDecimal.TEN, null, List.of());
+        return new PrescriptionSummary(3L, visitId, null, List.of());
     }
 
     @Test
@@ -109,7 +109,7 @@ class MedicalHistoryServiceImplTest {
         assertThat(page.getItems()).hasSize(2);
         assertThat(page.getItems()).extracting(MedicalHistoryEntry::doctorName).containsOnly("BS Lan");
         assertThat(page.getItems().get(0).prescription()).isNull();              // ca 7 không kê đơn
-        assertThat(page.getItems().get(1).prescription().status()).isEqualTo("DISPENSED");
+        assertThat(page.getItems().get(1).prescription().id()).isEqualTo(3L);   // đơn thuốc v3.0 không có trạng thái
         verify(visitRepository).findByPetId(eq(11L), any(Pageable.class));
     }
 

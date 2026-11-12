@@ -7,8 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.math.BigDecimal;
-
+/** Một thuốc được kê. Không lưu giá: giá chốt tại {@link MedicineInvoiceItem} lúc lập hóa đơn thuốc (BR-26). */
 @Entity
 @Table(name = "prescription_items")
 @Getter
@@ -29,15 +28,9 @@ public class PrescriptionItem {
     @JoinColumn(name = "medicine_id", nullable = false)
     private Medicine medicine;
 
+    /** Số lượng bác sĩ kê. */
     @Column(name = "quantity", nullable = false)
     private int quantity;
-
-    /** Snapshot đơn giá bán tại thời điểm kê đơn (BR-26): đổi giá thuốc sau đó không ảnh hưởng đơn đã kê. */
-    @Column(name = "unit_price", nullable = false, precision = 12, scale = 2)
-    private BigDecimal unitPrice;
-
-    @Column(name = "subtotal", nullable = false, precision = 12, scale = 2)
-    private BigDecimal subtotal;
 
     @Column(name = "dosage", nullable = false, length = 100)
     private String dosage;

@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Báo cáo doanh thu (FR-69). Doanh thu chỉ tính hóa đơn PAID theo ngày thu tiền (giờ phòng khám). Phân rã hai nguồn:
- * dịch vụ kỹ thuật và thuốc (trước VAT và chiết khấu), kèm VAT và chiết khấu; finalAmount = dịch vụ + thuốc + VAT - chiết khấu.
- * byStatus thống kê số hóa đơn và tiền theo trạng thái cho các hóa đơn LẬP trong kỳ (PENDING = công nợ chưa thu).
+ * FR-69, phần doanh thu THUỐC (billing-pharmacy-service): hóa đơn thuốc {@code PAID} theo {@code paid_at} (giờ phòng khám); hóa đơn
+ * CANCELLED không tính. Doanh thu dịch vụ nằm ở clinical-service; Admin cộng hai nguồn ở tầng ứng dụng (CLAUDE.md §10 #5).
+ * payableAmount = amountBeforeVat + vatAmount - discountAmount. byStatus = số hóa đơn LẬP trong kỳ theo trạng thái (PENDING = chưa thu).
  */
 public record RevenueReportResponse(
         LocalDate fromDate,
@@ -16,16 +16,15 @@ public record RevenueReportResponse(
         String groupBy,
         Totals totals,
         List<Period> periods,
-        Map<String, StatusTotal> byStatus
+        Map<String, Long> byStatus
 ) {
 
     public record Totals(
             long invoiceCount,
-            BigDecimal serviceAmount,
-            BigDecimal medicineAmount,
+            BigDecimal amountBeforeVat,
             BigDecimal vatAmount,
             BigDecimal discountAmount,
-            BigDecimal finalAmount
+            BigDecimal payableAmount
     ) {
     }
 
@@ -33,14 +32,10 @@ public record RevenueReportResponse(
             String label,
             LocalDate periodStart,
             long invoiceCount,
-            BigDecimal serviceAmount,
-            BigDecimal medicineAmount,
+            BigDecimal amountBeforeVat,
             BigDecimal vatAmount,
             BigDecimal discountAmount,
-            BigDecimal finalAmount
+            BigDecimal payableAmount
     ) {
-    }
-
-    public record StatusTotal(long invoiceCount, BigDecimal finalAmount) {
     }
 }

@@ -48,6 +48,11 @@ public class Medicine {
     @Column(name = "sale_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal salePrice;
 
+    /** Thuế suất VAT hiện hành của thuốc (0.05 = 5%); snapshot vào hóa đơn thuốc khi lập (BR-26). */
+    @Column(name = "vat_rate", nullable = false, precision = 4, scale = 2)
+    @Builder.Default
+    private BigDecimal vatRate = new BigDecimal("0.05");
+
     @Column(name = "stock_quantity", nullable = false)
     private int stockQuantity;
 

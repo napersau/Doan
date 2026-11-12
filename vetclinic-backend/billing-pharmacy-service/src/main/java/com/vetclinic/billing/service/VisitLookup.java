@@ -1,7 +1,6 @@
 package com.vetclinic.billing.service;
 
 import com.vetclinic.billing.client.ClinicalClient;
-import com.vetclinic.billing.dto.response.BillableServiceResponse;
 import com.vetclinic.billing.dto.response.VisitSummaryResponse;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
@@ -59,13 +58,5 @@ public class VisitLookup {
             log.warn("Không lấy được thông tin {} đợt khám từ clinical-service: {}", visitIds.size(), e.getMessage());
             return Map.of();
         }
-    }
-
-    public List<BillableServiceResponse> billableServices(Long visitId) {
-        ApiResponse<List<BillableServiceResponse>> response = clinicalClient.getBillableServices(visitId);
-        if (response == null || response.getData() == null) {
-            throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
-        }
-        return response.getData();
     }
 }

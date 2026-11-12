@@ -8,7 +8,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * Đường dẫn nội bộ theo Kiến trúc v3.0 §5.1: billing-pharmacy-service đọc trạng thái + bác sĩ phụ trách của đợt khám (kê đơn, lập hóa đơn
@@ -24,5 +27,11 @@ public class InternalVisitController {
     @GetMapping("/{id}/summary")
     public ResponseEntity<ApiResponse<VisitSummaryResponse>> summary(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(visitService.summary(id)));
+    }
+
+    /** Theo lô, để billing làm giàu danh sách đơn thuốc bằng mã ca khám / tên thú cưng; id không tồn tại bị bỏ qua. */
+    @GetMapping("/summaries")
+    public ResponseEntity<ApiResponse<List<VisitSummaryResponse>>> summaries(@RequestParam("ids") List<Long> ids) {
+        return ResponseEntity.ok(ApiResponse.success(visitService.summaries(ids)));
     }
 }

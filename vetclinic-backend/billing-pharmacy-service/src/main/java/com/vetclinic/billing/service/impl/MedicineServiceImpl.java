@@ -1,9 +1,9 @@
 package com.vetclinic.billing.service.impl;
 
 import com.vetclinic.billing.constant.InventoryTransactionType;
+import com.vetclinic.billing.dto.request.InventoryAdjustRequest;
+import com.vetclinic.billing.dto.request.InventoryImportRequest;
 import com.vetclinic.billing.dto.request.MedicineRequest;
-import com.vetclinic.billing.dto.request.StockAdjustRequest;
-import com.vetclinic.billing.dto.request.StockImportRequest;
 import com.vetclinic.billing.dto.request.UpdateMedicineRequest;
 import com.vetclinic.billing.dto.response.InventoryTransactionResponse;
 import com.vetclinic.billing.dto.response.MedicineResponse;
@@ -14,7 +14,7 @@ import com.vetclinic.billing.repository.InventoryTransactionRepository;
 import com.vetclinic.billing.repository.MedicineRepository;
 import com.vetclinic.billing.repository.MedicineSpecifications;
 import com.vetclinic.billing.service.BillingAssembler;
-import com.vetclinic.billing.service.InvoiceCalculator;
+import com.vetclinic.billing.service.MedicineInvoiceAmounts;
 import com.vetclinic.billing.service.MedicineService;
 import com.vetclinic.billing.service.StockAlertPublisher;
 import com.vetclinic.common.dto.PageResponse;
@@ -31,6 +31,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.Locale;
 
 @Service
@@ -83,7 +84,8 @@ public class MedicineServiceImpl implements MedicineService {
                 .activeIngredient(blankToNull(request.activeIngredient()))
                 .dosageForm(request.dosageForm().trim())
                 .unit(request.unit().trim())
-                .salePrice(InvoiceCalculator.money(request.salePrice()))
+                .salePrice(MedicineInvoiceAmounts.money(request.salePrice()))
+                .vatRate(request.vatRate() == null ? new BigDecimal("0.05") : MedicineInvoiceAmounts.money(request.vatRate()))
                 .stockQuantity(initialStock)
                 .minStockAlert(request.minStockAlert() == null ? 10 : request.minStockAlert())
                 .build();
@@ -94,8 +96,7 @@ public class MedicineServiceImpl implements MedicineService {
             throw new AppException(ErrorCode.MEDICINE_CODE_ALREADY_EXISTS);
         }
         if (initialStock > 0) {
-            log(medicine.getId(), InventoryTransactionType.IMPORT, initialStock, initialStock, null,
-                    "Tồn kho ban đầu khi tạo thuốc", actor);
+            log(medicine.getId(), InventoryTransactionType.IMPORT, initialStock, "Tồn kho ban đầu khi tạo thuốc", actor);
         }
         return mapper.toResponse(medicine);
     }
@@ -108,7 +109,10 @@ public class MedicineServiceImpl implements MedicineService {
         medicine.setActiveIngredient(blankToNull(request.activeIngredient()));
         medicine.setDosageForm(request.dosageForm().trim());
         medicine.setUnit(request.unit().trim());
-        medicine.setSalePrice(InvoiceCalculator.money(request.salePrice()));
+        medicine.setSalePrice(MedicineInvoiceAmounts.money(request.salePrice()));
+        if (request.vatRate() != null) {
+            medicine.setVatRate(MedicineInvoiceAmounts.money(request.vatRate()));
+        }
         if (request.minStockAlert() != null) {
             medicine.setMinStockAlert(request.minStockAlert());
         }
@@ -121,26 +125,24 @@ public class MedicineServiceImpl implements MedicineService {
 
     @Override
     @Transactional
-    public MedicineResponse importStock(Long id, StockImportRequest request) {
+    public MedicineResponse importStock(InventoryImportRequest request) {
         Long actor = SecurityUtils.getCurrentUserId();
-        Medicine medicine = find(id);
+        Medicine medicine = find(request.medicineId());
         applyDelta(medicine, request.quantity());
-        log(id, InventoryTransactionType.IMPORT, request.quantity(), medicine.getStockQuantity(), null,
-                blankToNull(request.notes()), actor);
+        log(medicine.getId(), InventoryTransactionType.IMPORT, request.quantity(), blankToNull(request.notes()), actor);
         return mapper.toResponse(medicine);
     }
 
     @Override
     @Transactional
-    public MedicineResponse adjustStock(Long id, StockAdjustRequest request) {
+    public MedicineResponse adjustStock(InventoryAdjustRequest request) {
         Long actor = SecurityUtils.getCurrentUserId();
         if (request.delta() == 0) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Số lượng điều chỉnh phải khác 0");
         }
-        Medicine medicine = find(id);
+        Medicine medicine = find(request.medicineId());
         applyDelta(medicine, request.delta());
-        log(id, InventoryTransactionType.ADJUSTMENT, request.delta(), medicine.getStockQuantity(), null,
-                request.reason().trim(), actor);
+        log(medicine.getId(), InventoryTransactionType.ADJUSTMENT, request.delta(), request.reason().trim(), actor);
         if (request.delta() < 0) {
             stockAlerts.publishIfLow(medicine, actor);
         }
@@ -175,11 +177,10 @@ public class MedicineServiceImpl implements MedicineService {
         entityManager.refresh(medicine);
     }
 
-    private void log(Long medicineId, InventoryTransactionType type, int quantity, int balanceAfter, Long referenceId,
-                     String notes, Long actor) {
+    /** quantity có dấu (+ nhập / - xuất): bất biến stock_quantity = SUM(quantity). */
+    private void log(Long medicineId, InventoryTransactionType type, int quantity, String notes, Long actor) {
         inventoryRepository.save(InventoryTransaction.builder().medicineId(medicineId).transactionType(type)
-                .quantity(quantity).balanceAfter(balanceAfter).referenceId(referenceId).notes(notes).createdBy(actor)
-                .build());
+                .quantity(quantity).notes(notes).createdBy(actor).build());
     }
 
     private static boolean isAdmin() {

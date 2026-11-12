@@ -22,7 +22,7 @@ public class ReportController {
 
     private final ReportService reportService;
 
-    /** FR-69: doanh thu theo ngày / tuần / tháng / quý, phân rã dịch vụ và thuốc. */
+    /** FR-69, phần doanh thu THUỐC (hóa đơn thuốc PAID theo ngày / tuần / tháng / quý). Phần dịch vụ ở clinical-service /clinical/reports/revenue. */
     @GetMapping("/revenue")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<RevenueReportResponse>> revenue(

@@ -21,13 +21,13 @@ public interface MedicineRepository extends JpaRepository<Medicine, Long>, JpaSp
      * dùng EntityManager.refresh(medicine) để đọc lại tồn kho thật, không bao giờ tin giá trị cũ trong entity.
      */
     @Modifying(flushAutomatically = true)
-    @Query("update Medicine m set m.stockQuantity = m.stockQuantity - :quantity "
+    @Query("update Medicine m set m.stockQuantity = m.stockQuantity - :quantity, m.version = m.version + 1 "
             + "where m.id = :id and m.stockQuantity >= :quantity")
     int deductStock(@Param("id") Long id, @Param("quantity") int quantity);
 
     /** Nhập kho / cân chỉnh (delta có thể âm). Không cho tồn kho âm: trả 0 dòng nếu sẽ âm hoặc thuốc không tồn tại. */
     @Modifying(flushAutomatically = true)
-    @Query("update Medicine m set m.stockQuantity = m.stockQuantity + :delta "
+    @Query("update Medicine m set m.stockQuantity = m.stockQuantity + :delta, m.version = m.version + 1 "
             + "where m.id = :id and m.stockQuantity + :delta >= 0")
     int addStock(@Param("id") Long id, @Param("delta") int delta);
 }

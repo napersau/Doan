@@ -70,7 +70,3 @@ management:
 vetclinic:
   billing:
     zone: Asia/Ho_Chi_Minh          # Múi giờ vận hành phòng khám (năm trong mã hóa đơn)
-    # Chưa có quyết định thuế suất từ nhóm (CLAUDE.md §8) -> mặc định 0%
-    vat:
-      service-rate: 0.00
-      medicine-rate: 0.00

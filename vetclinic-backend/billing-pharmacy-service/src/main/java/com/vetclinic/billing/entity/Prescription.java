@@ -1,6 +1,5 @@
 package com.vetclinic.billing.entity;
 
-import com.vetclinic.billing.constant.PrescriptionStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -13,6 +12,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Đơn thuốc = chỉ định chuyên môn của bác sĩ (v3.0): KHÔNG có giá, KHÔNG có trạng thái. Việc khách mua tại phòng khám
+ * thể hiện qua {@link MedicineInvoice}; mua ngoài thì không phát sinh gì thêm.
+ */
 @Entity
 @Table(name = "prescriptions")
 @Getter
@@ -31,18 +34,6 @@ public class Prescription {
 
     @Column(name = "doctor_notes", columnDefinition = "TEXT")
     private String doctorNotes;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    @Builder.Default
-    private PrescriptionStatus status = PrescriptionStatus.PRESCRIBED;
-
-    /** Khóa ngoại logic -> auth.users(id): người phát thuốc. */
-    @Column(name = "dispensed_by")
-    private Long dispensedBy;
-
-    @Column(name = "dispensed_at")
-    private Instant dispensedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

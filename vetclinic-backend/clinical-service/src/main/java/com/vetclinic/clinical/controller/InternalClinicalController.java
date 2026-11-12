@@ -50,16 +50,10 @@ public class InternalClinicalController {
 
     /**
      * billing-pharmacy-service kiểm tra trạng thái, bác sĩ phụ trách và chủ nuôi của đợt khám (kê đơn, xem đơn). Đường dẫn chuẩn v3.0 là
-     * {@code /internal/pet-visits/{id}/summary}; đường dẫn này giữ tạm cho billing v2 tới Phase 4 (xóa ở bước 7.1).
+     * {@code /internal/pet-visits/{id}/summary}; đường dẫn này giữ tạm cho notification-service v2 tới Phase 5 (xóa ở bước 7.1).
      */
     @GetMapping("/visits/{id}")
     public ResponseEntity<ApiResponse<VisitSummaryResponse>> visit(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(visitService.summary(id)));
-    }
-
-    /** Làm giàu danh sách hóa đơn / đơn thuốc bằng mã ca khám và tên thú cưng theo lô. */
-    @GetMapping("/visits")
-    public ResponseEntity<ApiResponse<List<VisitSummaryResponse>>> visits(@RequestParam("ids") List<Long> ids) {
-        return ResponseEntity.ok(ApiResponse.success(visitService.summaries(ids)));
     }
 }

@@ -1,6 +1,5 @@
 package com.vetclinic.billing.testsupport;
 
-import com.vetclinic.billing.constant.PrescriptionStatus;
 import com.vetclinic.billing.constant.VisitStatus;
 import com.vetclinic.billing.dto.response.VisitSummaryResponse;
 import com.vetclinic.billing.entity.Medicine;
@@ -37,7 +36,7 @@ public final class TestData {
 
     public static Medicine medicine(long id, String name, String price, int stock) {
         return Medicine.builder().id(id).code("MED_" + id).name(name).dosageForm("Viên nén").unit("Viên")
-                .salePrice(new BigDecimal(price)).stockQuantity(stock).minStockAlert(10).active(true).version(0L).build();
+                .salePrice(new BigDecimal(price)).vatRate(new BigDecimal("0.05")).stockQuantity(stock).minStockAlert(10).active(true).version(0L).build();
     }
 
     public static VisitSummaryResponse visit(long id, VisitStatus status, Long doctorId) {
@@ -45,13 +44,12 @@ public final class TestData {
     }
 
     public static PrescriptionItem item(long id, Medicine medicine, int quantity) {
-        return PrescriptionItem.builder().id(id).medicine(medicine).quantity(quantity).unitPrice(medicine.getSalePrice())
-                .subtotal(medicine.getSalePrice().multiply(BigDecimal.valueOf(quantity))).dosage("1 viên")
+        return PrescriptionItem.builder().id(id).medicine(medicine).quantity(quantity).dosage("1 viên")
                 .frequency("2 lần/ngày").durationDays(5).build();
     }
 
-    public static Prescription prescription(long id, long visitId, PrescriptionStatus status, PrescriptionItem... items) {
-        Prescription prescription = Prescription.builder().id(id).visitId(visitId).status(status).build();
+    public static Prescription prescription(long id, long visitId, PrescriptionItem... items) {
+        Prescription prescription = Prescription.builder().id(id).visitId(visitId).build();
         for (PrescriptionItem item : items) {
             prescription.addItem(item);
         }

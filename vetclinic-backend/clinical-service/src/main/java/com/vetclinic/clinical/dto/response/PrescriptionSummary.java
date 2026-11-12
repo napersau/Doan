@@ -1,17 +1,15 @@
 package com.vetclinic.clinical.dto.response;
 
-import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 
-/** Đơn thuốc của một đợt khám do billing-pharmacy-service trả về (chỉ phần cần cho bệnh án và hướng dẫn dùng thuốc). */
+/**
+ * Đơn thuốc của một đợt khám do billing-pharmacy-service trả về (chỉ phần cần cho bệnh án và hướng dẫn dùng thuốc). Từ v3.0 đơn thuốc
+ * không có giá và không có trạng thái (chỉ định chuyên môn), nên xem được cả khi khách mua ngoài.
+ */
 public record PrescriptionSummary(
         Long id,
         Long visitId,
-        String status,
         String doctorNotes,
-        BigDecimal totalAmount,
-        Instant dispensedAt,
         List<Item> items
 ) {
 

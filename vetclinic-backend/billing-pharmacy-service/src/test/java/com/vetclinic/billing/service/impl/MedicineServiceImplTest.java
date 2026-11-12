@@ -1,9 +1,9 @@
 package com.vetclinic.billing.service.impl;
 
 import com.vetclinic.billing.constant.InventoryTransactionType;
+import com.vetclinic.billing.dto.request.InventoryAdjustRequest;
+import com.vetclinic.billing.dto.request.InventoryImportRequest;
 import com.vetclinic.billing.dto.request.MedicineRequest;
-import com.vetclinic.billing.dto.request.StockAdjustRequest;
-import com.vetclinic.billing.dto.request.StockImportRequest;
 import com.vetclinic.billing.dto.request.UpdateMedicineRequest;
 import com.vetclinic.billing.dto.response.MedicineResponse;
 import com.vetclinic.billing.entity.InventoryTransaction;
@@ -85,21 +85,20 @@ class MedicineServiceImplTest {
     }
 
     @Test
-    void importStock_increasesStockAndLogsImportWithBalance() {
+    void importStock_increasesStockAndLogsPositiveImport() {
         loginAs(ADMIN, RoleCode.ADMIN);
         Medicine medicine = medicine(1L, "Clavamox", "15000", 20);
         when(medicineRepository.findById(1L)).thenReturn(Optional.of(medicine));
         when(medicineRepository.addStock(1L, 100)).thenReturn(1);
         stockBecomes(medicine, 120);
 
-        MedicineResponse response = service.importStock(1L, new StockImportRequest(100, "Nhập lô tháng 10"));
+        MedicineResponse response = service.importStock(new InventoryImportRequest(1L, 100, "Nhập lô tháng 10"));
 
         assertThat(response.stockQuantity()).isEqualTo(120);
         ArgumentCaptor<InventoryTransaction> log = ArgumentCaptor.forClass(InventoryTransaction.class);
         verify(inventoryRepository).save(log.capture());
         assertThat(log.getValue().getTransactionType()).isEqualTo(InventoryTransactionType.IMPORT);
         assertThat(log.getValue().getQuantity()).isEqualTo(100);
-        assertThat(log.getValue().getBalanceAfter()).isEqualTo(120);
         assertThat(log.getValue().getCreatedBy()).isEqualTo(ADMIN);
     }
 
@@ -111,13 +110,12 @@ class MedicineServiceImplTest {
         when(medicineRepository.addStock(1L, -12)).thenReturn(1);
         stockBecomes(medicine, 8);
 
-        service.adjustStock(1L, new StockAdjustRequest(-12, "Hết hạn sử dụng"));
+        service.adjustStock(new InventoryAdjustRequest(1L, -12, "Hết hạn sử dụng"));
 
         ArgumentCaptor<InventoryTransaction> log = ArgumentCaptor.forClass(InventoryTransaction.class);
         verify(inventoryRepository).save(log.capture());
         assertThat(log.getValue().getTransactionType()).isEqualTo(InventoryTransactionType.ADJUSTMENT);
         assertThat(log.getValue().getQuantity()).isEqualTo(-12);
-        assertThat(log.getValue().getBalanceAfter()).isEqualTo(8);
         assertThat(log.getValue().getNotes()).isEqualTo("Hết hạn sử dụng");
         verify(stockAlerts).publishIfLow(medicine, ADMIN);   // 8 <= ngưỡng 10
     }
@@ -130,7 +128,7 @@ class MedicineServiceImplTest {
         when(medicineRepository.addStock(1L, 30)).thenReturn(1);
         stockBecomes(medicine, 35);
 
-        service.adjustStock(1L, new StockAdjustRequest(30, "Kiểm kê thừa"));
+        service.adjustStock(new InventoryAdjustRequest(1L, 30, "Kiểm kê thừa"));
 
         verify(stockAlerts, never()).publishIfLow(any(), anyLong());
     }
@@ -141,7 +139,7 @@ class MedicineServiceImplTest {
         when(medicineRepository.findById(1L)).thenReturn(Optional.of(medicine(1L, "Clavamox", "15000", 5)));
         when(medicineRepository.addStock(1L, -50)).thenReturn(0);   // điều kiện stock + delta >= 0 không thỏa
 
-        assertError(ErrorCode.INVALID_STOCK_ADJUSTMENT, () -> service.adjustStock(1L, new StockAdjustRequest(-50, "Mất")));
+        assertError(ErrorCode.INVALID_STOCK_ADJUSTMENT, () -> service.adjustStock(new InventoryAdjustRequest(1L, -50, "Mất")));
         verify(inventoryRepository, never()).save(any());
     }
 
@@ -149,7 +147,7 @@ class MedicineServiceImplTest {
     void adjustStock_byZeroIsRefused() {
         loginAs(ADMIN, RoleCode.ADMIN);
 
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.adjustStock(1L, new StockAdjustRequest(0, "Không đổi")));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.adjustStock(new InventoryAdjustRequest(1L, 0, "Không đổi")));
         verify(medicineRepository, never()).addStock(anyLong(), anyInt());
     }
 
@@ -159,7 +157,7 @@ class MedicineServiceImplTest {
         when(medicineRepository.existsByCodeIgnoreCase("MED_NEW")).thenReturn(false);
 
         MedicineResponse response = service.create(new MedicineRequest(" med_new ", "Thuốc mới", null, "Viên nén", "Viên",
-                new BigDecimal("2500"), 40, null));
+                new BigDecimal("2500"), null, 40, null));
 
         assertThat(response.code()).isEqualTo("MED_NEW");
         assertThat(response.stockQuantity()).isEqualTo(40);
@@ -167,7 +165,8 @@ class MedicineServiceImplTest {
         ArgumentCaptor<InventoryTransaction> log = ArgumentCaptor.forClass(InventoryTransaction.class);
         verify(inventoryRepository).save(log.capture());
         assertThat(log.getValue().getTransactionType()).isEqualTo(InventoryTransactionType.IMPORT);
-        assertThat(log.getValue().getBalanceAfter()).isEqualTo(40);
+        assertThat(log.getValue().getQuantity()).isEqualTo(40);
+        assertThat(response.vatRate()).isEqualByComparingTo("0.05");   // mặc định 5%
     }
 
     @Test
@@ -176,7 +175,7 @@ class MedicineServiceImplTest {
         when(medicineRepository.existsByCodeIgnoreCase("MED_AMOX")).thenReturn(true);
 
         assertError(ErrorCode.MEDICINE_CODE_ALREADY_EXISTS, () -> service.create(new MedicineRequest("med_amox", "Trùng",
-                null, "Viên", "Viên", BigDecimal.TEN, null, null)));
+                null, "Viên", "Viên", BigDecimal.TEN, null, null, null)));
         verify(medicineRepository, never()).saveAndFlush(any());
     }
 
@@ -187,10 +186,11 @@ class MedicineServiceImplTest {
         when(medicineRepository.findById(1L)).thenReturn(Optional.of(medicine));
 
         MedicineResponse response = service.update(1L, new UpdateMedicineRequest("Clavamox 500", null, "Viên nén", "Viên",
-                new BigDecimal("18000"), null, false));
+                new BigDecimal("18000"), new BigDecimal("0.10"), null, false));
 
         assertThat(response.active()).isFalse();
         assertThat(response.salePrice()).isEqualByComparingTo("18000");
+        assertThat(response.vatRate()).isEqualByComparingTo("0.10");
         assertThat(response.stockQuantity()).isEqualTo(20);
         assertThat(response.minStockAlert()).isEqualTo(10);   // bỏ trống = giữ nguyên
         verify(medicineRepository, never()).addStock(anyLong(), anyInt());

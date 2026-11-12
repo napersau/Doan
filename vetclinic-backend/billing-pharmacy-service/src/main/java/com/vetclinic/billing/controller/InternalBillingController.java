@@ -22,16 +22,8 @@ import java.util.List;
 public class InternalBillingController {
 
     private final PrescriptionService prescriptionService;
-    private final com.vetclinic.billing.service.InvoiceService invoiceService;
 
-    /** clinical-service mở lại đợt khám: hủy hóa đơn PENDING của đợt khám (idempotent; đã thu tiền thì từ chối). */
-    @org.springframework.web.bind.annotation.PostMapping("/invoices/by-visit/{visitId}/cancel-for-reopen")
-    public ResponseEntity<ApiResponse<Void>> cancelInvoiceForReopen(@org.springframework.web.bind.annotation.PathVariable Long visitId) {
-        invoiceService.cancelForReopen(visitId);
-        return ResponseEntity.ok(ApiResponse.<Void>success("Đã hủy hóa đơn của đợt khám", null));
-    }
-
-    /** clinical-service ghép đơn thuốc (chưa hủy) vào bệnh án trọn đời của thú cưng. */
+    /** clinical-service ghép đơn thuốc vào bệnh án trọn đời của thú cưng (kể cả đơn khách mua ngoài). */
     @GetMapping("/prescriptions")
     public ResponseEntity<ApiResponse<List<PrescriptionResponse>>> prescriptions(@RequestParam("visitIds") List<Long> visitIds) {
         return ResponseEntity.ok(ApiResponse.success(prescriptionService.findByVisits(visitIds)));

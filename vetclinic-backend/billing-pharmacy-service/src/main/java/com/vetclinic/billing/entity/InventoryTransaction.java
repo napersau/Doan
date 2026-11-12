@@ -12,8 +12,9 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.Instant;
 
 /**
- * Nhật ký biến động kho (audit). quantity là số lượng của giao dịch: IMPORT và EXPORT_PRESCRIPTION luôn dương (chiều tăng
- * giảm do transactionType quyết định), riêng ADJUSTMENT mang dấu (+ thừa, - hao hụt). balanceAfter là tồn kho ngay sau giao dịch.
+ * Nhật ký biến động kho (audit). {@code quantity} CÓ DẤU (+ nhập / - xuất), nên bất biến
+ * {@code medicines.stock_quantity = SUM(inventory_transactions.quantity)}. Không lưu tồn sau giao dịch (tính bằng window function).
+ * EXPORT_SALE bắt buộc có {@code medicineInvoiceId}.
  */
 @Entity
 @Table(name = "inventory_transactions")
@@ -37,12 +38,8 @@ public class InventoryTransaction {
     @Column(name = "quantity", nullable = false)
     private int quantity;
 
-    @Column(name = "balance_after", nullable = false)
-    private int balanceAfter;
-
-    /** Với EXPORT_PRESCRIPTION: id đơn thuốc. */
-    @Column(name = "reference_id")
-    private Long referenceId;
+    @Column(name = "medicine_invoice_id")
+    private Long medicineInvoiceId;
 
     @Column(name = "notes", length = 255)
     private String notes;

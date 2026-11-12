@@ -1,7 +1,6 @@
 package com.vetclinic.billing.dto.response;
 
-import java.math.BigDecimal;
-
+/** Dòng thuốc trong đơn: chỉ định chuyên môn, không có giá. */
 public record PrescriptionItemResponse(
         Long id,
         Long medicineId,
@@ -10,8 +9,6 @@ public record PrescriptionItemResponse(
         String activeIngredient,
         String unit,
         int quantity,
-        BigDecimal unitPrice,
-        BigDecimal subtotal,
         String dosage,
         String frequency,
         int durationDays,

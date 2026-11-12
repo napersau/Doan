@@ -10,6 +10,7 @@ public record MedicineResponse(
         String dosageForm,
         String unit,
         BigDecimal salePrice,
+        BigDecimal vatRate,
         int stockQuantity,
         int minStockAlert,
         boolean lowStock,
