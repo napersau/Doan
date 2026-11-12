@@ -29,4 +29,10 @@ public interface PetService {
 
     /** Như getSummary nhưng theo lô; id không tồn tại bị bỏ qua (làm giàu danh sách lịch hẹn). */
     List<PetSummaryResponse> getSummaries(java.util.Collection<Long> ids);
+
+    /**
+     * Các thú cưng của một chủ nuôi. appointment-service dùng để lọc "lịch hẹn của tôi" bằng {@code pet_id IN (...)} vì bảng
+     * appointments không còn cột owner_id (lược đồ v3.0). Chủ nuôi không có thú cưng thì trả danh sách rỗng.
+     */
+    List<PetSummaryResponse> getSummariesByOwner(Long ownerId);
 }

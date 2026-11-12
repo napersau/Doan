@@ -33,8 +33,11 @@ public class AppointmentNoShowScheduler {
 
     @Scheduled(cron = "${vetclinic.booking.no-show-cron}", zone = "${vetclinic.booking.zone}")
     public void scanAndMarkNoShowAppointments() {
-        LocalDateTime cutoff = LocalDateTime.now(clock).minusMinutes(properties.noShowGraceMinutes());
-        List<Long> ids = appointmentRepository.findIdsEndedBefore(
+        // Hạn vắng mặt = giờ kết thúc khung (= bắt đầu + độ dài khung) + thời gian chờ; appointments không còn cột end_time
+        // nên lọc theo giờ BẮT ĐẦU trước (now - độ dài khung - thời gian chờ).
+        LocalDateTime cutoff = LocalDateTime.now(clock)
+                .minusMinutes((long) properties.slotMinutes() + properties.noShowGraceMinutes());
+        List<Long> ids = appointmentRepository.findIdsStartedBefore(
                 AppointmentStatus.CONFIRMED, cutoff.toLocalDate(), cutoff.toLocalTime());
         if (ids.isEmpty()) {
             return;

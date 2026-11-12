@@ -92,6 +92,11 @@ class AppointmentServiceImplTest {
         // Khóa khung giờ giả: chạy thẳng action, giống khi lấy được khóa
         lenient().when(slotLockService.runLocked(anyCollection(), any())).thenAnswer(inv ->
                 ((Supplier<?>) inv.getArgument(1)).get());
+        // appointments không còn owner_id: chủ nuôi suy ra từ thú cưng ở clinical-service.
+        // PET thuộc OWNER, PET + 1 thuộc OTHER_OWNER (xem helper appointment(...))
+        lenient().when(petClient.getPet(PET)).thenReturn(ApiResponse.success(new PetSummaryResponse(PET, OWNER, "Lu")));
+        lenient().when(petClient.getPet(PET + 1)).thenReturn(ApiResponse.success(new PetSummaryResponse(PET + 1, OTHER_OWNER, "Mun")));
+        lenient().when(petClient.getPetsByOwner(OWNER)).thenReturn(ApiResponse.success(List.of(new PetSummaryResponse(PET, OWNER, "Lu"))));
     }
 
     @AfterEach
@@ -218,9 +223,9 @@ class AppointmentServiceImplTest {
         assertThat(response.status()).isEqualTo(AppointmentStatus.CONFIRMED);
         assertThat(response.bookingChannel()).isEqualTo(BookingChannel.PHONE);
         assertThat(response.ownerId()).isEqualTo(77L);
-        assertThat(response.confirmedBy()).isEqualTo(RECEPTIONIST);
-        assertThat(response.confirmedAt()).isNotNull();
+        // Người tạo/duyệt nằm ở lịch sử (appointments không còn confirmed_by/confirmed_at)
         assertThat(lastHistory().getToStatus()).isEqualTo(AppointmentStatus.CONFIRMED);
+        assertThat(lastHistory().getChangedByUserId()).isEqualTo(RECEPTIONIST);
     }
 
     @Test
@@ -317,14 +322,14 @@ class AppointmentServiceImplTest {
     void confirm_movesPendingToConfirmedAndRecordsReceptionist() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         AppointmentResponse response = service.confirm(1L);
 
         assertThat(response.status()).isEqualTo(AppointmentStatus.CONFIRMED);
-        assertThat(a.getConfirmedBy()).isEqualTo(RECEPTIONIST);
-        assertThat(a.getConfirmedAt()).isNotNull();
         AppointmentStatusHistory history = lastHistory();
+        assertThat(history.getChangedByUserId()).isEqualTo(RECEPTIONIST);   // người duyệt nằm ở lịch sử, không còn cột confirmed_by
         assertThat(history.getFromStatus()).isEqualTo(AppointmentStatus.PENDING);
         assertThat(history.getToStatus()).isEqualTo(AppointmentStatus.CONFIRMED);
     }
@@ -333,7 +338,8 @@ class AppointmentServiceImplTest {
     void confirm_isNotRepeatableAndOnlyForReceptionist() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TOMORROW, LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThatThrownBy(() -> service.confirm(1L))
                 .isInstanceOf(AppException.class)
@@ -350,15 +356,15 @@ class AppointmentServiceImplTest {
     void cancel_byOwnerWellBeforeAppointment_isAllowed() {
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TOMORROW, LocalTime.of(10, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         AppointmentResponse response = service.cancel(1L, new CancelAppointmentRequest("  Bận việc đột xuất "));
 
         assertThat(response.status()).isEqualTo(AppointmentStatus.CANCELLED);
-        assertThat(a.getCancelReason()).isEqualTo("Bận việc đột xuất");
-        assertThat(a.getCancelledBy()).isEqualTo(OWNER);
-        assertThat(a.getCancelledAt()).isNotNull();
-        assertThat(lastHistory().getNotes()).contains("Chủ nuôi tự hủy").contains("Bận việc đột xuất");
+        // Lý do hủy ghi nguyên văn vào lịch sử (cột cancel_reason/cancelled_by đã bỏ ở v3.0)
+        assertThat(lastHistory().getNotes()).isEqualTo("Bận việc đột xuất");
+        assertThat(lastHistory().getChangedByUserId()).isEqualTo(OWNER);
     }
 
     @Test
@@ -366,7 +372,8 @@ class AppointmentServiceImplTest {
         loginAs(OWNER, RoleCode.PET_OWNER);
         // Bây giờ 09:00, hẹn 10:30 -> còn 1,5 giờ
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY, LocalTime.of(10, 30));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThatThrownBy(() -> service.cancel(1L, new CancelAppointmentRequest("Bận")))
                 .isInstanceOf(AppException.class)
@@ -379,7 +386,8 @@ class AppointmentServiceImplTest {
     void cancel_byOwnerExactlyTwoHoursBefore_isStillAllowed() {
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TODAY, LocalTime.of(11, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.cancel(1L, new CancelAppointmentRequest("Bận")).status())
                 .isEqualTo(AppointmentStatus.CANCELLED);
@@ -389,7 +397,8 @@ class AppointmentServiceImplTest {
     void cancel_ofSomeoneElsesAppointment_looksLikeNotFound() {
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment a = appointment(1L, OTHER_OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(10, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThatThrownBy(() -> service.cancel(1L, new CancelAppointmentRequest("Bận")))
                 .isInstanceOf(AppException.class)
@@ -407,7 +416,8 @@ class AppointmentServiceImplTest {
     void confirm_notifiesTheOwner_UC17() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         service.confirm(1L);
 
@@ -422,7 +432,8 @@ class AppointmentServiceImplTest {
     void cancel_byReceptionistCarriesTheReasonToTheOwner_butOwnersOwnCancelDoesNot() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
         service.cancel(1L, new CancelAppointmentRequest("Phòng khám bảo trì thiết bị"));
 
         var event = publishedStatusEvent();
@@ -432,7 +443,8 @@ class AppointmentServiceImplTest {
         org.mockito.Mockito.clearInvocations(eventPublisher);
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment own = appointment(2L, OWNER, AppointmentStatus.CONFIRMED, TOMORROW, LocalTime.of(10, 0));
-        when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(own));
+        lenient().when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(own));
+        lenient().when(appointmentRepository.findById(2L)).thenReturn(Optional.of(own));
         service.cancel(2L, new CancelAppointmentRequest("Bận việc đột xuất"));
 
         verify(eventPublisher, never()).publishEvent(any(Object.class));   // chủ nuôi tự hủy: đã thấy kết quả trên màn hình
@@ -441,7 +453,8 @@ class AppointmentServiceImplTest {
     @Test
     void systemNoShow_notifiesTheOwnerWithNoActor() {
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, LocalDate.of(2026, 10, 29), LocalTime.of(8, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
@@ -454,12 +467,14 @@ class AppointmentServiceImplTest {
     void cancel_byReceptionist_ignoresTheTwoHourRule() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TODAY, LocalTime.of(9, 30));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         AppointmentResponse response = service.cancel(1L, new CancelAppointmentRequest("Phòng khám bảo trì thiết bị"));
 
         assertThat(response.status()).isEqualTo(AppointmentStatus.CANCELLED);
-        assertThat(lastHistory().getNotes()).contains("Lễ tân hủy / từ chối");
+        assertThat(lastHistory().getNotes()).isEqualTo("Phòng khám bảo trì thiết bị");
+        assertThat(lastHistory().getChangedByUserId()).isEqualTo(RECEPTIONIST);
     }
 
     @Test
@@ -467,7 +482,8 @@ class AppointmentServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         for (AppointmentStatus status : List.of(AppointmentStatus.CHECKED_IN, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW)) {
             Appointment a = appointment(1L, OWNER, status, TOMORROW, LocalTime.of(10, 0));
-            when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+            lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+            lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
             assertThatThrownBy(() -> service.cancel(1L, new CancelAppointmentRequest("Lý do")))
                     .isInstanceOf(AppException.class)
@@ -482,7 +498,8 @@ class AppointmentServiceImplTest {
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TOMORROW, LocalTime.of(9, 0));
         when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
         stubCapacity(2);
 
         AppointmentResponse response = service.reschedule(1L, new RescheduleAppointmentRequest(
@@ -503,7 +520,8 @@ class AppointmentServiceImplTest {
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(9, 0));
         when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
         stubCapacity(2);
         when(appointmentRepository.countByAppointmentDateAndStartTimeAndStatusIn(
                 TOMORROW, LocalTime.of(10, 0), AppointmentStatus.OCCUPYING)).thenReturn(2L);
@@ -520,7 +538,8 @@ class AppointmentServiceImplTest {
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(9, 0));
         when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
         stubCapacity(2);
 
         assertThatThrownBy(() -> service.reschedule(1L, new RescheduleAppointmentRequest(TOMORROW, LocalTime.of(9, 0), null)))
@@ -533,7 +552,8 @@ class AppointmentServiceImplTest {
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY, LocalTime.of(10, 30));
         when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
         stubCapacity(2);
 
         assertThatThrownBy(() -> service.reschedule(1L, new RescheduleAppointmentRequest(TOMORROW, LocalTime.of(9, 0), null)))
@@ -558,7 +578,8 @@ class AppointmentServiceImplTest {
     @Test
     void markNoShowBySystem_afterGracePeriod_movesConfirmedToNoShowWithSystemActor() {
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY.minusDays(1), LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
@@ -573,7 +594,8 @@ class AppointmentServiceImplTest {
     void markNoShowBySystem_beforeGracePeriodEnds_doesNothing() {
         // Khung 08:30-09:00, bây giờ 09:00: còn 30 phút nữa mới quá hạn
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY, LocalTime.of(8, 30));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.markNoShowBySystem(1L)).isFalse();
         assertThat(a.getStatus()).isEqualTo(AppointmentStatus.CONFIRMED);
@@ -584,7 +606,8 @@ class AppointmentServiceImplTest {
     void markNoShowBySystem_neverTouchesAppointmentsThatAreNoLongerConfirmed() {
         // Khách vừa check-in đúng lúc tiến trình quét chạy: không được đè sang NO_SHOW
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CHECKED_IN, TODAY.minusDays(1), LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.markNoShowBySystem(1L)).isFalse();
         assertThat(a.getStatus()).isEqualTo(AppointmentStatus.CHECKED_IN);
@@ -596,15 +619,14 @@ class AppointmentServiceImplTest {
     @Test
     void expirePendingBySystem_afterTheSlotEnded_cancelsAndFreesTheSlotWithSystemActor() {
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TODAY, LocalTime.of(8, 0));   // khung 08:00-08:30, bây giờ 09:00
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.expirePendingBySystem(1L)).isTrue();
 
         assertThat(a.getStatus()).isEqualTo(AppointmentStatus.CANCELLED);
-        assertThat(a.getCancelReason()).contains("chưa xác nhận");
-        assertThat(a.getCancelledBy()).isNull();   // null = hệ thống
-        assertThat(a.getCancelledAt()).isNotNull();
         AppointmentStatusHistory history = lastHistory();
+        assertThat(history.getNotes()).contains("chưa xác nhận");
         assertThat(history.getFromStatus()).isEqualTo(AppointmentStatus.PENDING);
         assertThat(history.getToStatus()).isEqualTo(AppointmentStatus.CANCELLED);
         assertThat(history.getChangedByUserId()).isNull();
@@ -613,7 +635,8 @@ class AppointmentServiceImplTest {
     @Test
     void expirePendingBySystem_doesNothingWhileTheSlotIsStillOpen() {
         Appointment a = appointment(1L, OWNER, AppointmentStatus.PENDING, TODAY, LocalTime.of(9, 0));   // khung 09:00-09:30
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         assertThat(service.expirePendingBySystem(1L)).isFalse();
         assertThat(a.getStatus()).isEqualTo(AppointmentStatus.PENDING);
@@ -624,8 +647,9 @@ class AppointmentServiceImplTest {
     void expirePendingBySystem_neverTouchesAppointmentsApprovedMeanwhile() {
         // Lễ tân vừa duyệt đúng lúc tiến trình quét chạy: không được hủy lịch đã CONFIRMED
         Appointment confirmed = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY.minusDays(1), LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(confirmed));
-        when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.empty());
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(confirmed));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(confirmed));
+        lenient().when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.empty());
 
         assertThat(service.expirePendingBySystem(1L)).isFalse();
         assertThat(service.expirePendingBySystem(2L)).isFalse();
@@ -638,8 +662,10 @@ class AppointmentServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Appointment late = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY.minusDays(1), LocalTime.of(9, 0));
         Appointment early = appointment(2L, OWNER, AppointmentStatus.CONFIRMED, TODAY, LocalTime.of(8, 30));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(late));
-        when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(early));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(late));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(late));
+        lenient().when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(early));
+        lenient().when(appointmentRepository.findById(2L)).thenReturn(Optional.of(early));
 
         assertThat(service.markNoShow(1L).status()).isEqualTo(AppointmentStatus.NO_SHOW);
         assertThat(lastHistory().getChangedByUserId()).isEqualTo(RECEPTIONIST);
@@ -655,7 +681,8 @@ class AppointmentServiceImplTest {
     @Test
     void markCheckedIn_movesConfirmedToCheckedInWithReceptionistAsActor() {
         Appointment a = appointment(1L, OWNER, AppointmentStatus.CONFIRMED, TODAY, LocalTime.of(9, 0));
-        when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
         service.markCheckedIn(1L, RECEPTIONIST, "VIS-2026-0001");
 
@@ -670,7 +697,8 @@ class AppointmentServiceImplTest {
         for (AppointmentStatus status : List.of(AppointmentStatus.CHECKED_IN, AppointmentStatus.NO_SHOW,
                 AppointmentStatus.CANCELLED, AppointmentStatus.PENDING)) {
             Appointment a = appointment(1L, OWNER, status, TODAY, LocalTime.of(9, 0));
-            when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+            lenient().when(appointmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+            lenient().when(appointmentRepository.findById(1L)).thenReturn(Optional.of(a));
 
             service.markCheckedIn(1L, RECEPTIONIST, "VIS-2026-0001");
 
@@ -681,7 +709,7 @@ class AppointmentServiceImplTest {
 
     @Test
     void markCheckedIn_forUnknownAppointment_failsSoTheMessageGoesToTheDeadLetterQueue() {
-        when(appointmentRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
+        lenient().when(appointmentRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.markCheckedIn(99L, RECEPTIONIST, "VIS-2026-0001"))
                 .isInstanceOf(AppException.class)
@@ -705,6 +733,62 @@ class AppointmentServiceImplTest {
 
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         assertThat(service.getById(1L).ownerId()).isEqualTo(OTHER_OWNER);
+    }
+
+    @Test
+    void search_byOwner_ignoresTheOwnerIdParameterAndUsesTheCallersOwnPets() {
+        loginAs(OWNER, RoleCode.PET_OWNER);
+        when(appointmentRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class),
+                any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+
+        // Cố ý gửi ownerId của người khác: phải bị bỏ qua
+        service.search(new com.vetclinic.appointment.service.AppointmentFilter(
+                OTHER_OWNER, null, null, null, null, null, null, false, 0, 20));
+
+        verify(petClient).getPetsByOwner(OWNER);
+        verify(petClient, never()).getPetsByOwner(OTHER_OWNER);   // appointments không còn owner_id: lọc qua thú cưng của chủ
+    }
+
+    @Test
+    void search_byReceptionistWithoutOwnerFilter_doesNotCallClinical() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        when(appointmentRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class),
+                any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(
+                        appointment(1L, OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(9, 0)))));
+
+        var page = service.search(new com.vetclinic.appointment.service.AppointmentFilter(
+                null, null, null, null, null, null, null, false, 0, 20));
+
+        verify(petClient, never()).getPetsByOwner(any());
+        assertThat(page.getItems()).hasSize(1);
+        assertThat(page.getItems().get(0).endTime()).isEqualTo(LocalTime.of(9, 30));   // endTime suy ra từ giờ bắt đầu
+    }
+
+    @Test
+    void search_whenClinicalIsDown_failsClosedInsteadOfDroppingTheOwnerFilter() {
+        loginAs(OWNER, RoleCode.PET_OWNER);
+        when(petClient.getPetsByOwner(OWNER)).thenThrow(new RuntimeException("clinical down"));
+        var captor = org.mockito.ArgumentCaptor.forClass(org.springframework.data.jpa.domain.Specification.class);
+        when(appointmentRepository.findAll(captor.capture(), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+
+        service.search(new com.vetclinic.appointment.service.AppointmentFilter(
+                null, null, null, null, null, null, null, false, 0, 20));
+
+        // Vẫn có điều kiện lọc: danh sách thú cưng rỗng => specification KHỚP KHÔNG LỊCH NÀO (disjunction),
+        // tuyệt đối không bỏ điều kiện (nếu không chủ nuôi sẽ thấy lịch của người khác)
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        org.springframework.data.jpa.domain.Specification<Appointment> applied = captor.getValue();
+        @SuppressWarnings("unchecked")
+        jakarta.persistence.criteria.Root<Appointment> root = mock(jakarta.persistence.criteria.Root.class);
+        jakarta.persistence.criteria.CriteriaBuilder cb = mock(jakarta.persistence.criteria.CriteriaBuilder.class);
+        jakarta.persistence.criteria.Predicate none = mock(jakarta.persistence.criteria.Predicate.class);
+        when(cb.disjunction()).thenReturn(none);
+        when(cb.and(any(jakarta.persistence.criteria.Predicate[].class))).thenReturn(none);
+        applied.toPredicate(root, mock(jakarta.persistence.criteria.CriteriaQuery.class), cb);
+        verify(cb).disjunction();
     }
 
     // ================================================================== fixtures
@@ -737,11 +821,9 @@ class AppointmentServiceImplTest {
         return Appointment.builder()
                 .id(id)
                 .appointmentCode("APT-TEST-" + id)
-                .petId(PET)
-                .ownerId(ownerId)
+                .petId(ownerId == OTHER_OWNER ? PET + 1 : PET)   // chủ nuôi suy ra từ thú cưng (appointments không còn owner_id)
                 .appointmentDate(date)
                 .startTime(start)
-                .endTime(start.plusMinutes(30))
                 .reason("Khám")
                 .bookingChannel(BookingChannel.ONLINE)
                 .status(status)

@@ -16,7 +16,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -42,18 +41,11 @@ public class Appointment {
     @Column(name = "pet_id", nullable = false)
     private Long petId;
 
-    /** Khóa ngoại logic -> pet_clinic_auth_db.users(id) */
-    @Column(name = "owner_id", nullable = false)
-    private Long ownerId;
-
     @Column(name = "appointment_date", nullable = false)
     private LocalDate appointmentDate;
 
     @Column(name = "start_time", nullable = false)
     private LocalTime startTime;
-
-    @Column(name = "end_time", nullable = false)
-    private LocalTime endTime;
 
     @Column(name = "reason", nullable = false, columnDefinition = "TEXT")
     private String reason;
@@ -68,26 +60,7 @@ public class Appointment {
     @Builder.Default
     private AppointmentStatus status = AppointmentStatus.PENDING;
 
-    @Column(name = "cancel_reason", columnDefinition = "TEXT")
-    private String cancelReason;
-
-    @Column(name = "confirmed_by")
-    private Long confirmedBy;
-
-    @Column(name = "confirmed_at")
-    private Instant confirmedAt;
-
-    @Column(name = "cancelled_by")
-    private Long cancelledBy;
-
-    @Column(name = "cancelled_at")
-    private Instant cancelledAt;
-
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
-
-    @UpdateTimestamp
-    @Column(name = "updated_at", nullable = false)
-    private Instant updatedAt;
 }

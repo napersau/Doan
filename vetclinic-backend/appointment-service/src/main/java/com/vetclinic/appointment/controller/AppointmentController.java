@@ -52,7 +52,7 @@ public class AppointmentController {
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST')")
     public ResponseEntity<ApiResponse<AppointmentResponse>> create(@Valid @RequestBody CreateAppointmentRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created("Đặt lịch hẹn thành công", appointmentService.create(request)));
+                .body(ApiResponse.created("Đặt lịch hẹn thành công", enricher.enrich(appointmentService.create(request))));
     }
 
     /**
@@ -97,7 +97,7 @@ public class AppointmentController {
     @PostMapping("/{id}/confirm")
     @PreAuthorize("hasRole('RECEPTIONIST')")
     public ResponseEntity<ApiResponse<AppointmentResponse>> confirm(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã xác nhận lịch hẹn", appointmentService.confirm(id)));
+        return ResponseEntity.ok(ApiResponse.success("Đã xác nhận lịch hẹn", enricher.enrich(appointmentService.confirm(id))));
     }
 
     /** UC-15 (chủ nuôi tự hủy) và UC-17 (lễ tân từ chối / hủy). Bắt buộc có lý do. */
@@ -105,7 +105,7 @@ public class AppointmentController {
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST')")
     public ResponseEntity<ApiResponse<AppointmentResponse>> cancel(@PathVariable Long id,
                                                                    @Valid @RequestBody CancelAppointmentRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã hủy lịch hẹn", appointmentService.cancel(id, request)));
+        return ResponseEntity.ok(ApiResponse.success("Đã hủy lịch hẹn", enricher.enrich(appointmentService.cancel(id, request))));
     }
 
     /** UC-15: đổi ngày / khung giờ. */
@@ -113,14 +113,14 @@ public class AppointmentController {
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST')")
     public ResponseEntity<ApiResponse<AppointmentResponse>> reschedule(@PathVariable Long id,
                                                                        @Valid @RequestBody RescheduleAppointmentRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đổi lịch hẹn thành công", appointmentService.reschedule(id, request)));
+        return ResponseEntity.ok(ApiResponse.success("Đổi lịch hẹn thành công", enricher.enrich(appointmentService.reschedule(id, request))));
     }
 
     /** EX-01: lễ tân xác nhận khách vắng mặt (ngoài tiến trình quét tự động). */
     @PostMapping("/{id}/no-show")
     @PreAuthorize("hasRole('RECEPTIONIST')")
     public ResponseEntity<ApiResponse<AppointmentResponse>> noShow(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã đánh dấu khách vắng mặt", appointmentService.markNoShow(id)));
+        return ResponseEntity.ok(ApiResponse.success("Đã đánh dấu khách vắng mặt", enricher.enrich(appointmentService.markNoShow(id))));
     }
 
     /** FR-70: thống kê lịch hẹn theo trạng thái và kênh đặt, tỉ lệ bỏ hẹn (NO_SHOW) và tỉ lệ hủy. */

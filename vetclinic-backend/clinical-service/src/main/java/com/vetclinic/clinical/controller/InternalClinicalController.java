@@ -35,9 +35,18 @@ public class InternalClinicalController {
     }
 
     /** appointment-service làm giàu danh sách lịch hẹn bằng tên thú cưng, theo lô. */
-    @GetMapping("/pets")
+    @GetMapping(value = "/pets", params = "ids")
     public ResponseEntity<ApiResponse<List<PetSummaryResponse>>> pets(@RequestParam("ids") List<Long> ids) {
         return ResponseEntity.ok(ApiResponse.success(petService.getSummaries(ids)));
+    }
+
+    /**
+     * appointment-service lọc "lịch hẹn của tôi" / theo chủ nuôi: appointments không còn cột owner_id (lược đồ v3.0) nên
+     * hỏi danh sách thú cưng của chủ rồi lọc {@code pet_id IN (...)}.
+     */
+    @GetMapping(value = "/pets", params = "ownerId")
+    public ResponseEntity<ApiResponse<List<PetSummaryResponse>>> petsOfOwner(@RequestParam("ownerId") Long ownerId) {
+        return ResponseEntity.ok(ApiResponse.success(petService.getSummariesByOwner(ownerId)));
     }
 
     /** billing-pharmacy-service lập hóa đơn: chỉ gồm dịch vụ COMPLETED (dịch vụ đã hủy không tính tiền). */

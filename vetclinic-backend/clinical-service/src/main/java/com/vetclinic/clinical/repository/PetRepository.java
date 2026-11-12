@@ -21,4 +21,7 @@ public interface PetRepository extends JpaRepository<Pet, Long>, JpaSpecificatio
     @Override
     @EntityGraph(attributePaths = "species")
     Page<Pet> findAll(Specification<Pet> spec, Pageable pageable);
+
+    /** Thú cưng của một chủ nuôi (dùng cho appointment-service: appointments không còn cột owner_id). */
+    java.util.List<Pet> findByOwnerId(Long ownerId);
 }

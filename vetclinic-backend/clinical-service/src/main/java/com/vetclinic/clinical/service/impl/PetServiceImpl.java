@@ -208,6 +208,16 @@ public class PetServiceImpl implements PetService {
                 .map(p -> new PetSummaryResponse(p.getId(), p.getOwnerId(), p.getName())).toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<PetSummaryResponse> getSummariesByOwner(Long ownerId) {
+        if (ownerId == null) {
+            return List.of();
+        }
+        return petRepository.findByOwnerId(ownerId).stream()
+                .map(p -> new PetSummaryResponse(p.getId(), p.getOwnerId(), p.getName())).toList();
+    }
+
     // ------------------------------------------------------------------ helper
 
     private Pet findPet(Long id) {

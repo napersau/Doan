@@ -11,7 +11,7 @@
 |---|---|---|
 | **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
 | **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
-| Phase 2 `appointment-service` | ⬜ chưa làm | **Bước kế tiếp: 2.A1 (bỏ 7 cột khỏi entity `Appointment`)** |
+| Phase 2 `appointment-service` | 🟨 **ĐANG LÀM** — **Khối A ✅ xong (12/11)**, Khối B chưa | **Bước kế tiếp: 2.B1 (sức chứa `N_active × 2`)** |
 | Phase 3 `clinical-service` | ⬜ chưa làm | |
 | Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
 | Phase 5 `notification-service` | ⬜ chưa làm | |
@@ -119,11 +119,11 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 ## PHASE 2 — `appointment-service` (nhỏ nhất, làm trước để rút kinh nghiệm)
 
 ### Khối A — khớp schema (`appointments` còn 9 cột)
-- [ ] **2.A1** `Appointment`: bỏ `endTime`, `ownerId`, `cancelReason`, `confirmedBy/At`, `cancelledBy/At`, `updatedAt`. Sửa chỗ báo đỏ (chủ yếu `AppointmentServiceImpl`, `AppointmentMapper`, `AppointmentResponse`).
-- [ ] **2.A2** `transition()`/`recordHistory()` ghi **lý do hủy vào `notes`**, người thao tác vào `changed_by_user_id` (bảng lịch sử đã có sẵn 2 trường này). Response lấy `cancelReason`, `confirmedBy`… từ lịch sử (`AppointmentEnricher`).
-- [ ] **2.A3** `endTime` suy ra = `startTime + 30'` (hằng từ `BookingProperties`), chỉ khi cần hiển thị.
-- [ ] **2.A4** `ownerId`: tạm thời lấy qua `PetClient.getPet(petId).ownerId` (đã có endpoint `/internal/clinical/pets/{id}`); bộ lọc "lịch của tôi" cần `GET /internal/clinical/pets?ownerId=` → **làm cùng bước 3.A5** (bên clinical). Đến khi đó, `AppointmentSpecifications` lọc theo `petId IN (...)`.
-- **Xong khi:** service khởi động trên schema mới; test sửa xong; đặt lịch + duyệt + hủy bằng `curl` (Task 2.7).
+- [x] **2.A1** `Appointment` còn đúng 9 cột (bỏ `endTime`, `ownerId`, `cancelReason`, `confirmedBy/At`, `cancelledBy/At`, `updatedAt`). `ddl-auto: validate` đạt trên schema v3.0.
+- [x] **2.A2** Lý do hủy ghi **nguyên văn** vào `appointment_status_histories.notes`, người thao tác vào `changed_by_user_id` (`null` = hệ thống). `AppointmentEnricher` suy ra `cancelReason`/`confirmedBy/At`/`cancelledBy/At`/`updatedAt` từ lịch sử bằng **một** truy vấn theo lô (`findByAppointmentIdInOrderByIdAsc`); hình dạng `AppointmentResponse` giữ nguyên nên FE và clinical không phải đổi. Controller `enrich` MỌI response (create/confirm/cancel/reschedule/no-show).
+- [x] **2.A3** `endTime` suy ra = `startTime + slotMinutes` (`SlotPolicy.endOf`); repository `findIdsEndedBefore` → `findIdsStartedBefore` (lọc theo giờ bắt đầu; hai scheduler tự trừ độ dài khung/thời gian chờ). Hành vi v2 giữ nguyên (hạn NO_SHOW còn là *kết thúc khung + 30 phút*; đổi sang *bắt đầu + 30 phút* ở 2.B2).
+- [x] **2.A4** `ownerId` suy ra từ thú cưng qua `PetClient` — **luôn ngoài transaction** (các hàm `confirm/cancel/reschedule/markNoShow/*BySystem` đổi sang `transactionTemplate`, tra chủ nuôi trước). Chủ nuôi (PET_OWNER) tra không được ⇒ **đóng cửa** (404 `APPT_1202` / 503), nhân viên tra không được ⇒ chỉ mất thông báo (CLAUDE.md §10 #3). "Lịch của tôi"/lọc theo chủ = `pet_id IN (...)` qua `GET /internal/clinical/pets?ownerId=`; tra không được ⇒ danh sách rỗng, **không bao giờ bỏ điều kiện lọc**. **Endpoint phía clinical đã làm luôn ở bước này** (`PetService.getSummariesByOwner`, `PetRepository.findByOwnerId`, `@GetMapping(params="ownerId")`) nên 3.A5 không cần làm lại phần đó.
+- **Kết quả đo Khối A (12/11):** `mvn clean test`: appointment **63 test** (54 cũ + 9 mới), clinical **106** (103 + 3 mới), 0 lỗi. **Chạy thật** appointment-service (jar) trên MySQL schema v3.0 + auth-service thật + clinical *giả* (Python, đúng hợp đồng `/internal/clinical/pets…` vì clinical thật chưa boot được trên schema mới): đặt lịch `201` (ownerId 8 suy ra từ thú cưng, endTime 09:30, tên chủ từ auth) → lễ tân duyệt (`confirmedBy` 5 từ lịch sử) → "lịch của tôi" đúng 2 lịch → chủ nuôi khác thấy 0 lịch dù gửi `ownerId=8`, xem/hủy lịch người khác = `404 APPT_1202` → chủ nuôi hủy kèm lý do (`cancelReason`, `cancelledBy` từ lịch sử) → lịch sử đúng 3 dòng. Không có ERROR trong log. Dữ liệu thử đã xóa khỏi DB. *(Lưu ý kiểm thử: `curl` trên Git Bash/Windows làm hỏng byte tiếng Việt trong body → 400 `SYS_1001`; dùng ASCII khi test bằng `curl`.)*
 
 ### Khối B — nghiệp vụ mới
 - [ ] **2.B1 Sức chứa `N_active × 2`** (`SlotPolicy`/`SlotService`) — sửa 1 chỗ + test.

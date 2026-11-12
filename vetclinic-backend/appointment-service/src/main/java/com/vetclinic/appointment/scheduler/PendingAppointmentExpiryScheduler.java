@@ -24,12 +24,14 @@ public class PendingAppointmentExpiryScheduler {
 
     private final AppointmentRepository appointmentRepository;
     private final AppointmentService appointmentService;
+    private final com.vetclinic.appointment.config.BookingProperties properties;
     private final Clock clock;
 
     @Scheduled(cron = "${vetclinic.booking.pending-expiry-cron}", zone = "${vetclinic.booking.zone}")
     public void expireStalePendingAppointments() {
-        LocalDateTime now = LocalDateTime.now(clock);
-        List<Long> ids = appointmentRepository.findIdsEndedBefore(AppointmentStatus.PENDING, now.toLocalDate(), now.toLocalTime());
+        // Hết hạn khi đã qua giờ kết thúc khung (= bắt đầu + độ dài khung): lọc theo giờ bắt đầu trước (now - độ dài khung)
+        LocalDateTime cutoff = LocalDateTime.now(clock).minusMinutes(properties.slotMinutes());
+        List<Long> ids = appointmentRepository.findIdsStartedBefore(AppointmentStatus.PENDING, cutoff.toLocalDate(), cutoff.toLocalTime());
         if (ids.isEmpty()) {
             return;
         }

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 
@@ -15,13 +16,16 @@ public final class AppointmentSpecifications {
     private AppointmentSpecifications() {
     }
 
-    /** Tham số null thì bỏ qua điều kiện tương ứng. */
-    public static Specification<Appointment> filter(Long ownerId, Long petId, String code,
+    /**
+     * Tham số null thì bỏ qua điều kiện tương ứng. appointments không còn cột owner_id nên "lịch của một chủ nuôi" được lọc
+     * bằng {@code petIds} = các thú cưng của chủ đó (lấy từ clinical-service); danh sách rỗng nghĩa là không có lịch nào.
+     */
+    public static Specification<Appointment> filter(Collection<Long> petIds, Long petId, String code,
                                                     LocalDate fromDate, LocalDate toDate, AppointmentStatus status) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            if (ownerId != null) {
-                predicates.add(cb.equal(root.get("ownerId"), ownerId));
+            if (petIds != null) {
+                predicates.add(petIds.isEmpty() ? cb.disjunction() : root.get("petId").in(petIds));
             }
             if (petId != null) {
                 predicates.add(cb.equal(root.get("petId"), petId));

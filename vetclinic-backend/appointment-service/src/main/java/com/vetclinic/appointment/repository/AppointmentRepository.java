@@ -47,19 +47,20 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long>,
                                                                Collection<AppointmentStatus> statuses, Long id);
 
     /**
-     * Lịch hẹn CONFIRMED đã quá giờ kết thúc khung hẹn + thời gian chờ. So sánh theo (ngày, giờ) nên lịch của các
-     * ngày trước cũng được quét, kể cả khi service đã tắt lúc nửa đêm hay cuối tuần.
+     * Lịch hẹn ở trạng thái {@code status} có GIỜ BẮT ĐẦU trước mốc (cutoffDate, cutoffTime). Bảng appointments không còn cột
+     * end_time (= start_time + độ dài khung) nên người gọi tự trừ độ dài khung / thời gian chờ vào mốc cắt. So sánh theo
+     * (ngày, giờ) nên lịch của các ngày trước cũng được quét, kể cả khi service đã tắt lúc nửa đêm hay cuối tuần.
      */
     @Query("""
             select a.id from Appointment a
             where a.status = :status
               and (a.appointmentDate < :cutoffDate
-                   or (a.appointmentDate = :cutoffDate and a.endTime < :cutoffTime))
+                   or (a.appointmentDate = :cutoffDate and a.startTime < :cutoffTime))
             order by a.id
             """)
-    List<Long> findIdsEndedBefore(@Param("status") AppointmentStatus status,
-                                  @Param("cutoffDate") LocalDate cutoffDate,
-                                  @Param("cutoffTime") LocalTime cutoffTime);
+    List<Long> findIdsStartedBefore(@Param("status") AppointmentStatus status,
+                                    @Param("cutoffDate") LocalDate cutoffDate,
+                                    @Param("cutoffTime") LocalTime cutoffTime);
 
     /** Báo cáo lịch hẹn: số lịch theo trạng thái / kênh đặt, ngày hẹn trong [from, to]. */
     @Query("select a.status, count(a) from Appointment a where a.appointmentDate >= :from and a.appointmentDate <= :to group by a.status")

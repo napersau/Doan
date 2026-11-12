@@ -20,4 +20,11 @@ public interface PetClient {
     /** Tra cứu hàng loạt theo ?ids=1,2,3 để làm giàu danh sách lịch hẹn. */
     @GetMapping("/pets")
     ApiResponse<java.util.List<PetSummaryResponse>> getPets(@org.springframework.web.bind.annotation.RequestParam("ids") java.util.List<Long> ids);
+
+    /**
+     * Thú cưng của một chủ nuôi: {@code GET /internal/clinical/pets?ownerId=}. appointments không còn cột owner_id nên
+     * "lịch của tôi" / lọc theo chủ nuôi được thực hiện bằng {@code pet_id IN (...)} (CLAUDE.md §10 #3).
+     */
+    @GetMapping("/pets")
+    ApiResponse<java.util.List<PetSummaryResponse>> getPetsByOwner(@org.springframework.web.bind.annotation.RequestParam("ownerId") Long ownerId);
 }
