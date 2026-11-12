@@ -26,18 +26,28 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.vetclinic.common.event.PatientCalledEvent;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
+import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.OTHER_DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
 import static com.vetclinic.clinical.testsupport.TestData.loginAs;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -49,6 +59,8 @@ class DoctorQueueServiceImplTest {
     private PetVisitRepository visitRepository;
     @Mock
     private AuthClient authClient;
+    @Mock
+    private ApplicationEventPublisher publisher;
 
     private DoctorQueueServiceImpl service;
 
@@ -57,7 +69,9 @@ class DoctorQueueServiceImplTest {
         VisitAssembler assembler = new VisitAssembler(mock(VisitServiceDetailRepository.class), mock(LabTestResultRepository.class),
                 mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), mock(ServiceInvoiceRepository.class),
                 new VisitTimeline(mock(PetVisitStatusHistoryRepository.class)));
-        service = new DoctorQueueServiceImpl(visitRepository, authClient, assembler);
+        PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
+        lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        service = new DoctorQueueServiceImpl(visitRepository, authClient, assembler, publisher, CLOCK, tm);
     }
 
     @AfterEach
@@ -123,5 +137,146 @@ class DoctorQueueServiceImplTest {
 
         assertThat(queue).extracting(VisitResponse::id).containsExactly(3L, 4L);
         verify(visitRepository).findDoctorVisits(DOCTOR, List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY));
+    }
+
+    // ================================================================== Gọi số / Đẩy lùi (BR-34)
+
+    private static final List<VisitStatus> QUEUE_STATUSES = List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY);
+
+    private void stubRoom(String room) {
+        lenient().when(authClient.getUser(DOCTOR)).thenReturn(ApiResponse.success(doctor(DOCTOR, room)));
+    }
+
+    private static PetVisit queued(long id, VisitStatus status, long queueOrder) {
+        PetVisit v = visit(id, status, DOCTOR);
+        v.setQueueOrder(queueOrder);
+        return v;
+    }
+
+    private List<PatientCalledEvent> publishedCalls() {
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(publisher, org.mockito.Mockito.atLeast(0)).publishEvent(captor.capture());
+        return captor.getAllValues().stream().filter(PatientCalledEvent.class::isInstance).map(PatientCalledEvent.class::cast).toList();
+    }
+
+    @Test
+    void callNext_picksTheHead_publishesCalled_andDoesNotChangeTheStatus() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        // Ca có kết quả đứng đầu hàng đợi (Q5), rồi ca WAITING
+        PetVisit head = queued(3L, VisitStatus.RESULTS_READY, 100L);
+        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(head, queued(4L, VisitStatus.WAITING, 200L)));
+
+        VisitResponse response = service.callNext();
+
+        assertThat(response.id()).isEqualTo(3L);
+        assertThat(response.status()).isEqualTo(VisitStatus.RESULTS_READY);   // Q3: gọi trước, đổi trạng thái sau
+        assertThat(response.assignedRoom()).isEqualTo("P101");
+        verify(visitRepository, never()).save(any());
+        PatientCalledEvent call = publishedCalls().get(0);
+        assertThat(call.action()).isEqualTo("CALLED");
+        assertThat(call.station()).isEqualTo("DOCTOR_ROOM");
+        assertThat(call.visitId()).isEqualTo(3L);
+        assertThat(call.roomNumber()).isEqualTo("P101");
+        assertThat(call.routingKey()).isEqualTo("visit.patient_called");
+    }
+
+    @Test
+    void callNext_refusedWhileTheDoctorIsExamining_andWhenTheQueueIsEmpty() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
+        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.callNext());   // CLIN_1302
+
+        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(false);
+        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of());
+        assertError(ErrorCode.QUEUE_EMPTY, () -> service.callNext());            // CLIN_1303
+    }
+
+    @Test
+    void skip_pushesTheCalledVisitBehindTheNextOne_andCallsTheNext() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        PetVisit a = queued(1L, VisitStatus.WAITING, 100L);
+        PetVisit b = queued(2L, VisitStatus.WAITING, 200L);
+        PetVisit c = queued(3L, VisitStatus.WAITING, 300L);
+        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
+        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(a, b, c));
+
+        VisitResponse response = service.skip(1L);
+
+        assertThat(a.getSkipCount()).isEqualTo(1);
+        assertThat(a.getQueueOrder()).isEqualTo(250L);                 // giữa B (200) và C (300): ngay sau người kế tiếp
+        assertThat(a.getStatus()).isEqualTo(VisitStatus.WAITING);      // trạng thái KHÔNG đổi
+        assertThat(response.id()).isEqualTo(2L);                       // người kế tiếp được gọi ngay
+        List<PatientCalledEvent> calls = publishedCalls();
+        assertThat(calls).extracting(PatientCalledEvent::action).containsExactly("PUSHED_BACK", "CALLED");
+        assertThat(calls).extracting(PatientCalledEvent::visitId).containsExactly(1L, 2L);
+        assertThat(calls.get(0).skipCount()).isEqualTo(1);
+    }
+
+    @Test
+    void skip_ofAResultsReadyVisit_keepsItResultsReady_EX10() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        PetVisit ready = queued(1L, VisitStatus.RESULTS_READY, 100L);
+        PetVisit next = queued(2L, VisitStatus.WAITING, 200L);
+        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(ready));
+        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(ready, next));
+
+        service.skip(1L);
+
+        assertThat(ready.getStatus()).isEqualTo(VisitStatus.RESULTS_READY);
+        assertThat(ready.getQueueOrder()).isEqualTo(201L);   // chỉ có một người phía sau: người đó + 1
+    }
+
+    @Test
+    void skip_withNobodyBehind_keepsThePositionButCountsTheMiss() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        PetVisit only = queued(1L, VisitStatus.WAITING, 100L);
+        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(only));
+        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(only));
+
+        VisitResponse response = service.skip(1L);
+
+        assertThat(only.getQueueOrder()).isEqualTo(100L);   // giữ nguyên vị trí
+        assertThat(only.getSkipCount()).isEqualTo(1);
+        assertThat(response.id()).isEqualTo(1L);            // không có ai để gọi tiếp
+        assertThat(publishedCalls()).extracting(PatientCalledEvent::action).containsExactly("PUSHED_BACK");
+    }
+
+    @Test
+    void skip_ofAnEmergency_losesItsPriorityAndIsQueuedLikeARegularCase_EX04() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        PetVisit emergency = queued(1L, VisitStatus.WAITING, 100L);
+        emergency.setEmergency(true);
+        PetVisit regular = queued(2L, VisitStatus.WAITING, 200L);
+        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(emergency));
+        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(emergency, regular));
+
+        service.skip(1L);
+
+        assertThat(emergency.getSkipCount()).isEqualTo(1);       // skip_count > 0: xếp như ca thường từ nay
+        assertThat(emergency.getQueueOrder()).isEqualTo(201L);   // ngay sau ca thường kế tiếp
+    }
+
+    @Test
+    void skip_isRefusedForOthersVisits_wrongStatus_orWhileExamining() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        PetVisit others = visit(1L, VisitStatus.WAITING, OTHER_DOCTOR);
+        PetVisit inProgress = visit(2L, VisitStatus.IN_PROGRESS, DOCTOR);
+        PetVisit mine = queued(3L, VisitStatus.WAITING, 100L);
+        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(others));
+        when(visitRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(inProgress));
+        when(visitRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(mine));
+        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
+
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.skip(1L));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.skip(2L));
+        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.skip(3L));
+        verify(visitRepository, never()).save(any());
     }
 }

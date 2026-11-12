@@ -48,6 +48,26 @@ public class VisitController {
         return ResponseEntity.ok(ApiResponse.success(doctorQueueService.board()));
     }
 
+    /**
+     * Q3 "Gọi số tiếp theo" (BR-34): Bác sĩ không có ca đang khám gọi ca đầu hàng đợi của mình; ca chưa đổi trạng thái.
+     * CLIN_1302 nếu đang khám dở, CLIN_1303 nếu hàng đợi trống.
+     */
+    @PostMapping("/call-next")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<VisitResponse>> callNext() {
+        return ResponseEntity.ok(ApiResponse.success("Đã gọi số tiếp theo", doctorQueueService.callNext()));
+    }
+
+    /**
+     * Q4 "Đẩy lùi 1 bậc" (EX-10): gọi mà khách vắng. Ca giữ trạng thái, skip_count + 1, xếp ngay sau người kế tiếp; người kế tiếp
+     * được gọi ngay và là dữ liệu trả về.
+     */
+    @PostMapping("/{id}/skip")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<VisitResponse>> skip(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã đẩy lùi 1 bậc, gọi người kế tiếp", doctorQueueService.skip(id)));
+    }
+
     /** Hàng đợi của chính Bác sĩ đang đăng nhập (ca WAITING và RESULTS_READY, ca có kết quả đứng đầu). */
     @GetMapping("/my-queue")
     @PreAuthorize("hasRole('VETERINARIAN')")

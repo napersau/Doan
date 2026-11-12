@@ -16,4 +16,17 @@ public interface DoctorQueueService {
 
     /** Hàng đợi của chính Bác sĩ đang đăng nhập (ca WAITING và RESULTS_READY), theo thứ tự gọi. */
     List<VisitResponse> myQueue();
+
+    /**
+     * Q3 "Gọi số tiếp theo": Bác sĩ KHÔNG có ca IN_PROGRESS (CLIN_1302) chọn ca đầu hàng đợi của mình (CLIN_1303 nếu trống), phát
+     * PatientCalledEvent. Ca CHƯA đổi trạng thái: bệnh nhân vào phòng mới bấm "Bắt đầu khám" (T02) hoặc "Bắt đầu GĐ 2" (T07).
+     */
+    VisitResponse callNext();
+
+    /**
+     * Q4 "Đẩy lùi 1 bậc" (EX-10, FR-47): gọi mà khách vắng. Ca (WAITING hoặc RESULTS_READY) giữ nguyên trạng thái, skip_count + 1,
+     * queue_order mới theo {@link QueueOrders#afterPushBack}; người kế tiếp được gọi ngay. Trả về người vừa được gọi tiếp, hoặc
+     * chính ca đó nếu không còn ai phía sau. Không ghi lịch sử trạng thái vì trạng thái không đổi.
+     */
+    VisitResponse skip(Long visitId);
 }
