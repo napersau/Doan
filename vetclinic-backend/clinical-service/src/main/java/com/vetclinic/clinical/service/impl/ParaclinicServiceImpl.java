@@ -231,9 +231,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     public QueueItemResponse skip(Long detailId) {
         Long actor = SecurityUtils.getCurrentUserId();
-        VisitServiceDetail preview = detailRepository.findById(detailId)
-                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
-        ServiceCategory category = preview.getService().getCategory();
+        // dịch vụ của chỉ định là LAZY: phải đọc nhóm dịch vụ TRONG transaction (đây là bước đọc nhanh trước khi gọi Feign lấy số phòng)
+        ServiceCategory category = readCommittedTemplate.execute(tx -> detailRepository.findById(detailId)
+                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND)).getService().getCategory());
         requireParaclinical(category);
         assertTechnicianOf(category);
         String room = roomOf(actor);

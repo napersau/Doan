@@ -12,7 +12,7 @@
 | **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
 | **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
 | **Phase 2** `appointment-service` | ✅ **ĐÃ XONG** (12/11/2026) | Khối A + B xong; 68 test pass + chạy thật trên schema v3.0 |
-| Phase 3 `clinical-service` | 🟨 **ĐANG LÀM** — **Khối A ✅ xong (12/11)**; **Khối B: 3.B1–3.B14 ✅ code + unit test xong (12/11, 183 test clinical)**; còn **chạy kiểm chứng thật với MySQL** (các JPQL mới: `findQueue`, `findMinQueueOrder`, `findPaidBetween`, `findDebt`, `findCompletedWithDebt`) rồi mới đánh dấu Phase 3 ✅ | **Bước kế tiếp: kiểm chứng e2e Phase 3, sau đó Phase 4 (billing-pharmacy)** |
+| Phase 3 `clinical-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (3.B1–3.B14); 183 unit test clinical; **đã chạy kiểm chứng thật trên MySQL** (luồng chính + đẩy lùi Lab + T11/T12/T14 + thu tiền T10 + công nợ + báo cáo doanh thu: 100% đạt, phát hiện và sửa 1 lỗi lazy ở `skip` phòng Lab) | **Bước kế tiếp: Phase 4 (billing-pharmacy-service)** |
 | Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
 | Phase 5 `notification-service` | ⬜ chưa làm | |
 | Phase 6 Gateway + FE | ⬜ chưa làm | |
