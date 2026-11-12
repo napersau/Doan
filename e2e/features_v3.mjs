@@ -96,8 +96,13 @@ function stomp(token, { subscribe = [], send = false } = {}) {
 async function main() {
   const who = { admin: 'admin', doc2: 'bs_tien', doc3: 'bs_an', doc4: 'bs_mai', rec: 'letan_hoa', lab: 'ktv_lab_minh', img: 'ktv_cdha_dung', owner: 'khach_lan', owner2: 'khach_nam' };
   for (const [k, u] of Object.entries(who)) T[k] = (await login(u)).accessToken;
-  // Dọn đợt khám dở dang của các bác sĩ #2-#4 từ lần chạy trước để script chạy lại được (chỉ là vệ sinh dữ liệu thử, không phải nghiệp vụ)
-  sql("UPDATE pet_clinic_clinical_db.pet_visits SET status='CANCELLED' WHERE doctor_id IN (2,3,4) AND status IN ('WAITING','IN_PROGRESS','RESULTS_READY','WAITING_RESULTS')");
+  // Chạy lại cần dọn đợt khám dở dang của bác sĩ #2-#4. Việc này HỦY ca thật đang có trong CSDL nên chỉ làm khi đặt E2E_CLEAN=1
+  // (chỉ dùng trên CSDL thử; trên CSDL đang demo thủ công thì reset bằng `docker compose down -v` thay vì chạy lại).
+  if (process.env.E2E_CLEAN === '1') {
+    sql("UPDATE pet_clinic_clinical_db.pet_visits SET status='CANCELLED' WHERE doctor_id IN (2,3,4) AND status IN ('WAITING','IN_PROGRESS','RESULTS_READY','WAITING_RESULTS')");
+  } else {
+    console.log('  (không dọn ca dở dang; nếu bác sĩ #2-#4 còn ca đang khám, chạy lại với E2E_CLEAN=1 hoặc reset CSDL)');
+  }
 
   // =====================================================================================================================
   step('A. Tài khoản: tự đăng ký, hồ sơ, đổi mật khẩu, tạo / khóa / đổi vai trò / đặt lại mật khẩu, chặn dò mật khẩu');

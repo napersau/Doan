@@ -38,5 +38,5 @@ Yêu cầu: Node 18+ (dùng `fetch`, `FormData`), Docker Compose (script đối 
 - `fe_smoke_v3` tự tạo 4 tài khoản nhân sự (`0990000001..4`, mật khẩu `Smoke@1234`) nếu chưa có.
 - Lịch sử thông báo của notification-service nằm trong bộ nhớ nên còn lại giữa các lần chạy.
 - Kiểm tra email cần Mailpit truy cập được (cổng 8025 chỉ mở khi dùng `docker-compose.dev.yml`); nếu không, phần email được bỏ qua.
-- `features_v3.mjs` chạy lại được: đầu script nó dọn các đợt khám dở dang của bác sĩ #2-#4 bằng một câu SQL (vệ sinh dữ liệu thử). Kiểm tra email cần Mailpit truy cập được (dùng `-f docker-compose.dev.yml`).
+- `features_v3.mjs` chạy lại được khi đặt `E2E_CLEAN=1`: khi đó đầu script HỦY các đợt khám dở dang của bác sĩ #2-#4 bằng một câu SQL. **Không** đặt biến này trên CSDL đang demo thủ công (ca đang chờ sẽ bị hủy); mặc định script không dọn gì. Kiểm tra email cần Mailpit truy cập được (dùng `-f docker-compose.dev.yml`).
 - Việc đặt lịch đồng thời dựa vào sức chứa mỗi khung = số bác sĩ ACTIVE × 2: chạy sau `auth.sh` (tạo thêm bác sĩ) sẽ làm đổi con số 6.
