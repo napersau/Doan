@@ -284,6 +284,37 @@ class ParaclinicServiceImplTest {
     }
 
     @Test
+    void skip_pushesBackAllPendingServicesOfTheSameVisitTogether_andCallsTheNextVisit() {
+        // Một ca có siêu âm + X-quang cùng phòng CĐHA: gọi một lần, đẩy lùi cùng nhau, chỉ một thông báo "bị lùi"
+        loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
+        VisitServiceDetail us = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        VisitServiceDetail xray = detail(2L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        VisitServiceDetail other = detail(3L, 11L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        VisitServiceDetail last = detail(4L, 12L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        long orderOther = other.getQueueOrder();
+        long orderLast = last.getQueueOrder();
+        stubQueue(ServiceCategory.IMAGING, List.of(us, xray, other, last), visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR),
+                visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR), visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR));
+        when(detailRepository.findById(1L)).thenReturn(Optional.of(us));
+        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(us));
+        when(detailRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(xray));
+
+        QueueItemResponse called = service.skip(1L);
+
+        long newOrder = (orderOther + orderLast) / 2;
+        assertThat(us.getSkipCount()).isEqualTo(1);
+        assertThat(xray.getSkipCount()).isEqualTo(1);   // cả nhóm cùng bị lùi
+        assertThat(us.getQueueOrder()).isEqualTo(newOrder);
+        assertThat(xray.getQueueOrder()).isEqualTo(newOrder + 1);   // giữ thứ tự trong nhóm, cùng nằm sau ca kế tiếp
+        assertThat(called.visitId()).isEqualTo(11L);   // ca kế tiếp (đợt khám khác) được gọi ngay, không phải dịch vụ còn lại của ca vừa bị lùi
+        verify(detailHistoryRepository, org.mockito.Mockito.times(2)).save(any(VisitServiceDetailHistory.class));
+        PatientCalledEvent[] events = publishedCalls(2);
+        assertThat(events[0].action()).isEqualTo("PUSHED_BACK");
+        assertThat(events[1].action()).isEqualTo("CALLED");
+        assertThat(events[1].visitId()).isEqualTo(11L);
+    }
+
+    @Test
     void skip_nobodyBehind_keepsThePosition_butStillCountsTheSkip() {
         loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
         VisitServiceDetail d1 = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);

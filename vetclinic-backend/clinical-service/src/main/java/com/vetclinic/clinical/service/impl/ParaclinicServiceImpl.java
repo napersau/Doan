@@ -222,7 +222,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
             if (pending.isEmpty()) {
                 throw new AppException(ErrorCode.QUEUE_EMPTY);
             }
-            VisitServiceDetail head = pending.get(0);
+            VisitServiceDetail head = pending.get(0);   // gọi CẢ CA của đợt khám này một lần (các chỉ định cùng phòng đứng chung một lượt)
             publishCalled(head, visitWithPet(head.getVisitId()), CALLED, actor, room, category);   // chưa đổi trạng thái (Q3)
             return toItems(category, List.of(head)).get(0);
         });
@@ -242,36 +242,59 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
             requireDetailStatus(detail, ServiceDetailStatus.PENDING, "Chỉ đẩy lùi được chỉ định đang chờ trong hàng đợi (PENDING)");
             List<VisitServiceDetail> queue = detailRepository.findQueue(category, List.of(ServiceDetailStatus.PENDING));
-            int index = indexOf(queue, detailId);
             Map<Long, PetVisit> visits = visitRepository.findWithPetByIdIn(
                             queue.stream().map(VisitServiceDetail::getVisitId).distinct().toList()).stream()
                     .collect(Collectors.toMap(PetVisit::getId, v -> v));
-            Long newOrder = QueueOrders.afterPushBack(queue.stream()
-                    .map(q -> new QueueOrders.Entry(q.getQueueOrder(),
-                            visits.get(q.getVisitId()).isEmergency() && q.getSkipCount() == 0)).toList(), index);
 
-            detail.setSkipCount(detail.getSkipCount() + 1);   // không giới hạn số lần; ca cấp cứu đã bị lùi xếp như ca thường
-            if (newOrder != null) {
-                detail.setQueueOrder(newOrder);
+            // Một "ca" trong phòng = mọi chỉ định đang chờ của CÙNG đợt khám trong CÙNG phòng (vd. siêu âm + X-quang): gọi một lần,
+            // đẩy lùi cùng nhau. Thứ tự các ca = thứ tự xuất hiện đầu tiên trong hàng đợi.
+            List<List<VisitServiceDetail>> groups = groupByVisit(queue);
+            int index = groupIndexOf(groups, detail.getVisitId());
+            List<VisitServiceDetail> group = groups.get(index);
+            for (VisitServiceDetail member : group) {
+                if (!member.getId().equals(detailId)) {
+                    detailRepository.findByIdForUpdate(member.getId());   // khóa cả nhóm, tránh hai người cùng đẩy lùi một ca
+                }
             }
-            detailRepository.save(detail);
-            // Dịch vụ giữ PENDING (khách quay lại chỉ chờ tới lượt); ghi vết để biết đã bị lùi
-            support.recordDetail(detailId, ServiceDetailStatus.PENDING, ServiceDetailStatus.PENDING, ACTION_SKIPPED, actor,
-                    "Vắng mặt khi gọi số: đẩy lùi 1 bậc");
-            publishCalled(detail, visits.get(detail.getVisitId()), PUSHED_BACK, actor, room, category);
+            Long newOrder = QueueOrders.afterPushBack(groups.stream()
+                    .map(g -> new QueueOrders.Entry(g.stream().mapToLong(VisitServiceDetail::getQueueOrder).min().orElseThrow(),
+                            visits.get(g.get(0).getVisitId()).isEmergency() && g.stream().allMatch(x -> x.getSkipCount() == 0)))
+                    .toList(), index);
+
+            long offset = 0;
+            for (VisitServiceDetail member : group) {
+                member.setSkipCount(member.getSkipCount() + 1);   // không giới hạn số lần; ca cấp cứu đã bị lùi xếp như ca thường
+                if (newOrder != null) {
+                    member.setQueueOrder(newOrder + offset++);   // giữ nguyên thứ tự trong nhóm, cả nhóm nằm sau người kế tiếp
+                }
+                detailRepository.save(member);
+                // Dịch vụ giữ PENDING (khách quay lại chỉ chờ tới lượt); ghi vết để biết đã bị lùi
+                support.recordDetail(member.getId(), ServiceDetailStatus.PENDING, ServiceDetailStatus.PENDING, ACTION_SKIPPED, actor,
+                        "Vắng mặt khi gọi số: đẩy lùi 1 bậc");
+            }
+            publishCalled(detail, visits.get(detail.getVisitId()), PUSHED_BACK, actor, room, category);   // một thông báo cho cả ca
 
             if (newOrder == null) {
                 return toItems(category, List.of(detail)).get(0);   // không còn ai phía sau: giữ nguyên vị trí
             }
-            VisitServiceDetail next = queue.get(index + 1);   // người kế tiếp lên đầu và được gọi ngay
+            VisitServiceDetail next = groups.get(index + 1).get(0);   // ca kế tiếp lên đầu và được gọi ngay
             publishCalled(next, visits.get(next.getVisitId()), CALLED, actor, room, category);
             return toItems(category, List.of(next)).get(0);
         });
     }
 
-    private static int indexOf(List<VisitServiceDetail> queue, Long detailId) {
-        for (int i = 0; i < queue.size(); i++) {
-            if (queue.get(i).getId().equals(detailId)) {
+    /** Gom hàng đợi (đã sắp theo thứ tự gọi) thành từng ca theo đợt khám, giữ thứ tự xuất hiện đầu tiên. */
+    private static List<List<VisitServiceDetail>> groupByVisit(List<VisitServiceDetail> queue) {
+        Map<Long, List<VisitServiceDetail>> byVisit = new java.util.LinkedHashMap<>();
+        for (VisitServiceDetail d : queue) {
+            byVisit.computeIfAbsent(d.getVisitId(), k -> new java.util.ArrayList<>()).add(d);
+        }
+        return new java.util.ArrayList<>(byVisit.values());
+    }
+
+    private static int groupIndexOf(List<List<VisitServiceDetail>> groups, Long visitId) {
+        for (int i = 0; i < groups.size(); i++) {
+            if (groups.get(i).get(0).getVisitId().equals(visitId)) {
                 return i;
             }
         }

@@ -23,9 +23,18 @@ function ReasonDialog({ title, item, onClose, onSubmit, danger }) {
   </FormDialog>;
 }
 
+/** Gom các dòng của CÙNG đợt khám thành một "ca" (giữ thứ tự xuất hiện đầu tiên): một lần gọi, một lần đẩy lùi. */
+function groupByVisit(items) {
+  const map = new Map();
+  items.forEach((item) => { if (!map.has(item.visitId)) map.set(item.visitId, []); map.get(item.visitId).push(item); });
+  return [...map.values()].map((rows) => ({ key: rows[0].visitId, head: rows[0], rows }));
+}
+const serviceNames = (rows) => rows.map((r) => r.serviceName).join(' + ');
+
 /**
  * Hàng đợi Lab / CĐHA (v3.0): hàng đợi tự có khi bác sĩ chỉ định. "Gọi số tiếp theo" chọn người đứng đầu (cấp cứu chưa bị lùi trước) mà KHÔNG đổi
  * trạng thái dịch vụ; khách vào phòng thì "Bắt đầu". Không thấy khách → "Đẩy lùi 1 bậc" (dịch vụ giữ chờ thực hiện, xếp sau người kế tiếp).
+ * Nhiều dịch vụ của CÙNG một đợt khám trong CÙNG phòng (vd. siêu âm + X-quang) hiện thành MỘT ca: gọi một lần, bắt đầu / đẩy lùi cùng nhau; nhập kết quả và hủy vẫn theo từng dịch vụ.
  */
 export default function QueuePage({ kind }) {
   const room = ROOM[kind];
@@ -41,11 +50,15 @@ export default function QueuePage({ kind }) {
     const item = await action.run(() => room.callNext());
     if (item && item !== true) { setCalled(item); queue.refresh(); }
   };
-  const skip = async (item) => {
-    const next = await action.run(() => paraclinicApi.skip(item.serviceDetailId), `Đã đẩy lùi ${item.petName} một bậc.`);
+  const skip = async (group) => {
+    const next = await action.run(() => paraclinicApi.skip(group.head.serviceDetailId), `Đã đẩy lùi ${group.head.petName} một bậc.`);
     if (next) { setCalled(next === true ? null : next); queue.refresh(); }
   };
-  const start = async (item) => { if (await action.run(() => paraclinicApi.start(item.serviceDetailId), `Đã bắt đầu ${item.serviceName} cho ${item.petName}.`)) { setCalled(null); queue.refresh(); } };
+  const start = async (group) => {
+    const ok = await action.run(async () => { for (const row of group.rows) await paraclinicApi.start(row.serviceDetailId); return true; },
+      `Đã bắt đầu ${serviceNames(group.rows)} cho ${group.head.petName}.`);
+    if (ok) { setCalled(null); queue.refresh(); }
+  };
   const sample = async (item) => { if (await action.run(() => paraclinicApi.sampleCollected(item.serviceDetailId), `Đã ghi nhận lấy mẫu của ${item.petName}.`)) queue.refresh(); };
 
   return <StaffLayout area={room.area} title={room.title}>
@@ -53,40 +66,44 @@ export default function QueuePage({ kind }) {
     <Notice notice={action.notice} onClose={action.clear} />
     <AsyncView state={queue}>
       {(items) => {
-        const working = items.filter((item) => item.status === 'IN_PROGRESS');
-        const waiting = items.filter((item) => item.status !== 'IN_PROGRESS');
-        const calledItem = called && waiting.find((item) => item.serviceDetailId === called.serviceDetailId);
+        const workingGroups = groupByVisit(items.filter((item) => item.status === 'IN_PROGRESS'));
+        const waitingGroups = groupByVisit(items.filter((item) => item.status !== 'IN_PROGRESS'));
+        const calledGroup = called && waitingGroups.find((g) => g.key === called.visitId);
+        const isFirstRun = (g) => g.rows.every((r) => r.skipCount === 0);
+        const urgent = waitingGroups.filter((g) => g.head.emergency && isFirstRun(g));
         return <>
-          <Stats items={[['Đang thực hiện', working.length], ['Đang chờ', waiting.length], ['Cấp cứu', items.filter((i) => i.emergency && i.skipCount === 0).length, undefined, items.some((i) => i.emergency && i.skipCount === 0) ? 'red' : ''], ['Đã bị lùi', items.filter((i) => i.skipCount > 0).length, undefined, 'amber']]} />
+          <Stats items={[['Đang thực hiện', workingGroups.length], ['Đang chờ', waitingGroups.length], ['Cấp cứu', urgent.length, undefined, urgent.length ? 'red' : ''], ['Đã bị lùi', waitingGroups.filter((g) => g.rows.some((r) => r.skipCount > 0)).length, undefined, 'amber']]} />
 
-          {calledItem && <div className="ui-alert info" role="status" style={{ alignItems: 'center' }}>
-            <span>Đang gọi <strong>{calledItem.petName}</strong> ({calledItem.visitCode}) — {calledItem.serviceName}. Khách vào phòng thì bấm Bắt đầu; không thấy khách thì Đẩy lùi 1 bậc.</span>
-            <span className="ui-actions"><Button className="small primary" onClick={() => start(calledItem)}>Bắt đầu</Button><Button className="small" onClick={() => skip(calledItem)}>Không thấy khách — Đẩy lùi 1 bậc</Button></span>
+          {calledGroup && <div className="ui-alert info" role="status" style={{ alignItems: 'center' }}>
+            <span>Đang gọi <strong>{calledGroup.head.petName}</strong> ({calledGroup.head.visitCode}) — {serviceNames(calledGroup.rows)}. Khách vào phòng thì bấm Bắt đầu; không thấy khách thì Đẩy lùi 1 bậc.</span>
+            <span className="ui-actions"><Button className="small primary" onClick={() => start(calledGroup)}>Bắt đầu</Button><Button className="small" onClick={() => skip(calledGroup)}>Không thấy khách — Đẩy lùi 1 bậc</Button></span>
           </div>}
 
-          {working.length > 0 && <Panel title="Đang thực hiện" flush>
-            <Table caption="Đang thực hiện" rows={working} rowKey="serviceDetailId" columns={[
-              { title: 'Thú cưng', render: (row) => <><strong>{row.petName}</strong><small>{row.speciesName} · {row.visitCode}</small></> },
-              { title: 'Dịch vụ', render: (row) => row.serviceName },
-              { title: 'Giai đoạn', render: (row) => (row.stage ? <Badge map={QUEUE_STAGE} value={row.stage} /> : <Badge tone="blue">Đang thực hiện</Badge>) },
-              { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
-                {kind === 'lab' && row.stage === 'SAMPLING' && <Button className="small" onClick={() => sample(row)}>Đã lấy mẫu</Button>}
-                <Link className="ui-button small primary" to={`${room.base}/entry/${row.serviceDetailId}`}>Nhập kết quả</Link>
-                <Button className="small danger" onClick={() => setDialog({ item: row })}>Hủy</Button></div> }]} />
+          {workingGroups.length > 0 && <Panel title="Đang thực hiện" flush>
+            <Table caption="Đang thực hiện" rows={workingGroups} rowKey="key" columns={[
+              { title: 'Thú cưng', render: (g) => <><strong>{g.head.petName}</strong><small>{g.head.speciesName} · {g.head.visitCode}</small></> },
+              { title: 'Dịch vụ', render: (g) => <div style={{ display: 'grid', gap: 8 }}>{g.rows.map((row) => <div key={row.serviceDetailId} className="ui-actions" style={{ justifyContent: 'space-between' }}>
+                <span>{row.serviceName} {row.stage ? <Badge map={QUEUE_STAGE} value={row.stage} /> : <Badge tone="blue">Đang thực hiện</Badge>}</span>
+                <span className="ui-actions">
+                  {kind === 'lab' && row.stage === 'SAMPLING' && <Button className="small" onClick={() => sample(row)}>Đã lấy mẫu</Button>}
+                  <Link className="ui-button small primary" to={`${room.base}/entry/${row.serviceDetailId}`}>Nhập kết quả</Link>
+                  <Button className="small danger" onClick={() => setDialog({ item: row })}>Hủy</Button></span></div>)}</div> }]} />
           </Panel>}
 
-          <Panel title="Hàng đợi" subtitle="Người đứng đầu được gọi khi bấm Gọi số tiếp theo." actions={<Button variant="primary" disabled={waiting.length === 0} busy={action.busy} onClick={callNext}>Gọi số tiếp theo</Button>} flush>
-            {waiting.length === 0 ? <Empty>Hiện không có ca nào chờ ở phòng này.</Empty> : <Table caption={room.title} rows={waiting} rowKey="serviceDetailId" rowClass={(row) => (row.emergency && row.skipCount === 0 ? 'emergency' : '')} columns={[
-              { title: 'Thú cưng', render: (row) => <><strong>{row.petName}</strong>{row.emergency && row.skipCount === 0 && <span className="ui-emergency"> · CẤP CỨU</span>}{row.skipCount > 0 && <Badge tone="amber">Đã bị lùi {row.skipCount} lần</Badge>}<small>{row.speciesName} · {row.visitCode}</small></> },
-              { title: 'Dịch vụ', render: (row) => <>{row.serviceName}{row.notes && <small>{row.notes}</small>}</> },
-              { title: 'Chỉ định lúc', render: (row) => formatTimeOfInstant(row.orderedAt) },
-              { title: kind === 'imaging' ? 'Liên phòng' : 'Giai đoạn', render: (row) => (kind === 'imaging'
-                ? (row.labStatus ? <Badge map={LAB_BADGE} value={row.labStatus} /> : <span className="ui-muted">—</span>)
-                : <Badge map={QUEUE_STAGE} value={row.stage || 'QUEUED'} />) },
-              { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
-                <Button className="small primary" onClick={() => start(row)}>Bắt đầu</Button>
-                <Button className="small" onClick={() => skip(row)}>Đẩy lùi 1 bậc</Button>
-                <Button className="small danger" onClick={() => setDialog({ item: row })}>Hủy</Button></div> }]} />}
+          <Panel title="Hàng đợi" subtitle="Người đứng đầu được gọi khi bấm Gọi số tiếp theo; các dịch vụ cùng đợt khám được gọi chung một lượt." actions={<Button variant="primary" disabled={waitingGroups.length === 0} busy={action.busy} onClick={callNext}>Gọi số tiếp theo</Button>} flush>
+            {waitingGroups.length === 0 ? <Empty>Hiện không có ca nào chờ ở phòng này.</Empty> : <Table caption={room.title} rows={waitingGroups} rowKey="key" rowClass={(g) => (g.head.emergency && isFirstRun(g) ? 'emergency' : '')} columns={[
+              { title: 'Thú cưng', render: (g) => <><strong>{g.head.petName}</strong>{g.head.emergency && isFirstRun(g) && <span className="ui-emergency"> · CẤP CỨU</span>}{Math.max(...g.rows.map((r) => r.skipCount)) > 0 && <Badge tone="amber">Đã bị lùi {Math.max(...g.rows.map((r) => r.skipCount))} lần</Badge>}<small>{g.head.speciesName} · {g.head.visitCode}</small></> },
+              { title: 'Dịch vụ', render: (g) => <div style={{ display: 'grid', gap: 6 }}>{g.rows.map((row) => <div key={row.serviceDetailId} className="ui-actions" style={{ justifyContent: 'space-between' }}>
+                <span>{row.serviceName}{row.notes && <small>{row.notes}</small>}</span>
+                {g.rows.length > 1 && <Button className="small danger" onClick={() => setDialog({ item: row })}>Hủy dịch vụ</Button>}</div>)}</div> },
+              { title: 'Chỉ định lúc', render: (g) => formatTimeOfInstant(g.head.orderedAt) },
+              { title: kind === 'imaging' ? 'Liên phòng' : 'Giai đoạn', render: (g) => (kind === 'imaging'
+                ? (g.head.labStatus ? <Badge map={LAB_BADGE} value={g.head.labStatus} /> : <span className="ui-muted">—</span>)
+                : <Badge map={QUEUE_STAGE} value={g.head.stage || 'QUEUED'} />) },
+              { title: '', align: 'right', render: (g) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
+                <Button className="small primary" onClick={() => start(g)}>Bắt đầu</Button>
+                <Button className="small" onClick={() => skip(g)}>Đẩy lùi 1 bậc</Button>
+                {g.rows.length === 1 && <Button className="small danger" onClick={() => setDialog({ item: g.head })}>Hủy</Button>}</div> }]} />}
           </Panel>
           {dialog && <ReasonDialog title="Hủy dịch vụ" danger item={dialog.item} onClose={() => setDialog(null)} onSubmit={async (reason) => { await paraclinicApi.cancel(dialog.item.serviceDetailId, reason); done(`Đã hủy dịch vụ của ${dialog.item.petName}.`); }} />}
         </>;

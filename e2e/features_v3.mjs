@@ -352,6 +352,20 @@ async function main() {
   check('chủ nuôi khác KHÔNG tải được ảnh (403/404)', [403, 404].includes(dlOther?.status));
   check('không token không tải được ảnh (401)', attach && (await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/file`)).status === 401);
   await call('POST', `${CLIN}/pet-visits/${im.v}/abandon`, { token: T.rec });
+  // Gộp ca: nhiều dịch vụ CĐHA của CÙNG một đợt khám bị đẩy lùi cùng nhau (một lần gọi / một lần đẩy lùi)
+  const g1 = await inProgress('GRP1', 4);
+  await call('POST', `${CLIN}/pet-visits/${g1.v}/paraclinical-orders`, { token: g1.token, body: { serviceIds: [6, 7] } });
+  const g2 = await inProgress('GRP2', 4);
+  await call('POST', `${CLIN}/pet-visits/${g2.v}/paraclinical-orders`, { token: g2.token, body: { serviceIds: [6] } });
+  const q1 = (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
+  const g1rows = q1.filter((i) => i.visitId === g1.v);
+  check('hai dịch vụ CĐHA cùng đợt khám nằm liền nhau trong hàng đợi', g1rows.length === 2 && Math.abs(q1.indexOf(g1rows[0]) - q1.indexOf(g1rows[1])) === 1);
+  const sk = await call('POST', `${CLIN}/service-details/${g1rows[0].serviceDetailId}/skip`, { token: T.img });
+  const q2 = (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
+  check('Đẩy lùi 1 lần: cả hai dịch vụ của ca cùng bị lùi (skipCount = 1) và ca kế tiếp được gọi', q2.filter((i) => i.visitId === g1.v).every((i) => i.skipCount === 1) && sk.data?.visitId === g2.v, brief(sk));
+  check('ca kế tiếp đứng trước ca vừa bị lùi, ca vừa bị lùi vẫn đủ hai dịch vụ', q2.findIndex((i) => i.visitId === g2.v) < q2.findIndex((i) => i.visitId === g1.v) && q2.filter((i) => i.visitId === g1.v).length === 2);
+  await call('POST', `${CLIN}/pet-visits/${g1.v}/abandon`, { token: T.rec });
+  await call('POST', `${CLIN}/pet-visits/${g2.v}/abandon`, { token: T.rec });
 
   // =====================================================================================================================
   step('F. Báo cáo');
