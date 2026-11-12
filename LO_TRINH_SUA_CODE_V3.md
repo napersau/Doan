@@ -12,8 +12,8 @@
 | **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
 | **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
 | **Phase 2** `appointment-service` | ✅ **ĐÃ XONG** (12/11/2026) | Khối A + B xong; 68 test pass + chạy thật trên schema v3.0 |
-| Phase 3 `clinical-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (3.B1–3.B14); 183 unit test clinical; **đã chạy kiểm chứng thật trên MySQL** (luồng chính + đẩy lùi Lab + T11/T12/T14 + thu tiền T10 + công nợ + báo cáo doanh thu: 100% đạt, phát hiện và sửa 1 lỗi lazy ở `skip` phòng Lab) | **Bước kế tiếp: Phase 4 (billing-pharmacy-service)** |
-| Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
+| Phase 3 `clinical-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (3.B1–3.B14); 183 unit test clinical; **đã chạy kiểm chứng thật trên MySQL** (luồng chính + đẩy lùi Lab + T11/T12/T14 + thu tiền T10 + công nợ + báo cáo doanh thu: 100% đạt, phát hiện và sửa 1 lỗi lazy ở `skip` phòng Lab) | |
+| Phase 4 `billing-pharmacy-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (4.B1–4.B6); 56 unit test billing (+183 clinical vẫn đạt); **đã chạy kiểm chứng thật trên MySQL** (kê đơn + `stockWarnings`, khóa đơn `PHARM_1411`, lập/sửa/hủy hóa đơn thuốc, thu tiền + trừ kho nguyên tử, EX-15 rollback rồi sửa hóa đơn thu lại, EX-16 kể cả 3 yêu cầu song song, nhập/cân chỉnh kho, mở lại hồ sơ T14, báo cáo doanh thu thuốc, bệnh án ghép đơn: 65/65 đạt) | **Bước kế tiếp: Phase 5 (notification-service)** |
 | Phase 5 `notification-service` | ⬜ chưa làm | |
 | Phase 6 Gateway + FE | ⬜ chưa làm | |
 | Phase 7 Dọn dẹp + kiểm thử cuối | ⬜ chưa làm | |
@@ -185,19 +185,31 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 ## PHASE 4 — `billing-pharmacy-service`
 
 ### Khối A — khớp schema
-- [ ] **4.A1** `Medicine` thêm `vatRate`. `Prescription` bỏ `status`, `dispensedBy/At`. `PrescriptionItem` bỏ `unitPrice`, `subtotal`. `InventoryTransaction` bỏ `balanceAfter`, `referenceId`, thêm `medicineInvoiceId`; `InventoryTransactionType`: `EXPORT_PRESCRIPTION → EXPORT_SALE`; `quantity` có dấu.
-- [ ] **4.A2** Xóa `Invoice`, `InvoiceItem`, `InvoiceItemType`, `PrescriptionStatus`, `InvoiceCalculator`, `InvoiceServiceImpl`, `InvoiceController`, `VisitClosedListener`, `prescriptions/{id}/dispense`, `removeFromInvoice`, `cancelForReopen`. Thêm entity `MedicineInvoice` (`@Version`) + `MedicineInvoiceItem` + repository.
+- [x] **4.A1** `Medicine` thêm `vatRate`. `Prescription` bỏ `status`, `dispensedBy/At`. `PrescriptionItem` bỏ `unitPrice`, `subtotal`. `InventoryTransaction` bỏ `balanceAfter`, `referenceId`, thêm `medicineInvoiceId`; `InventoryTransactionType`: `EXPORT_PRESCRIPTION → EXPORT_SALE`; `quantity` có dấu.
+- [x] **4.A2** Xóa `Invoice`, `InvoiceItem`, `InvoiceItemType`, `PrescriptionStatus`, `InvoiceCalculator`, `InvoiceServiceImpl`, `InvoiceController`, `VisitClosedListener`, `prescriptions/{id}/dispense`, `removeFromInvoice`, `cancelForReopen`. Thêm entity `MedicineInvoice` (`@Version`) + `MedicineInvoiceItem` + repository.
 - **Xong khi:** service khởi động trên schema mới; test cũ của phần đã xóa bị loại.
 
 ### Khối B
 | Bước | Nghiệp vụ | Việc chính | Kiểm thử |
 |---|---|---|---|
-| [ ] **4.B1** | Thuốc + kho | CRUD thêm `vat_rate`; `import`/`adjust` ghi `quantity` có dấu, giữ bất biến `stock = SUM(quantity)` | Task 4.1 |
-| [ ] **4.B2** | Đơn thuốc | không giá/không trạng thái; trả `stockWarnings` thay vì chặn (EX-13); khóa theo `/internal/pet-visits/{id}/summary` (`PHARM_1411`); `print` | Task 4.2 |
-| [ ] **4.B3** | Lập hóa đơn thuốc | `POST /prescriptions/{id}/medicine-invoices`: chỉ khi ca `WAITING_PAYMENT`/`COMPLETED`; `PHARM_1407`, `PHARM_1410`; snapshot giá/VAT; mã `MINV-` | Task 4.3 |
-| [ ] **4.B4** | Sửa/hủy | `PUT /medicine-invoices/{id}/items` (`quantity = 0` bỏ dòng, còn ≥ 1 dòng); `POST …/cancel` (hủy là kết thúc) | Task 4.3.4 |
-| [ ] **4.B5** | Thu tiền + trừ kho | **một `@Transactional`**: sắp theo `medicineId` → `UPDATE … WHERE stock >= :qty` → `inventory_transactions EXPORT_SALE` → `PAID`; thiếu kho ⇒ rollback toàn bộ (`PHARM_1406`); phát `MedicineInvoicePaidEvent` + `MedicineLowStockEvent`. **Giữ lại logic trừ kho hiện có**, chỉ đổi nguồn dữ liệu | Task 4.4, EX-15/16 |
-| [ ] **4.B6** | Báo cáo | doanh thu thuốc từ `medicine_invoices` `PAID` (tái dùng `RevenuePeriods`) | FR-69 |
+| [x] **4.B1** | Thuốc + kho | CRUD thêm `vat_rate`; `import`/`adjust` ghi `quantity` có dấu, giữ bất biến `stock = SUM(quantity)` | Task 4.1 |
+| [x] **4.B2** | Đơn thuốc | không giá/không trạng thái; trả `stockWarnings` thay vì chặn (EX-13); khóa theo `/internal/pet-visits/{id}/summary` (`PHARM_1411`); `print` | Task 4.2 |
+| [x] **4.B3** | Lập hóa đơn thuốc | `POST /prescriptions/{id}/medicine-invoices`: chỉ khi ca `WAITING_PAYMENT`/`COMPLETED`; `PHARM_1407`, `PHARM_1410`; snapshot giá/VAT; mã `MINV-` | Task 4.3 |
+| [x] **4.B4** | Sửa/hủy | `PUT /medicine-invoices/{id}/items` (`quantity = 0` bỏ dòng, còn ≥ 1 dòng); `POST …/cancel` (hủy là kết thúc) | Task 4.3.4 |
+| [x] **4.B5** | Thu tiền + trừ kho | **một `@Transactional`**: sắp theo `medicineId` → `UPDATE … WHERE stock >= :qty` → `inventory_transactions EXPORT_SALE` → `PAID`; thiếu kho ⇒ rollback toàn bộ (`PHARM_1406`); phát `MedicineInvoicePaidEvent` + `MedicineLowStockEvent`. **Giữ lại logic trừ kho hiện có**, chỉ đổi nguồn dữ liệu | Task 4.4, EX-15/16 |
+| [x] **4.B6** | Báo cáo | doanh thu thuốc từ `medicine_invoices` `PAID` (tái dùng `RevenuePeriods`) | FR-69 |
+
+
+> **Ghi chú điều chỉnh sau Phase 4 (12/11/2026):**
+> - **Bỏ so với v2 (đã xóa khỏi code):** `Invoice`/`InvoiceItem`, `InvoiceCalculator`, `VisitClosedListener` (và `BillingRabbitConfig`: billing không còn consumer nào), `prescriptions/{id}/dispense`, hủy đơn thuốc (`/prescriptions/{id}/cancel`), danh sách "chờ phát", `cancel-for-reopen`, `vetclinic.billing.vat.*` (VAT là dữ liệu: `medicines.vat_rate`). Docs v3.0 không có API hủy đơn thuốc nên không giữ.
+> - **Đơn thuốc:** `PUT` ghép dòng theo thuốc và **sửa tại chỗ** (giữ id dòng) thay vì xóa-rồi-thêm, để hóa đơn đã hủy còn tham chiếu được (`fk_mii_pitem`); bỏ một thuốc mà hóa đơn (kể cả đã hủy) còn tham chiếu → `PHARM_1411`. Đơn bị khóa khi ca không còn `IN_PROGRESS` **hoặc** đã có hóa đơn thuốc `PENDING`/`PAID`; hóa đơn `CANCELLED` không khóa (dùng với "Mở lại hồ sơ" T14).
+> - **Hóa đơn thuốc:** lập khi ca `WAITING_PAYMENT`/`COMPLETED` (sai → `BILL_1409`); `PUT …/items` chỉ sửa dòng **đã có** trong hóa đơn (dòng lạ → `SYS_1001`), `quantity = 0` bỏ dòng, luôn kiểm tra lại giảm giá; sửa/hủy/thu đều khóa dòng (`SELECT … FOR UPDATE`) + `@Version`. Thu tiền: `UPDATE … WHERE stock >= :qty` (đã thêm `version = version + 1` theo docs 4.4.2), sắp theo `medicineId`.
+> - **Kho:** `POST /pharmacy/inventory/import` và `/adjust` (ADMIN, body có `medicineId`) thay `/medicines/{id}/import|adjust` (đã xóa); `inventory_transactions.quantity` có dấu, `EXPORT_SALE` có `medicine_invoice_id`; `InventoryTransactionResponse` không còn `balanceAfter`/`referenceId`.
+> - **Báo cáo:** `GET /billing/reports/revenue` chỉ còn phần **thuốc** (`totals`, `periods`, `byStatus` = số hóa đơn theo trạng thái); phần dịch vụ + công nợ ở `clinical /reports/revenue` — Admin FE cộng hai nguồn (CLAUDE.md §10 #5).
+> - **Feign billing→clinical** đổi sang `/internal/pet-visits/{id}/summary` + **mới** `/internal/pet-visits/summaries?ids=` (theo lô, thêm vào `InternalVisitController` của clinical). Đã xóa `/internal/clinical/visits?ids=` (chỉ billing dùng). **Còn giữ** `/internal/clinical/visits/{id}` vì notification-service v2 vẫn gọi (xóa ở 7.1 sau Phase 5).
+> - **clinical:** `PrescriptionSummary` (bệnh án) bỏ `status/totalAmount/dispensedAt`; đơn thuốc xem được cả khi khách mua ngoài.
+> - **Phát event:** `MedicineInvoicePaidEvent`, `MedicineLowStockEvent` đã phát sau commit (RabbitMQ); notification-service chưa nghe (Phase 5.3). Event/routing key v2 của billing không còn ai phát.
+> - **FE (Phase 6) bị ảnh hưởng:** `PrescriptionResponse` (không `status/unitPrice/subtotal/totalAmount/dispensedAt`, thêm `stockWarnings`, `medicineInvoiceId/Status`), `MedicineResponse.vatRate`, endpoint kho mới, toàn bộ API hóa đơn gộp `/billing/invoices` biến mất → màn hình "bán thuốc theo đơn" mới.
 
 ---
 
