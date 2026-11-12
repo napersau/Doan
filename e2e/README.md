@@ -1,50 +1,37 @@
-# Kịch bản kiểm thử end-to-end
+# Kiểm thử end-to-end (v3.0)
 
-Chạy qua API Gateway (`http://localhost:8080`) trên hệ thống Docker thật, tự đối chiếu `[PASS]`/`[FAIL]`.
-Mỗi kịch bản in dòng cuối `KET QUA: N dat, M khong dat`.
+Chạy qua API Gateway (`http://localhost:8080`) trên hệ thống Docker thật, tự đối chiếu `PASS` / `FAIL`. Mỗi kịch bản in dòng cuối
+`N đạt, M lỗi`. Bộ e2e của thiết kế v2 (hàng đợi sảnh 3 bậc, Khóa ưu tiên, hóa đơn gộp, `dispense`) đã bị **xóa** ở Phase 7.
 
 | File | Phạm vi | Số kiểm tra |
 |---|---|---|
-| `auth.sh` | auth-service: đăng nhập, refresh, khóa tài khoản, endpoint nội bộ (kịch bản quan sát, không đếm PASS) | – |
-| `appointment.sh` | đặt lịch, sức chứa khung giờ, song song, NO_SHOW, kiểm tra thú cưng | 85 |
-| `clinical.sh` | thú cưng, check-in, hàng đợi, phân công, khám 2 pha, Lab/CĐHA, tải ảnh, đồng thời | 171 |
-| `billing.sh` | kê đơn, hóa đơn, thanh toán, xuất thuốc, kho, EX-14/15/16, đồng thời, DLQ | 151 |
-| `notification.py` | STOMP/WebSocket thật (JWT, quyền đăng ký kênh), 6 sự kiện, email Mailpit, DLQ | 68 |
-| `features.py` | tự đăng ký / đổi vai trò / đặt lại mật khẩu, danh mục xét nghiệm, hàng đợi 3 bậc, bệnh án trọn đời, báo cáo, hết hạn PENDING, hủy hóa đơn + mở lại đợt khám | 138 |
-| `fe_smoke.mjs` | **(v2, lỗi thời — chờ Phase 7 xóa)** giao diện thật trên Chrome headless, luồng v2 | 50 |
-| `fe_smoke_v3.mjs` | **giao diện thật v3.0** trên Chrome headless qua Gateway: khung giờ công khai, gọi số/đẩy lùi, dịch vụ tại phòng, CLS, thu từng phần, bán thuốc, báo cáo hai nguồn (cùng khung CDP với `fe_smoke.mjs`; chạy `node e2e/fe_smoke_v3.mjs` khi Gateway :8080 + 5 service đang chạy và `fe/build` đã dựng) | 69 |
+| `backend_v3.mjs` | **Luồng chuẩn Task 5.4** (check-in → gọi số → khám → CBC + X-quang → có kết quả lên đầu hàng đợi → kê đơn → chốt → thu): đối chiếu `v_service_invoice_amounts` = **530.000**, `v_medicine_invoice_amounts` = **157.500**, Clavamox 200 → 190; **EX-15** (thiếu kho → rollback, sửa hóa đơn, thu lại), **EX-16** (thu trùng, kể cả 5 yêu cầu song song); **đua `RESULTS_READY`** (2 KTV hoàn tất cùng lúc, 3 vòng); **Đẩy lùi 1 bậc** (công thức `queue_order`); **công nợ** (khách bỏ về → thu bù); **đặt lịch đồng thời** (9 yêu cầu vào khung còn 6 chỗ); **refresh token dùng lại**; phân quyền, `/internal/**` bị chặn; bất biến kho `SUM(quantity) = stock_quantity` | 45 |
+| `notification_v3.mjs` | 9 sự kiện v3.0 → thông báo đúng người (chủ nuôi, bác sĩ, KTV, lễ tân, Admin) qua RabbitMQ thật; `POST /notifications/{id}/read` (riêng từng người, idempotent, 404); `send-email` đã bỏ; email (chỉ khi truy cập được Mailpit) | 25 |
+| `fe_smoke_v3.mjs` | **Giao diện thật** trên Chrome headless (Chrome DevTools Protocol, gói `ws` có sẵn trong `fe/node_modules`): khung giờ công khai, đặt lịch, tiếp nhận kèm chọn bác sĩ, Gọi số / Đẩy lùi, dịch vụ tại phòng, CLS Lab/CĐHA (có ảnh), giai đoạn 2, kê đơn (cảnh báo tồn), thu từng phần + giảm giá, bán thuốc, bệnh án + thông báo của chủ nuôi, báo cáo hai nguồn, phân quyền; in mọi lỗi console / HTTP ≥ 400 | 69 |
+| `auth.sh` | auth-service: đăng nhập, refresh, khóa tài khoản, endpoint nội bộ (kịch bản quan sát, không đếm PASS; tạo thêm tài khoản bác sĩ thử) | – |
 
 ## Chạy
 
 ```bash
-docker compose up -d --build        # chờ mọi container healthy
-pip install websockets              # chỉ cần cho notification.py
-bash e2e/run_all.sh                 # chạy 4 kịch bản đầu + notification.py
+docker compose down -v && docker compose up -d --build   # dữ liệu seed sạch; chờ mọi container healthy (lần đầu ~10 phút do máy chậm)
+bash e2e/run_all.sh                                       # backend -> notification -> giao diện, in tổng kết, mã thoát 1 nếu có lỗi
+# hoặc từng kịch bản:
+node e2e/backend_v3.mjs
+node e2e/notification_v3.mjs
+node e2e/fe_smoke_v3.mjs
 ```
 
-`features.py` thử việc tự hủy lịch PENDING quá hạn nên cần cron quét nhanh. Chạy riêng như sau:
-
-```bash
-BOOKING_PENDING_EXPIRY_CRON='*/5 * * * * *' docker compose up -d appointment-service
-python e2e/features.py
-docker compose up -d appointment-service     # trả lại cấu hình thường
-```
-
-## Giao diện (`fe_smoke.mjs`)
-
-`node e2e/fe_smoke.mjs` điều khiển Chrome headless (qua Chrome DevTools Protocol, dùng gói `ws` có sẵn trong `fe/node_modules`) đi trọn một ca khám bằng giao diện thật:
-chủ nuôi đăng ký + thêm thú cưng + đặt lịch → lễ tân duyệt lịch, tiếp nhận khách, phân công → bác sĩ khám và chỉ định xét nghiệm + siêu âm → KTV xét nghiệm và KTV CĐHA nhập kết quả (có tải ảnh) → bác sĩ mời tái khám, kê đơn, chốt ca → lễ tân thu tiền, phát thuốc → chủ nuôi xem bệnh án → admin mở các trang quản trị → kiểm tra chặn quyền. In ra mọi lỗi console / HTTP ≥ 400 phát sinh.
-
-Yêu cầu: stack đang chạy (`docker compose up -d`), Chrome cài sẵn (hoặc đặt `CHROME_PATH`), và giao diện ở cổng 3000 — hoặc đã `npm run build` trong `fe/` (script tự phục vụ thư mục `fe/build` nếu cổng 3000 trống). Biến tùy chọn: `API_URL`, `FE_PORT`.
-Script tự tạo 4 tài khoản nhân sự (`0990000001..4`, mật khẩu `Smoke@1234`) nếu chưa có. **Tạo và để lại dữ liệu nghiệp vụ**: chạy `bash e2e/reset_data.sh` trước mỗi lần chạy lại (ca dở dang còn giữ bác sĩ ở trạng thái BUSY sẽ làm bước phân công thất bại).
+Yêu cầu: Node 18+ (dùng `fetch`, `FormData`), Docker Compose (script đối chiếu VIEW/bất biến kho bằng `docker compose exec mysql-server mysql`,
+đọc `MYSQL_ROOT_PASSWORD` từ `.env` ở thư mục gốc), Chrome cài sẵn cho `fe_smoke_v3` (hoặc đặt `CHROME_PATH`). Giao diện lấy ở cổng 3000
+(image `frontend` của compose); nếu cổng trống, script tự phục vụ thư mục `fe/build` (cần `npm run build` trong `fe/`). Biến tùy chọn:
+`API_URL`, `FE_PORT`, `MAILPIT_URL`.
 
 ## Lưu ý
 
-- **Mỗi kịch bản xóa dữ liệu nghiệp vụ** (mọi người dùng trừ `admin`, thú cưng, lịch hẹn, đợt khám, hóa đơn...) và đặt lại tồn kho thuốc
-  về dữ liệu mẫu. Chỉ chạy trên môi trường thử nghiệm.
-- `features.py` thay đổi cấu hình xét nghiệm (thêm chỉ số HCT, đổi chỉ số của dịch vụ CBC). Nó tự dọn ở đầu lần chạy sau, nhưng nếu
-  chạy `clinical.sh` ngay sau đó thì trước hết đặt lại: `docker compose down -v && docker compose up -d` hoặc chạy lại `features.py`.
-- Lịch sử thông báo của notification-service nằm trong bộ nhớ nên còn lại giữa các lần chạy; `notification.py` đã lọc theo thời điểm chạy.
-- `bash e2e/reset_data.sh` đưa dữ liệu về sạch (chỉ còn `admin` và danh mục gốc: 2 loài, 7 dịch vụ, 4 thuốc, 4 chỉ số) mà không cần dựng lại DB.
-  Lệnh này **xóa cả dữ liệu demo** của `docs/schema_init.sql` PHẦN 5; mỗi kịch bản e2e tự gọi nó ở đầu. Muốn có lại dữ liệu demo: `docker compose down -v && docker compose up -d`.
-- Đầu ra tạm ghi vào `e2e/.tmp/` (bị bỏ qua khi commit).
+- Các kịch bản **tạo và để lại dữ liệu nghiệp vụ** (đợt khám, hóa đơn, lịch hẹn, thú cưng thử, kho thuốc bị trừ / điều chỉnh) và dùng ID seed cố
+  định (thú cưng #1/#2, thuốc #1 tồn 200, bác sĩ #2/#3, `Admin@123`). Muốn chạy lại phải reset CSDL (`docker compose down -v`).
+  Thứ tự `backend` → `notification` → `giao-dien` trong `run_all.sh` đã tính tới tồn kho còn lại giữa các kịch bản.
+- `fe_smoke_v3` tự tạo 4 tài khoản nhân sự (`0990000001..4`, mật khẩu `Smoke@1234`) nếu chưa có.
+- Lịch sử thông báo của notification-service nằm trong bộ nhớ nên còn lại giữa các lần chạy.
+- Kiểm tra email cần Mailpit truy cập được (cổng 8025 chỉ mở khi dùng `docker-compose.dev.yml`); nếu không, phần email được bỏ qua.
+- Việc đặt lịch đồng thời dựa vào sức chứa mỗi khung = số bác sĩ ACTIVE × 2: chạy sau `auth.sh` (tạo thêm bác sĩ) sẽ làm đổi con số 6.

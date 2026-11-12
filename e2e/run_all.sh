@@ -1,27 +1,26 @@
 #!/usr/bin/env bash
-# Chạy toàn bộ kịch bản end-to-end theo thứ tự, in số kiểm tra đạt / không đạt của từng kịch bản.
-# Yêu cầu: `docker compose up -d` đã chạy xong và mọi container healthy; file .env đã có; Python 3 + thư viện `websockets`
-# (pip install websockets) cho notification.py.
-# CẢNH BÁO: mỗi kịch bản XÓA dữ liệu nghiệp vụ hiện có (người dùng khác admin, thú cưng, lịch hẹn, đợt khám, hóa đơn...).
+# Chạy bộ e2e v3.0 theo thứ tự: backend (luồng chuẩn + luồng dễ lỗi) -> notification -> giao diện thật (Chrome headless).
+# Yêu cầu: `docker compose up -d --build` đã xong, mọi container healthy, dữ liệu seed MỚI (docker compose down -v trước khi dựng lại),
+# Node 18+, Chrome cài sẵn (cho fe_smoke_v3), `fe/build` có sẵn hoặc cổng 3000 đã có giao diện (image frontend của compose).
+# CẢNH BÁO: tạo dữ liệu thật, không dọn lại; muốn chạy lại thì reset CSDL: docker compose down -v && docker compose up -d --build
 cd "$(dirname "$0")/.." || exit 1
 export PYTHONIOENCODING=utf-8
-summary=()
+summary=(); status=0
 
 run() { # tên lệnh...
   local name=$1; shift
   local out; out=$("$@" 2>&1)
-  echo "$out" | grep -F "[FAIL]"
-  local line; line=$(echo "$out" | grep "KET QUA" | tail -1)
-  summary+=("$name: ${line:-(không có dòng KET QUA, chạy riêng để xem chi tiết)}")
+  echo "$out" | grep -E "^\s+FAIL"
+  local line; line=$(echo "$out" | grep -E "[0-9]+ đạt, [0-9]+ lỗi" | tail -1)
+  summary+=("$name: ${line:-(không có dòng tổng kết, chạy riêng để xem chi tiết)}")
+  echo "$line" | grep -qE ", 0 lỗi" || status=1
 }
 
-run appointment bash e2e/appointment.sh
-run clinical bash e2e/clinical.sh
-run billing bash e2e/billing.sh
-run notification python e2e/notification.py
-# features.py cần appointment-service chạy với cron quét nhanh (xem e2e/README.md); bật bằng RUN_FEATURES=1
-if [ "$RUN_FEATURES" = "1" ]; then run features python e2e/features.py; fi
+run backend node e2e/backend_v3.mjs
+run notification node e2e/notification_v3.mjs
+run giao-dien node e2e/fe_smoke_v3.mjs
 
 echo
 echo "===== TỔNG KẾT ====="
 printf '%s\n' "${summary[@]}"
+exit $status

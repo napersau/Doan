@@ -7,7 +7,6 @@ import org.springframework.http.HttpStatus;
  * Danh mục mã lỗi dùng chung toàn hệ thống.
  * Nguồn chuẩn: QUY_CHUAN_THIET_KE_VA_LAP_TRINH_BACKEND_SPRINGBOOT.md v3.0, mục 5.1 (39 mã). Số trong docs được ưu tiên;
  * mã chỉ có trong code thì nằm cuối nhóm, không đánh số lại. Đã đánh số lại ngày 12/11/2026 (LO_TRINH_SUA_CODE_V3.md, bước 1.1).
- * Mã có ghi chú "[v2 – TẠM GIỮ]" sẽ bị xóa khi phase tương ứng viết lại nghiệp vụ.
  */
 @Getter
 public enum ErrorCode {
@@ -92,12 +91,7 @@ public enum ErrorCode {
     INVALID_STOCK_ADJUSTMENT("PHARM_1412", "Điều chỉnh làm tồn kho âm, không thể thực hiện", HttpStatus.BAD_REQUEST),
     // Dời số ngày 12/11/2026 để nhường PHARM_1408/1409/1410/1411 cho docs
     PRESCRIPTION_ALREADY_EXISTS("PHARM_1413", "Đợt khám này đã có đơn thuốc, hãy cập nhật đơn hiện có", HttpStatus.CONFLICT),
-    MEDICINE_CODE_ALREADY_EXISTS("PHARM_1414", "Mã thuốc đã tồn tại trong danh mục", HttpStatus.CONFLICT),
-    // [v2 – TẠM GIỮ, XÓA ở Phase 4.A] đơn thuốc v3.0 không còn trạng thái / hóa đơn gộp
-    INVALID_PRESCRIPTION_STATUS("PHARM_1415", "Trạng thái đơn thuốc không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
-    INVOICE_NOT_PAID("BILL_1413", "Hóa đơn chưa được thanh toán, chưa thể xuất thuốc", HttpStatus.BAD_REQUEST),
-    INVALID_INVOICE_STATUS("BILL_1414", "Trạng thái hóa đơn không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
-    VISIT_NOT_READY_FOR_INVOICE("BILL_1415", "Đợt khám chưa được bác sĩ chốt sang chờ thanh toán", HttpStatus.BAD_REQUEST);
+    MEDICINE_CODE_ALREADY_EXISTS("PHARM_1414", "Mã thuốc đã tồn tại trong danh mục", HttpStatus.CONFLICT);
 
     private final String code;
     private final String message;
