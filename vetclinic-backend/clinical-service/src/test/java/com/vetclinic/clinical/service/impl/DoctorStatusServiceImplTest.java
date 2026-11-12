@@ -49,20 +49,18 @@ class DoctorStatusServiceImplTest {
     }
 
     @Test
-    void statusOf_prioritizesCallbackWhenResultsAreWaitingAndNotPostponed() {
-        when(visitRepository.existsByDoctorIdAndStatusAndCallbackPostponedAtIsNull(1L, VisitStatus.RESULTS_READY)).thenReturn(true);
-
-        assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.AVAILABLE_PRIORITY_CALLBACK);
-    }
-
-    @Test
-    void statusOf_isAvailableWhenNothingIsPendingOrAllResultsWerePostponed() {
-        // Ca tạm hoãn (EX-10) không còn tính vào Khóa ưu tiên nên truy vấn "chưa hoãn" trả về false
+    void statusOf_isAvailableWhenNothingIsPending_evenIfResultsAreWaiting() {
+        // v3.0 không còn "Khóa ưu tiên": ca RESULTS_READY nằm đầu hàng đợi của bác sĩ nhưng không làm đổi trạng thái bác sĩ
         assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.AVAILABLE);
     }
 
     @Test
-    void statusOf_busyWinsOverPriorityCallback() {
+    void doctorStatus_hasOnlyAvailableAndBusy() {
+        assertThat(DoctorStatus.values()).containsExactly(DoctorStatus.AVAILABLE, DoctorStatus.BUSY);
+    }
+
+    @Test
+    void statusOf_isBusyWhileExaminingAPatient() {
         when(visitRepository.existsByDoctorIdAndStatus(1L, VisitStatus.IN_PROGRESS)).thenReturn(true);
 
         assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.BUSY);
@@ -73,12 +71,11 @@ class DoctorStatusServiceImplTest {
         when(authClient.getActiveDoctors()).thenReturn(ApiResponse.success(List.of(
                 doctor(1L, "BS A", "P01"), doctor(2L, "BS B", "P02"), doctor(3L, "BS C", "P03"))));
         when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS, VisitStatus.WAITING))).thenReturn(Set.of(1L));
-        when(visitRepository.findDoctorIdsWithUnpostponedStatus(VisitStatus.RESULTS_READY)).thenReturn(Set.of(2L));
 
         List<DoctorStatusResponse> board = service.board();
 
         assertThat(board).extracting(DoctorStatusResponse::status)
-                .containsExactly(DoctorStatus.BUSY, DoctorStatus.AVAILABLE_PRIORITY_CALLBACK, DoctorStatus.AVAILABLE);
+                .containsExactly(DoctorStatus.BUSY, DoctorStatus.AVAILABLE, DoctorStatus.AVAILABLE);
         assertThat(board).extracting(DoctorStatusResponse::roomNumber).containsExactly("P01", "P02", "P03");
     }
 

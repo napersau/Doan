@@ -9,6 +9,7 @@ public record CreateServiceRequest(
         @NotBlank(message = "Tên dịch vụ không được để trống") @Size(max = 150, message = "Tên tối đa 150 ký tự") String name,
         @NotNull(message = "Nhóm dịch vụ không được để trống") ServiceCategory category,
         @NotNull(message = "Đơn giá không được để trống") @DecimalMin(value = "0.00", message = "Đơn giá không được âm") @Digits(integer = 10, fraction = 2, message = "Đơn giá tối đa 10 chữ số nguyên và 2 chữ số thập phân") BigDecimal price,
+        @DecimalMin(value = "0.00", message = "Thuế suất không được âm") @DecimalMax(value = "1.00", message = "Thuế suất tối đa 1.00 (100%)") @Digits(integer = 1, fraction = 2, message = "Thuế suất dạng 0.05 (5%)") BigDecimal vatRate,
         String description
 ) {
 }

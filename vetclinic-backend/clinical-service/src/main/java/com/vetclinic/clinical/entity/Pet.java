@@ -9,7 +9,6 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import com.vetclinic.clinical.constant.PetGender;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
@@ -52,10 +51,6 @@ public class Pet {
 
     @Column(name = "color", length = 100)
     private String color;
-
-    /** Cân nặng hồ sơ ban đầu / gần nhất (thông tin tĩnh). Cân nặng mỗi lần khám nằm ở pet_visits.weight_at_visit. */
-    @Column(name = "weight", precision = 5, scale = 2)
-    private BigDecimal weight;
 
     @Column(name = "is_neutered", nullable = false)
     private boolean neutered;

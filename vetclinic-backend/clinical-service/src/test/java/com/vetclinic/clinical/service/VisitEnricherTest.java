@@ -1,0 +1,67 @@
+package com.vetclinic.clinical.service;
+
+import com.vetclinic.clinical.client.AuthClient;
+import com.vetclinic.clinical.constant.VisitStatus;
+import com.vetclinic.clinical.dto.response.UserSummaryResponse;
+import com.vetclinic.clinical.dto.response.VisitResponse;
+import com.vetclinic.common.dto.ApiResponse;
+import com.vetclinic.common.security.RoleCode;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/** pet_visits v3.0 không còn assigned_room: số phòng = users.room_number của Bác sĩ, gắn bằng MỘT lời gọi theo lô. */
+@ExtendWith(MockitoExtension.class)
+class VisitEnricherTest {
+
+    @Mock
+    private AuthClient authClient;
+
+    private static VisitResponse visit(long id, Long doctorId) {
+        return new VisitResponse(id, "VIS-" + id, 11L, "Lu", "PET-11", "Chó", 5L, null, doctorId, 9L, null, false,
+                VisitStatus.WAITING, false, 0, 1L, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null);
+    }
+
+    private static UserSummaryResponse doctor(long id, String room) {
+        return new UserSummaryResponse(id, "BS " + id, "0911111111", RoleCode.VETERINARIAN, room, "ACTIVE");
+    }
+
+    @Test
+    void enrichAll_attachesTheDoctorsRoomWithOneBatchCall() {
+        when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(doctor(2L, "P101"), doctor(3L, "P102"))));
+
+        List<VisitResponse> result = new VisitEnricher(authClient)
+                .enrichAll(List.of(visit(1, 2L), visit(2, 3L), visit(3, 2L), visit(4, null)));
+
+        assertThat(result).extracting(VisitResponse::assignedRoom).containsExactly("P101", "P102", "P101", null);
+        verify(authClient).getUsers(any());   // đúng một lời gọi dù 4 ca khám: không N+1
+    }
+
+    @Test
+    void enrichAll_whenNoVisitHasADoctor_makesNoCall() {
+        List<VisitResponse> result = new VisitEnricher(authClient).enrichAll(List.of(visit(1, null)));
+
+        assertThat(result).hasSize(1);
+        verify(authClient, never()).getUsers(any());
+    }
+
+    @Test
+    void enrich_whenAuthServiceIsDown_returnsTheVisitUnchanged() {
+        when(authClient.getUsers(any())).thenThrow(new RuntimeException("auth down"));
+
+        VisitResponse result = new VisitEnricher(authClient).enrich(visit(1, 2L));
+
+        assertThat(result.assignedRoom()).isNull();
+        assertThat(result.id()).isEqualTo(1L);
+    }
+}

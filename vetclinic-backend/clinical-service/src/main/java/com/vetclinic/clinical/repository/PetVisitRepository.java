@@ -34,16 +34,28 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
     List<PetVisit> findWithPetByIdIn(Collection<Long> ids);
 
     /**
-     * Hàng đợi sảnh (nghiệp vụ §8.4 / §9): 1) cấp cứu tuyệt đối; 2) có hẹn đúng khung giờ, theo giờ hẹn; 3) vãng lai và khách
-     * hẹn nhưng đến trễ, theo giờ check-in (FIFO). Trong mỗi nhóm cùng mốc thì theo giờ check-in rồi id.
+     * Thứ tự MỌI hàng đợi (v3.0): cấp cứu chưa bị đẩy lùi lên đầu, còn lại theo queue_order tăng dần (số nhỏ gọi trước), cùng
+     * giá trị thì theo id. Không còn tầng "có hẹn đúng giờ" và không còn cột scheduled_at. Chỉ mục idx_visits_queue
+     * (doctor_id, status, is_emergency, queue_order).
      */
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    @Query("select v from PetVisit v where v.status = :status order by v.emergency desc, "
-            + "case when v.scheduledAt is null then 1 else 0 end asc, v.scheduledAt asc, v.checkedInAt asc, v.id asc")
+    @Query("select v from PetVisit v where v.status = :status "
+            + "order by case when (v.emergency = true and v.skipCount = 0) then 0 else 1 end asc, v.queueOrder asc, v.id asc")
     List<PetVisit> findQueueByStatus(@Param("status") VisitStatus status);
 
+    /** Các ca của một Bác sĩ (hàng đợi riêng + ca đang khám), cùng thứ tự hàng đợi như findQueueByStatus. */
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    List<PetVisit> findByDoctorIdAndStatusInOrderByCheckedInAtAscIdAsc(Long doctorId, Collection<VisitStatus> statuses);
+    @Query("select v from PetVisit v where v.doctorId = :doctorId and v.status in :statuses "
+            + "order by case when (v.emergency = true and v.skipCount = 0) then 0 else 1 end asc, v.queueOrder asc, v.id asc")
+    List<PetVisit> findDoctorVisits(@Param("doctorId") Long doctorId, @Param("statuses") Collection<VisitStatus> statuses);
+
+    /**
+     * Cân nặng gần nhất của mỗi thú cưng = weight_at_visit của đợt khám gần nhất có cân (pets không còn cột weight).
+     * Trả các dòng [petId, weight].
+     */
+    @Query("select v.pet.id, v.weightAtVisit from PetVisit v where v.weightAtVisit is not null and v.id in "
+            + "(select max(v2.id) from PetVisit v2 where v2.pet.id in :petIds and v2.weightAtVisit is not null group by v2.pet.id)")
+    List<Object[]> findLatestWeights(@Param("petIds") Collection<Long> petIds);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     List<PetVisit> findByPetIdOrderByIdDesc(Long petId);
@@ -72,13 +84,7 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
 
     boolean existsByDoctorIdAndStatus(Long doctorId, VisitStatus status);
 
-    boolean existsByDoctorIdAndStatusAndCallbackPostponedAtIsNull(Long doctorId, VisitStatus status);
-
     // ---- Trạng thái Bác sĩ (tính động): chỉ cần biết bác sĩ nào đang ở tình trạng nào
     @Query("select distinct v.doctorId from PetVisit v where v.doctorId is not null and v.status in :statuses")
     Set<Long> findDoctorIdsWithStatusIn(@Param("statuses") Collection<VisitStatus> statuses);
-
-    @Query("select distinct v.doctorId from PetVisit v "
-            + "where v.doctorId is not null and v.status = :status and v.callbackPostponedAt is null")
-    Set<Long> findDoctorIdsWithUnpostponedStatus(@Param("status") VisitStatus status);
 }

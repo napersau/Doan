@@ -1,12 +1,13 @@
 package com.vetclinic.clinical.dto.response;
 
-import com.vetclinic.clinical.constant.QueueState;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
+
 import java.time.Instant;
 
 /**
- * Một dòng trong hàng đợi phòng Lab / CĐHA. otherRoomStatus: tình trạng dịch vụ cùng đợt khám ở phòng còn lại
+ * Một dòng trong hàng đợi phòng Lab / CĐHA, đã xếp theo (cấp cứu chưa bị lùi) rồi queue_order. skipCount là số lần bị
+ * "Đẩy lùi 1 bậc" để nhân viên nhận biết (FR-39). otherRoomStatus: tình trạng dịch vụ cùng đợt khám ở phòng còn lại
  * (huy hiệu liên phòng FR-36), vd. LAB_IN_PROGRESS, LAB_PENDING, LAB_DONE, IMAGING_PENDING...
  */
 public record QueueItemResponse(
@@ -21,7 +22,7 @@ public record QueueItemResponse(
         ServiceCategory category,
         boolean emergency,
         ServiceDetailStatus status,
-        QueueState queueState,
+        int skipCount,
         String otherRoomStatus,
         String notes,
         Instant orderedAt

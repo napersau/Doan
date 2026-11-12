@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service;
 
+import com.vetclinic.clinical.constant.LabEvaluation;
 import com.vetclinic.clinical.dto.response.AttachmentResponse;
 import com.vetclinic.clinical.dto.response.ImagingResultResponse;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
@@ -10,14 +11,17 @@ import com.vetclinic.clinical.entity.ImagingResult;
 import com.vetclinic.clinical.entity.LabTestResult;
 import com.vetclinic.clinical.entity.Pet;
 import com.vetclinic.clinical.entity.PetVisit;
+import com.vetclinic.clinical.entity.ServiceInvoice;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
 import com.vetclinic.clinical.repository.ImagingResultRepository;
 import com.vetclinic.clinical.repository.LabTestResultRepository;
+import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +29,10 @@ import java.util.stream.Collectors;
 
 /**
  * Dựng VisitResponse. Phải gọi bên trong transaction (hoặc với entity đã nạp kèm pet và loài) vì open-in-view đã tắt.
+ * <p>
+ * Lược đồ v3.0 bỏ nhiều cột khỏi pet_visits / visit_service_details / lab_test_results; hình dạng response giữ nguyên bằng
+ * cách SUY RA: mốc thời gian và lý do hủy từ lịch sử trạng thái ({@link VisitTimeline}), đơn giá / VAT từ hóa đơn dịch vụ,
+ * nhãn đánh giá xét nghiệm từ giá trị so với khoảng tham chiếu đã snapshot. Số phòng do VisitEnricher gắn ở tầng controller.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,46 +42,69 @@ public class VisitAssembler {
     private final LabTestResultRepository labResultRepository;
     private final ImagingResultRepository imagingResultRepository;
     private final ImagingAttachmentRepository attachmentRepository;
+    private final ServiceInvoiceRepository invoiceRepository;
+    private final VisitTimeline timeline;
 
     /** Dùng cho API danh sách: không kèm dịch vụ và kết quả. */
     public VisitResponse summary(PetVisit visit) {
-        return build(visit, null, null, null);
+        return build(visit, timeline.of(visit), null, null, null);
     }
 
+    /** Một truy vấn lịch sử cho cả danh sách (không N+1). */
     public List<VisitResponse> summaries(Collection<PetVisit> visits) {
-        return visits.stream().map(this::summary).toList();
+        Map<Long, VisitTimeline.Times> times = timeline.ofAll(visits);
+        return visits.stream()
+                .map(v -> build(v, times.getOrDefault(v.getId(), VisitTimeline.Times.EMPTY), null, null, null))
+                .toList();
     }
 
     /** Chi tiết đầy đủ: dịch vụ đã chỉ định, kết quả xét nghiệm (có đánh giá LOW / NORMAL / HIGH) và ảnh CĐHA. */
     public VisitResponse detail(PetVisit visit) {
         List<VisitServiceDetail> details = detailRepository.findByVisitIdOrderByIdAsc(visit.getId());
         List<Long> detailIds = details.stream().map(VisitServiceDetail::getId).toList();
-
+        Map<Long, ServiceInvoice> invoices = invoicesOf(detailIds);
         List<LabResultResponse> labs = detailIds.isEmpty() ? List.of()
                 : labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(detailIds).stream().map(this::toLab).toList();
-
         List<ImagingResult> imagingResults = detailIds.isEmpty() ? List.of()
                 : imagingResultRepository.findByVisitServiceDetailIdIn(detailIds);
         Map<Long, List<ImagingAttachment>> attachments = imagingResults.isEmpty() ? Map.of()
                 : attachmentRepository.findByImagingResultIdIn(imagingResults.stream().map(ImagingResult::getId).toList())
                 .stream().collect(Collectors.groupingBy(ImagingAttachment::getImagingResultId));
-
-        return build(visit,
-                details.stream().map(this::toServiceDetail).toList(),
+        return build(visit, timeline.of(visit),
+                details.stream().map(d -> toServiceDetail(d, invoices.get(d.getId()))).toList(),
                 labs,
                 imagingResults.stream().map(r -> toImaging(r, attachments.getOrDefault(r.getId(), List.of()))).toList());
     }
 
     public ServiceDetailResponse toServiceDetail(VisitServiceDetail d) {
+        return toServiceDetail(d, invoiceRepository.findByVisitServiceDetailId(d.getId()).orElse(null));
+    }
+
+    private Map<Long, ServiceInvoice> invoicesOf(List<Long> detailIds) {
+        return detailIds.isEmpty() ? Map.of()
+                : invoiceRepository.findByVisitServiceDetailIdIn(detailIds).stream()
+                .collect(Collectors.toMap(ServiceInvoice::getVisitServiceDetailId, i -> i));
+    }
+
+    private ServiceDetailResponse toServiceDetail(VisitServiceDetail d, ServiceInvoice invoice) {
+        BigDecimal unitPrice = invoice == null ? null : invoice.getUnitPrice();
+        // Thành tiền trước VAT = số lượng × đơn giá snapshot: tính khi hiển thị, KHÔNG lưu (quy chuẩn: không lưu giá trị dẫn xuất)
+        BigDecimal subtotal = unitPrice == null ? null : unitPrice.multiply(BigDecimal.valueOf(d.getQuantity()));
         return new ServiceDetailResponse(d.getId(), d.getVisitId(), d.getService().getId(), d.getService().getCode(),
-                d.getService().getName(), d.getService().getCategory(), d.getUnitPrice(), d.getQuantity(),
-                d.getSubtotal(), d.getStatus(), d.getNotes(), d.getCreatedAt());
+                d.getService().getName(), d.getService().getCategory(), unitPrice, d.getQuantity(), subtotal, d.getStatus(),
+                d.getNotes(), d.getCreatedAt(),
+                invoice == null ? null : invoice.getVatRate(),
+                invoice == null ? null : invoice.getId(),
+                invoice == null ? null : invoice.getInvoiceCode(),
+                invoice == null ? null : invoice.getPaymentStatus());
     }
 
     private LabResultResponse toLab(LabTestResult r) {
+        // Không có cột evaluation: LOW / NORMAL / HIGH tính từ giá trị so với khoảng tham chiếu đã snapshot
+        LabEvaluation evaluation = LabEvaluation.of(r.getResultValue(), r.getMinValueSnapshot(), r.getMaxValueSnapshot());
         return new LabResultResponse(r.getId(), r.getVisitServiceDetailId(), r.getLabTestItem().getId(),
                 r.getLabTestItem().getCode(), r.getLabTestItem().getName(), r.getLabTestItem().getUnit(),
-                r.getResultValue(), r.getMinValueSnapshot(), r.getMaxValueSnapshot(), r.getEvaluation(),
+                r.getResultValue(), r.getMinValueSnapshot(), r.getMaxValueSnapshot(), evaluation,
                 r.getPerformedBy(), r.getNotes(), r.getCreatedAt());
     }
 
@@ -84,18 +115,19 @@ public class VisitAssembler {
                 r.getPerformedBy(), r.getPerformedAt(), attachments);
     }
 
-    private VisitResponse build(PetVisit v, List<ServiceDetailResponse> services, List<LabResultResponse> labs,
-                                List<ImagingResultResponse> imaging) {
+    private VisitResponse build(PetVisit v, VisitTimeline.Times times, List<ServiceDetailResponse> services,
+                                List<LabResultResponse> labs, List<ImagingResultResponse> imaging) {
         Pet pet = v.getPet();
         boolean locked = switch (v.getStatus()) {
             case WAITING_PAYMENT, COMPLETED, CANCELLED -> true;
             default -> false;
         };
+        // assignedRoom = null ở đây: số phòng là users.room_number của Bác sĩ, VisitEnricher gắn sau commit (không gọi Feign trong transaction)
         return new VisitResponse(v.getId(), v.getVisitCode(), pet.getId(), pet.getName(), pet.getPetCode(),
                 pet.getSpecies().getName(), pet.getOwnerId(), v.getAppointmentId(), v.getDoctorId(),
-                v.getReceptionistId(), v.getAssignedRoom(), v.isEmergency(), v.getStatus(), locked,
-                v.getCallbackPostponedAt() != null, v.getWeightAtVisit(), v.getTemperature(), v.getInitialSymptoms(),
-                v.getClinicalNotes(), v.getDiagnosis(), v.getTreatmentPlan(), v.getDoctorAdvice(), v.getCancelReason(),
-                v.getCheckedInAt(), v.getScheduledAt(), v.getStartedAt(), v.getClosedAt(), v.getCompletedAt(), services, labs, imaging);
+                v.getReceptionistId(), null, v.isEmergency(), v.getStatus(), locked, v.getSkipCount(), v.getQueueOrder(),
+                v.getWeightAtVisit(), v.getTemperature(), v.getInitialSymptoms(), v.getClinicalNotes(), v.getDiagnosis(),
+                v.getTreatmentPlan(), v.getDoctorAdvice(), times.cancelReason(), v.getCheckedInAt(), times.startedAt(),
+                times.closedAt(), times.completedAt(), services, labs, imaging);
     }
 }

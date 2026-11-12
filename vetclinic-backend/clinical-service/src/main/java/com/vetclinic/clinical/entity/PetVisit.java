@@ -42,9 +42,6 @@ public class PetVisit {
     @Column(name = "receptionist_id", nullable = false)
     private Long receptionistId;
 
-    @Column(name = "assigned_room", length = 20)
-    private String assignedRoom;
-
     @Column(name = "is_emergency", nullable = false)
     private boolean emergency;
 
@@ -74,31 +71,21 @@ public class PetVisit {
     @Builder.Default
     private VisitStatus status = VisitStatus.WAITING;
 
-    @Column(name = "cancel_reason", columnDefinition = "TEXT")
-    private String cancelReason;
-
     @Column(name = "checked_in_at", nullable = false)
     private Instant checkedInAt;
 
-    @Column(name = "started_at")
-    private Instant startedAt;
-
-    @Column(name = "closed_at")
-    private Instant closedAt;
-
-    @Column(name = "completed_at")
-    private Instant completedAt;
-
     /**
-     * Giờ bắt đầu khung hẹn nếu khách có hẹn check-in ĐÚNG khung giờ (ưu tiên 2 của hàng đợi sảnh); null với khách vãng lai
-     * hoặc khách đến trễ quá khung giờ (ưu tiên 3, xếp theo giờ check-in).
+     * Thứ tự trong hàng đợi, số NHỎ được gọi trước (v3.0). Gán = thời điểm tiếp nhận tính bằng epoch micro giây
+     * (QueueOrders). "Đẩy lùi 1 bậc" đặt ca ra ngay sau người kế tiếp; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1.
+     * Thứ tự mọi hàng đợi: ORDER BY (is_emergency AND skip_count = 0) DESC, queue_order ASC.
      */
-    @Column(name = "scheduled_at")
-    private Instant scheduledAt;
+    @Column(name = "queue_order", nullable = false)
+    private long queueOrder;
 
-    /** EX-10: có giá trị = Bác sĩ đã tạm hoãn ca tái khám này, không còn tính vào Khóa ưu tiên. */
-    @Column(name = "callback_postponed_at")
-    private Instant callbackPostponedAt;
+    /** Số lần bị "Đẩy lùi 1 bậc" (không giới hạn). Ca cấp cứu đã bị lùi (skip_count > 0) xếp như ca thường. */
+    @Column(name = "skip_count", nullable = false)
+    @Builder.Default
+    private int skipCount = 0;
 
     @Version
     @Column(name = "version", nullable = false)

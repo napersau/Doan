@@ -24,4 +24,13 @@ public record PetResponse(
         Instant createdAt,
         Instant updatedAt
 ) {
+
+    /**
+     * Lược đồ v3.0 bỏ cột pets.weight: cân nặng hiện tại = weight_at_visit của đợt khám gần nhất (PetServiceImpl gắn vào đây),
+     * null nếu thú cưng chưa từng được cân.
+     */
+    public PetResponse withWeight(BigDecimal weight) {
+        return new PetResponse(id, ownerId, speciesId, speciesCode, speciesName, petCode, name, breed, gender, dateOfBirth,
+                color, weight, neutered, identifyingCharacteristics, notes, createdAt, updatedAt);
+    }
 }

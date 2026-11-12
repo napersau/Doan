@@ -3,7 +3,6 @@ package com.vetclinic.clinical.service.impl;
 import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.dto.response.PetSummaryResponse;
 import com.vetclinic.clinical.entity.Pet;
-import com.vetclinic.clinical.mapper.ClinicalMapper;
 import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.SpeciesRepository;
@@ -42,15 +41,13 @@ class PetServiceImplTest {
     @Mock
     private AuthClient authClient;
     @Mock
-    private ClinicalMapper mapper;
-    @Mock
     private VisitAssembler assembler;
     @Mock
     private PlatformTransactionManager transactionManager;
 
     private PetServiceImpl service() {
-        return new PetServiceImpl(petRepository, speciesRepository, visitRepository, authClient, mapper, assembler,
-                CLOCK, transactionManager);
+        return new PetServiceImpl(petRepository, speciesRepository, visitRepository, authClient,
+                new com.vetclinic.clinical.mapper.ClinicalMapperImpl(), assembler, CLOCK, transactionManager);
     }
 
     @Test
@@ -71,6 +68,33 @@ class PetServiceImplTest {
         when(petRepository.findByOwnerId(9L)).thenReturn(List.of());
 
         assertThat(service().getSummariesByOwner(9L)).isEmpty();
+    }
+
+    @Test
+    void getById_attachesTheWeightOfTheMostRecentWeighedVisit_becausePetsHasNoWeightColumn() {
+        com.vetclinic.clinical.testsupport.TestData.loginAs(com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST,
+                com.vetclinic.common.security.RoleCode.RECEPTIONIST);
+        when(petRepository.findWithSpeciesById(11L)).thenReturn(java.util.Optional.of(
+                com.vetclinic.clinical.testsupport.TestData.pet(11L, com.vetclinic.clinical.testsupport.TestData.dog())));
+        when(visitRepository.findLatestWeights(List.of(11L)))
+                .thenReturn(java.util.Collections.singletonList(new Object[]{11L, new java.math.BigDecimal("4.60")}));
+
+        var response = service().getById(11L);
+
+        assertThat(response.weight()).isEqualByComparingTo("4.60");   // = weight_at_visit của đợt khám gần nhất (v3.0 bỏ pets.weight)
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void getById_weightIsNullWhenThePetWasNeverWeighed() {
+        com.vetclinic.clinical.testsupport.TestData.loginAs(com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST,
+                com.vetclinic.common.security.RoleCode.RECEPTIONIST);
+        when(petRepository.findWithSpeciesById(11L)).thenReturn(java.util.Optional.of(
+                com.vetclinic.clinical.testsupport.TestData.pet(11L, com.vetclinic.clinical.testsupport.TestData.dog())));
+        when(visitRepository.findLatestWeights(List.of(11L))).thenReturn(List.of());
+
+        assertThat(service().getById(11L).weight()).isNull();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 
     @Test

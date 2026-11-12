@@ -75,8 +75,6 @@ public enum ErrorCode {
     SERVICE_NOT_FOUND("CLIN_1320", "Không tìm thấy dịch vụ kỹ thuật hoặc dịch vụ đã ngừng sử dụng", HttpStatus.NOT_FOUND),
     SERVICE_DETAIL_NOT_FOUND("CLIN_1321", "Không tìm thấy chỉ định dịch vụ", HttpStatus.NOT_FOUND),
     INVALID_SERVICE_DETAIL_STATUS("CLIN_1322", "Trạng thái chỉ định dịch vụ không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
-    // [v2 – TẠM GIỮ, XÓA ở bước 3.A3] "Khóa ưu tiên" không còn trong v3.0; chỉ để code v2 còn biên dịch tới khi viết lại hàng đợi
-    DOCTOR_PRIORITY_LOCKED("CLIN_1323", "Bác sĩ đang có ca chờ đọc kết quả cận lâm sàng, vui lòng ưu tiên gọi lại ca tái khám", HttpStatus.CONFLICT),
 
     // 5. Hóa đơn & Kho dược (BILL/PHARM: 1400 - 1499) – dùng cho cả service_invoices (clinical) và medicine_invoices (billing-pharmacy)
     INVOICE_NOT_FOUND("BILL_1401", "Không tìm thấy hóa đơn", HttpStatus.NOT_FOUND),

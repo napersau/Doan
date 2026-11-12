@@ -26,20 +26,22 @@ import java.util.List;
 public class VisitController {
 
     private final VisitService visitService;
+    /** Số phòng của Bác sĩ lấy từ auth-service SAU commit (pet_visits không còn cột assigned_room). */
+    private final com.vetclinic.clinical.service.VisitEnricher enricher;
 
     /** UC-19: tiếp nhận khách có hẹn (appointmentId) hoặc vãng lai (petId). */
     @PostMapping("/check-in")
     @PreAuthorize("hasRole('RECEPTIONIST')")
     public ResponseEntity<ApiResponse<VisitResponse>> checkIn(@Valid @RequestBody CheckInRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created("Tiếp nhận thành công", visitService.checkIn(request)));
+                .body(ApiResponse.created("Tiếp nhận thành công", enricher.enrich(visitService.checkIn(request))));
     }
 
     /** UC-20: hàng đợi chung tại sảnh (ca cấp cứu lên đầu, còn lại theo thứ tự check-in). */
     @GetMapping("/queue")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<List<VisitResponse>>> queue() {
-        return ResponseEntity.ok(ApiResponse.success(visitService.waitingQueue()));
+        return ResponseEntity.ok(ApiResponse.success(enricher.enrichAll(visitService.waitingQueue())));
     }
 
     /** Danh sách đợt khám có lọc, phân trang, mới nhất trước (bảng điều phối của lễ tân, lịch sử ca của bác sĩ). */
@@ -53,13 +55,15 @@ public class VisitController {
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.success(visitService.search(status, date, doctorId, petId, keyword, page, size)));
+        var result = visitService.search(status, date, doctorId, petId, keyword, page, size);
+        result.setItems(enricher.enrichAll(result.getItems()));
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','LAB_TECHNICIAN','IMAGING_TECHNICIAN','ADMIN')")
     public ResponseEntity<ApiResponse<VisitResponse>> getById(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success(visitService.getById(id)));
+        return ResponseEntity.ok(ApiResponse.success(enricher.enrich(visitService.getById(id))));
     }
 
     /** Audit trail vòng đời đợt khám. */
@@ -69,12 +73,12 @@ public class VisitController {
         return ResponseEntity.ok(ApiResponse.success(visitService.getHistory(id)));
     }
 
-    /** UC-21: phân công Bác sĩ (kiểm tra BUSY và Khóa ưu tiên). */
+    /** UC-21: phân công Bác sĩ. */
     @PostMapping("/{id}/assign")
     @PreAuthorize("hasRole('RECEPTIONIST')")
     public ResponseEntity<ApiResponse<VisitResponse>> assign(@PathVariable Long id,
                                                              @Valid @RequestBody AssignDoctorRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Phân công bác sĩ thành công", visitService.assignDoctor(id, request)));
+        return ResponseEntity.ok(ApiResponse.success("Phân công bác sĩ thành công", enricher.enrich(visitService.assignDoctor(id, request))));
     }
 
     /** UC-22: Bác sĩ bắt đầu khám, tự đo cân nặng và thân nhiệt. */
@@ -82,7 +86,7 @@ public class VisitController {
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> startExam(@PathVariable Long id,
                                                                 @Valid @RequestBody StartExamRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Bác sĩ đã bắt đầu khám lâm sàng", visitService.startExam(id, request)));
+        return ResponseEntity.ok(ApiResponse.success("Bác sĩ đã bắt đầu khám lâm sàng", enricher.enrich(visitService.startExam(id, request))));
     }
 
     /** UC-23: chỉ định dịch vụ. Có Lab / CĐHA thì ca sang WAITING_RESULTS và Bác sĩ được giải phóng. */
@@ -90,28 +94,14 @@ public class VisitController {
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> orderServices(@PathVariable Long id,
                                                                     @Valid @RequestBody OrderServicesRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã chỉ định dịch vụ", visitService.orderServices(id, request)));
-    }
-
-    /** UC-30: mời ca đã có kết quả vào phòng (GĐ2), cũng là Recall sau khi tạm hoãn. */
-    @PostMapping("/{id}/call-back")
-    @PreAuthorize("hasRole('VETERINARIAN')")
-    public ResponseEntity<ApiResponse<VisitResponse>> callBack(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã mời bệnh nhân vào phòng", visitService.callBack(id)));
-    }
-
-    /** EX-10: khách vắng khi gọi vào GĐ2. */
-    @PostMapping("/{id}/postpone-callback")
-    @PreAuthorize("hasRole('VETERINARIAN')")
-    public ResponseEntity<ApiResponse<VisitResponse>> postponeCallback(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã tạm hoãn ca tái khám", visitService.postponeCallback(id)));
+        return ResponseEntity.ok(ApiResponse.success("Đã chỉ định dịch vụ", enricher.enrich(visitService.orderServices(id, request))));
     }
 
     /** Mở lại đợt khám đã chốt (chưa thu tiền) để điều chỉnh chuyên môn. Chỉ Admin, bắt buộc lý do. */
     @PostMapping("/{id}/reopen")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<VisitResponse>> reopen(@PathVariable Long id, @Valid @RequestBody ReasonRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã mở lại đợt khám", visitService.reopen(id, request)));
+        return ResponseEntity.ok(ApiResponse.success("Đã mở lại đợt khám", enricher.enrich(visitService.reopen(id, request))));
     }
 
     /** UC-33: chốt chuyên môn, khóa hồ sơ, chuyển sang thanh toán. Bắt buộc có chẩn đoán xác định. */
@@ -119,20 +109,20 @@ public class VisitController {
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> closeVisit(@PathVariable Long id,
                                                                  @Valid @RequestBody CloseVisitRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã chốt đợt khám, chuyển sang thanh toán", visitService.closeVisit(id, request)));
+        return ResponseEntity.ok(ApiResponse.success("Đã chốt đợt khám, chuyển sang thanh toán", enricher.enrich(visitService.closeVisit(id, request))));
     }
 
     /** EX-11: khách bỏ về hẳn không đọc kết quả. */
     @PostMapping("/{id}/abandon")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> abandon(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã đóng ca, ghi nợ viện phí", visitService.abandon(id)));
+        return ResponseEntity.ok(ApiResponse.success("Đã đóng ca, ghi nợ viện phí", enricher.enrich(visitService.abandon(id))));
     }
 
     @PostMapping("/{id}/cancel")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> cancel(@PathVariable Long id,
                                                              @Valid @RequestBody ReasonRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã hủy đợt khám", visitService.cancel(id, request)));
+        return ResponseEntity.ok(ApiResponse.success("Đã hủy đợt khám", enricher.enrich(visitService.cancel(id, request))));
     }
 }

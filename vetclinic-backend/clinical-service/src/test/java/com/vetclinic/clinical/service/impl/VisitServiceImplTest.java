@@ -31,6 +31,7 @@ import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.service.DoctorStatusService;
 import com.vetclinic.clinical.service.VisitAssembler;
+import com.vetclinic.clinical.service.QueueOrders;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.VisitCheckedInEvent;
@@ -96,6 +97,8 @@ class VisitServiceImplTest {
     @Mock
     private ClinicServiceRepository serviceRepository;
     @Mock
+    private com.vetclinic.clinical.repository.ServiceInvoiceRepository invoiceRepository;
+    @Mock
     private AuthClient authClient;
     @Mock
     private AppointmentClient appointmentClient;
@@ -113,9 +116,16 @@ class VisitServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, publisher, CLOCK);
+                detailHistoryRepository, invoiceRepository, publisher, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, mock(LabTestResultRepository.class),
-                mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class));
+                mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), invoiceRepository,
+                new com.vetclinic.clinical.service.VisitTimeline(historyRepository));
+        // Mỗi dòng chỉ định được lập hóa đơn riêng ngay khi tạo (BR-19): giả lập INSERT hóa đơn có id
+        lenient().when(invoiceRepository.saveAndFlush(any(com.vetclinic.clinical.entity.ServiceInvoice.class))).thenAnswer(inv -> {
+            com.vetclinic.clinical.entity.ServiceInvoice saved = inv.getArgument(0);
+            saved.setId(900L + saved.getVisitServiceDetailId());
+            return saved;
+        });
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         // Khóa tên giả: chạy thẳng action, giống khi lấy được khóa
@@ -195,28 +205,22 @@ class VisitServiceImplTest {
     }
 
     @Test
-    void checkIn_onTimeAppointment_getsPriorityTwoViaScheduledAt() {
-        // Bây giờ là 09:00 giờ VN, khung hẹn 09:00-09:30
+    void checkIn_queueOrderIsTheCheckInInstantInEpochMicros_andNoSkipYet() {
+        // v3.0: không còn tầng "có hẹn đúng giờ" và không còn cột scheduled_at; queue_order = thời điểm tiếp nhận (epoch micro giây)
         PetVisit visit = checkInWithSlot(LocalTime.of(9, 0), LocalTime.of(9, 30));
 
-        assertThat(visit.getScheduledAt()).isEqualTo(java.time.Instant.parse("2026-10-30T02:00:00Z"));
-        assertThat(lastHistory().getNotes()).contains("đúng giờ hẹn");
+        assertThat(visit.getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
+        assertThat(visit.getQueueOrder()).isEqualTo(1_793_325_600_000_000L);   // 2026-10-30T02:00:00Z
+        assertThat(visit.getSkipCount()).isZero();
+        assertThat(lastHistory().getNotes()).contains("lịch hẹn #7");
     }
 
     @Test
-    void checkIn_earlyArrivalIsStillOnTime() {
-        PetVisit visit = checkInWithSlot(LocalTime.of(9, 30), LocalTime.of(10, 0));
-
-        assertThat(visit.getScheduledAt()).isEqualTo(java.time.Instant.parse("2026-10-30T02:30:00Z"));
-    }
-
-    @Test
-    void checkIn_lateForTheSlot_isQueuedLikeAWalkIn() {
-        // Khung 08:00-08:30 đã qua lúc 09:00 -> mất ưu tiên có hẹn (nghiệp vụ §8.4 mục 4)
+    void checkIn_lateForTheSlot_getsNoSpecialTreatment_theSameRuleAsEveryoneElse() {
+        // Khung 08:00-08:30 đã qua lúc 09:00: giờ hẹn không còn ảnh hưởng thứ tự (khách đến trễ thật sự thì lịch đã NO_SHOW, FR-18)
         PetVisit visit = checkInWithSlot(LocalTime.of(8, 0), LocalTime.of(8, 30));
 
-        assertThat(visit.getScheduledAt()).isNull();
-        assertThat(lastHistory().getNotes()).contains("đến trễ");
+        assertThat(visit.getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
     }
 
     @Test
@@ -271,7 +275,7 @@ class VisitServiceImplTest {
     // ================================================================== phân công Bác sĩ (UC-21, EX-05)
 
     @Test
-    void assignDoctor_toAvailableDoctor_setsDoctorAndRoomButKeepsWaiting() {
+    void assignDoctor_toAvailableDoctor_setsDoctorButKeepsWaiting() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubDoctor(DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P01");
         PetVisit visit = visit(100L, VisitStatus.WAITING, null);
@@ -281,7 +285,9 @@ class VisitServiceImplTest {
         VisitResponse response = service.assignDoctor(100L, new AssignDoctorRequest(DOCTOR));
 
         assertThat(response.doctorId()).isEqualTo(DOCTOR);
-        assertThat(response.assignedRoom()).isEqualTo("P01");
+        // Số phòng không còn cột assigned_room: VisitEnricher gắn từ auth-service ở tầng controller, ngoài transaction
+        assertThat(response.assignedRoom()).isNull();
+        assertThat(visit.getDoctorId()).isEqualTo(DOCTOR);
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING);
         PetVisitStatusHistory history = lastHistory();
         assertThat(history.getFromStatus()).isEqualTo(VisitStatus.WAITING);
@@ -298,18 +304,6 @@ class VisitServiceImplTest {
         when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.BUSY);
 
         assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.assignDoctor(100L, new AssignDoctorRequest(DOCTOR)));
-        assertThat(visit.getDoctorId()).isNull();
-    }
-
-    @Test
-    void assignDoctor_toDoctorWithResultsWaiting_isRefusedByPriorityLock() {
-        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        stubDoctor(DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P01");
-        PetVisit visit = visit(100L, VisitStatus.WAITING, null);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.AVAILABLE_PRIORITY_CALLBACK);
-
-        assertError(ErrorCode.DOCTOR_PRIORITY_LOCKED, () -> service.assignDoctor(100L, new AssignDoctorRequest(DOCTOR)));
         assertThat(visit.getDoctorId()).isNull();
     }
 
@@ -352,12 +346,20 @@ class VisitServiceImplTest {
         assertThat(response.weightAtVisit()).isEqualByComparingTo("12.5");
         assertThat(response.temperature()).isEqualByComparingTo("38.6");
         assertThat(response.clinicalNotes()).isEqualTo("Ăn kém");
-        assertThat(response.startedAt()).isNotNull();
 
         ArgumentCaptor<VisitServiceDetail> fee = ArgumentCaptor.forClass(VisitServiceDetail.class);
         verify(detailRepository).saveAndFlush(fee.capture());
         assertThat(fee.getValue().getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
-        assertThat(fee.getValue().getUnitPrice()).isEqualByComparingTo("100000.00");
+        assertThat(fee.getValue().getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
+        // v3.0: dòng chỉ định không chứa giá; hóa đơn riêng PENDING được lập CÙNG giao dịch, snapshot đơn giá và thuế suất
+        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoice =
+                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
+        verify(invoiceRepository).saveAndFlush(invoice.capture());
+        assertThat(invoice.getValue().getUnitPrice()).isEqualByComparingTo("100000.00");
+        assertThat(invoice.getValue().getVatRate()).isEqualByComparingTo("0.00");
+        assertThat(invoice.getValue().getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.PENDING);
+        assertThat(invoice.getValue().getVisitServiceDetailId()).isEqualTo(500L);
+        assertThat(invoice.getValue().getInvoiceCode()).isEqualTo(String.format("SINV-2026-%04d", invoice.getValue().getId()));   // sinh từ id, không count + 1
         assertThat(lastHistory().getFromStatus()).isEqualTo(VisitStatus.WAITING);
         assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
     }
@@ -408,11 +410,17 @@ class VisitServiceImplTest {
         verify(detailRepository, org.mockito.Mockito.times(2)).saveAndFlush(saved.capture());
         VisitServiceDetail labLine = saved.getAllValues().get(0);
         assertThat(labLine.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        assertThat(labLine.getUnitPrice()).isEqualByComparingTo("250000.00");
         VisitServiceDetail vaccineLine = saved.getAllValues().get(1);
         assertThat(vaccineLine.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // làm tại phòng khám
         assertThat(vaccineLine.getQuantity()).isEqualTo(2);
-        assertThat(vaccineLine.getSubtotal()).isEqualByComparingTo("300000.00");
+        // Mỗi chỉ định có ĐÚNG MỘT hóa đơn riêng với đơn giá snapshot (BR-19, BR-25)
+        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoices =
+                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
+        verify(invoiceRepository, org.mockito.Mockito.times(2)).saveAndFlush(invoices.capture());
+        assertThat(invoices.getAllValues()).extracting(i -> i.getUnitPrice().toPlainString())
+                .containsExactly("250000.00", "150000.00");
+        assertThat(invoices.getAllValues()).extracting(com.vetclinic.clinical.entity.ServiceInvoice::getPaymentStatus)
+                .containsOnly(com.vetclinic.clinical.constant.PaymentStatus.PENDING);
     }
 
     @Test
@@ -445,43 +453,7 @@ class VisitServiceImplTest {
         verify(detailRepository, never()).saveAndFlush(any());
     }
 
-    // ================================================================== khám giai đoạn 2 (UC-30, UC-33, EX-10)
-
-    @Test
-    void callBack_movesResultsReadyToInProgressAndClearsPostponement() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        PetVisit visit = visit(100L, VisitStatus.RESULTS_READY, DOCTOR);
-        visit.setCallbackPostponedAt(CLOCK.instant());
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-
-        VisitResponse response = service.callBack(100L);
-
-        assertThat(response.status()).isEqualTo(VisitStatus.IN_PROGRESS);
-        assertThat(response.callbackPostponed()).isFalse();
-    }
-
-    @Test
-    void callBack_refusedWhileDoctorIsExaminingAnotherPatient() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.RESULTS_READY, DOCTOR)));
-        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
-
-        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.callBack(100L));
-    }
-
-    @Test
-    void postponeCallback_keepsResultsReadyButMarksItPostponed_andCannotRepeat() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        PetVisit visit = visit(100L, VisitStatus.RESULTS_READY, DOCTOR);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-
-        VisitResponse response = service.postponeCallback(100L);
-
-        assertThat(response.status()).isEqualTo(VisitStatus.RESULTS_READY);
-        assertThat(response.callbackPostponed()).isTrue();
-        assertThat(visit.getCallbackPostponedAt()).isNotNull();
-        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.postponeCallback(100L));
-    }
+    // ================================================================== chốt ca (UC-33). Gọi số / Đẩy lùi / Bắt đầu GĐ 2 làm ở 3.B3, 3.B10
 
     @Test
     void closeVisit_withoutDiagnosis_isRefusedAndNothingChanges() {
@@ -505,7 +477,6 @@ class VisitServiceImplTest {
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING_PAYMENT);
         assertThat(response.locked()).isTrue();
         assertThat(response.diagnosis()).isEqualTo("Viêm dạ dày ruột");
-        assertThat(response.closedAt()).isNotNull();
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(publisher).publishEvent(event.capture());
         VisitClosedToPaymentEvent closed = (VisitClosedToPaymentEvent) event.getValue();
@@ -537,7 +508,6 @@ class VisitServiceImplTest {
         VisitResponse response = service.abandon(100L);
 
         assertThat(response.status()).isEqualTo(VisitStatus.COMPLETED);
-        assertThat(response.completedAt()).isNotNull();
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(publisher).publishEvent(event.capture());
         assertThat(((VisitClosedToPaymentEvent) event.getValue()).abandoned()).isTrue();
@@ -549,7 +519,6 @@ class VisitServiceImplTest {
     void reopen_movesAClosedVisitBackToInProgressAndCancelsTheInvoiceFirst() {
         loginAs(ADMIN_ID, RoleCode.ADMIN);
         PetVisit visit = visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR);
-        visit.setClosedAt(java.time.Instant.parse("2026-10-30T01:30:00Z"));
         when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit));
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
         when(doctorStatusService.statusOf(DOCTOR)).thenReturn(DoctorStatus.AVAILABLE);
@@ -621,8 +590,10 @@ class VisitServiceImplTest {
         VisitResponse response = service.cancel(100L, new ReasonRequest("  Khách bận việc xin về  "));
 
         assertThat(response.status()).isEqualTo(VisitStatus.CANCELLED);
-        assertThat(response.cancelReason()).isEqualTo("Khách bận việc xin về");
         assertThat(response.locked()).isTrue();
+        // Không còn cột cancel_reason: lý do ghi nguyên văn vào notes của dòng lịch sử, VisitTimeline suy ra khi hiển thị
+        assertThat(lastHistory().getNotes()).isEqualTo("Khách bận việc xin về");
+        assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.CANCELLED);
     }
 
     @Test
@@ -667,35 +638,7 @@ class VisitServiceImplTest {
         assertThat(service.cancel(100L, new ReasonRequest("Chuyển viện cấp cứu")).status()).isEqualTo(VisitStatus.CANCELLED);
     }
 
-    // ================================================================== thanh toán xong (từ sự kiện của billing)
-
-    @Test
-    void completeAfterPayment_movesWaitingPaymentToCompleted_andIsIdempotent() {
-        PetVisit visit = visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-
-        service.completeAfterPayment(100L, 9L);
-
-        assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
-        assertThat(visit.getCompletedAt()).isNotNull();
-        assertThat(lastHistory().getChangedByUserId()).isEqualTo(9L);
-
-        service.completeAfterPayment(100L, 9L);   // nhận trùng sự kiện: không có thêm tác dụng
-        verify(historyRepository, org.mockito.Mockito.times(1)).save(any());
-    }
-
-    @Test
-    void completeAfterPayment_ignoresVisitsThatAreNotWaitingForPayment_andFailsForUnknownVisit() {
-        PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(visitRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
-
-        service.completeAfterPayment(100L, 9L);
-        assertThat(visit.getStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
-
-        // Không tìm thấy là lỗi vĩnh viễn: ném lỗi để tin nhắn vào DLQ
-        assertError(ErrorCode.VISIT_NOT_FOUND, () -> service.completeAfterPayment(99L, 9L));
-    }
+    // ================================================================== dịch vụ tính tiền (tạm, billing v2 còn gọi tới 3.B13)
 
     @Test
     void billableServices_onlyIncludesCompletedLines() {
@@ -709,6 +652,45 @@ class VisitServiceImplTest {
         assertThat(lines).hasSize(1);
         assertThat(lines.get(0).code()).isEqualTo("EXAM_GEN");
         assertThat(lines.get(0).subtotal()).isEqualByComparingTo("100000.00");
+    }
+
+    @Test
+    void billableServices_usesTheInvoiceSnapshotPrice_notTheCurrentCatalogPrice() {
+        // Admin đã tăng giá từ 100.000 lên 120.000 SAU khi chỉ định: hóa đơn giữ giá snapshot lúc chỉ định (BR-25)
+        ClinicService exam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "120000.00");
+        VisitServiceDetail line = detail(1L, 100L, exam, ServiceDetailStatus.COMPLETED);
+        line.setQuantity(2);
+        when(visitRepository.existsById(100L)).thenReturn(true);
+        when(detailRepository.findByVisitIdAndStatusOrderByIdAsc(100L, ServiceDetailStatus.COMPLETED)).thenReturn(List.of(line));
+        when(invoiceRepository.findByVisitServiceDetailIdIn(List.of(1L))).thenReturn(List.of(
+                com.vetclinic.clinical.entity.ServiceInvoice.builder().id(50L).visitServiceDetailId(1L)
+                        .unitPrice(new BigDecimal("100000.00")).vatRate(BigDecimal.ZERO).build()));
+
+        var lines = service.billableServices(100L);
+
+        assertThat(lines.get(0).unitPrice()).isEqualByComparingTo("100000.00");
+        assertThat(lines.get(0).subtotal()).isEqualByComparingTo("200000.00");   // = số lượng × đơn giá snapshot (tính khi hiển thị)
+    }
+
+    @Test
+    void cancel_alsoCancelsThePendingInvoiceOfEveryCancelledService_BR33() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
+        VisitServiceDetail pending = detail(1L, 100L, cbc, ServiceDetailStatus.PENDING);
+        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(pending));
+        com.vetclinic.clinical.entity.ServiceInvoice invoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
+                .id(50L).visitServiceDetailId(1L).unitPrice(new BigDecimal("250000.00")).vatRate(BigDecimal.ZERO).build();
+        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(invoice));
+
+        service.cancel(100L, new ReasonRequest("Khách xin về"));
+
+        assertThat(pending.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
+        assertThat(invoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
+        // Lý do hủy ghi nguyên văn vào lịch sử trạng thái (không còn cột cancel_reason)
+        assertThat(lastHistory().getNotes()).isEqualTo("Khách xin về");
+        assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.CANCELLED);
     }
 
     // ================================================================== fixtures

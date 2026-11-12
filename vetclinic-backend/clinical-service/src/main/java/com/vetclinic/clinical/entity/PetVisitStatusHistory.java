@@ -34,7 +34,8 @@ public class PetVisitStatusHistory {
     @Column(name = "to_status", nullable = false)
     private VisitStatus toStatus;
 
-    @Column(name = "changed_by_user_id", nullable = false)
+    // NULL = hệ thống tự chuyển trạng thái (vd. T06 WAITING_RESULTS -> RESULTS_READY khi đủ kết quả cận lâm sàng)
+    @Column(name = "changed_by_user_id")
     private Long changedByUserId;
 
     @Column(name = "notes", columnDefinition = "TEXT")

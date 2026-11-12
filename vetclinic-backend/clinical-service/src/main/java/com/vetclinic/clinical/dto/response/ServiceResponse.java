@@ -9,6 +9,7 @@ public record ServiceResponse(
         String name,
         ServiceCategory category,
         BigDecimal price,
+        BigDecimal vatRate,
         String description,
         boolean active
 ) {

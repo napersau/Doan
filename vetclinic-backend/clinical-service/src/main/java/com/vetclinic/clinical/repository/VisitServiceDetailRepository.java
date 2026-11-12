@@ -32,9 +32,14 @@ public interface VisitServiceDetailRepository extends JpaRepository<VisitService
     @EntityGraph(attributePaths = "service")
     List<VisitServiceDetail> findByVisitIdAndStatusOrderByIdAsc(Long visitId, ServiceDetailStatus status);
 
+    /**
+     * Hàng đợi phòng Xét nghiệm / CĐHA (v3.0): cấp cứu (is_emergency của đợt khám) chưa bị đẩy lùi lên đầu, còn lại theo
+     * queue_order của dịch vụ. Chỉ mục idx_vsd_queue (status, queue_order).
+     */
     @EntityGraph(attributePaths = "service")
-    @Query("select d from VisitServiceDetail d where d.service.category = :category and d.status in :statuses "
-            + "order by d.createdAt asc, d.id asc")
+    @Query("select d from VisitServiceDetail d, PetVisit v where v.id = d.visitId "
+            + "and d.service.category = :category and d.status in :statuses "
+            + "order by case when (v.emergency = true and d.skipCount = 0) then 0 else 1 end asc, d.queueOrder asc, d.id asc")
     List<VisitServiceDetail> findQueue(@Param("category") ServiceCategory category,
                                        @Param("statuses") Collection<ServiceDetailStatus> statuses);
 

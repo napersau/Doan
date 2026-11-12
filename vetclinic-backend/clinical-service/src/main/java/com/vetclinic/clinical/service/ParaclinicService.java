@@ -17,8 +17,8 @@ public interface ParaclinicService {
     }
 
     /**
-     * Hàng đợi của một phòng. Thứ tự: đang thực hiện trước; rồi ca cấp cứu, ca "ưu tiên kế tiếp" (đã gọi lại), còn lại
-     * theo thời gian Bác sĩ gửi chỉ định; ca tạm hoãn do vắng mặt xếp cuối (tab riêng ở giao diện).
+     * Hàng đợi của một phòng (v3.0): ORDER BY (cấp cứu AND skip_count = 0) DESC, queue_order ASC. Không còn tab "ca tạm hoãn" và
+     * "ưu tiên kế tiếp": khách vắng thì "Đẩy lùi 1 bậc" (bước 3.B6) và vẫn nằm trong hàng đợi.
      */
     List<QueueItemResponse> queue(ServiceCategory category);
 
@@ -30,12 +30,6 @@ public interface ParaclinicService {
 
     /** UC-25/26: thú cưng đã vào phòng, bắt đầu thực hiện. PENDING -> IN_PROGRESS. */
     ServiceDetailResponse start(Long detailId);
-
-    /** EX-06 / EX-09: khách vắng khi gọi, hoặc thú cưng đang ở phòng kia. Giữ PENDING, đưa vào tab tạm hoãn. */
-    ServiceDetailResponse postpone(Long detailId, String reason);
-
-    /** EX-07: khách quay lại, ghim vào vị trí "ưu tiên kế tiếp". */
-    ServiceDetailResponse recall(Long detailId);
 
     /** EX-08: khách xin hủy giữa chừng, hoặc thiết bị gặp sự cố. Dịch vụ hủy không bao giờ tính tiền. */
     ServiceDetailResponse cancel(Long detailId, String reason);

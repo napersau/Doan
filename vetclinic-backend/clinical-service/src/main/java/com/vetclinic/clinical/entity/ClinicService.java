@@ -36,6 +36,11 @@ public class ClinicService {
     @Column(name = "price", nullable = false, precision = 12, scale = 2)
     private BigDecimal price;
 
+    /** Thuế suất VAT hiện hành (0.05 = 5%, mặc định 0). Snapshot sang service_invoices khi chỉ định (BR-25). */
+    @Column(name = "vat_rate", nullable = false, precision = 4, scale = 2)
+    @Builder.Default
+    private BigDecimal vatRate = BigDecimal.ZERO.setScale(2);
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 

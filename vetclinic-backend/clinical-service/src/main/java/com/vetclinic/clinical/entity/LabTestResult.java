@@ -8,7 +8,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-import com.vetclinic.clinical.constant.LabEvaluation;
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -40,10 +39,6 @@ public class LabTestResult {
 
     @Column(name = "max_value_snapshot", nullable = false, precision = 8, scale = 2)
     private BigDecimal maxValueSnapshot;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "evaluation", nullable = false)
-    private LabEvaluation evaluation;
 
     @Column(name = "performed_by", nullable = false)
     private Long performedBy;

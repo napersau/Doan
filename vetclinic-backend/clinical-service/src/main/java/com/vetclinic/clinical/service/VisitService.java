@@ -31,7 +31,7 @@ public interface VisitService {
 
     List<VisitHistoryResponse> getHistory(Long id);
 
-    /** UC-21: Lễ tân phân công Bác sĩ (kiểm tra BUSY và Khóa ưu tiên). Ca vẫn WAITING cho tới khi Bác sĩ bấm bắt đầu. */
+    /** UC-21: Lễ tân phân công Bác sĩ. Ca vẫn WAITING cho tới khi Bác sĩ bấm bắt đầu. */
     VisitResponse assignDoctor(Long id, AssignDoctorRequest request);
 
     /** UC-22: Bác sĩ bắt đầu khám giai đoạn 1. WAITING -> IN_PROGRESS. */
@@ -39,12 +39,6 @@ public interface VisitService {
 
     /** UC-23: chỉ định dịch vụ. Có Lab / CĐHA thì IN_PROGRESS -> WAITING_RESULTS và giải phóng Bác sĩ. */
     VisitResponse orderServices(Long id, OrderServicesRequest request);
-
-    /** UC-30: mời ca đã có kết quả vào phòng (GĐ2), cũng là Recall sau khi tạm hoãn. RESULTS_READY -> IN_PROGRESS. */
-    VisitResponse callBack(Long id);
-
-    /** EX-10: khách vắng khi gọi vào GĐ2. Giữ RESULTS_READY nhưng giải phóng Khóa ưu tiên của Bác sĩ. */
-    VisitResponse postponeCallback(Long id);
 
     /** UC-33: chốt chuyên môn, khóa hồ sơ. IN_PROGRESS -> WAITING_PAYMENT, phát sự kiện để billing lập hóa đơn. */
     VisitResponse closeVisit(Long id, CloseVisitRequest request);
@@ -66,9 +60,6 @@ public interface VisitService {
     List<VisitResponse> myVisits();
 
     // ------------------------------------------------------------------ không cần người dùng đăng nhập
-
-    /** Consumer của PaymentAndDispenseCompletedEvent: WAITING_PAYMENT -> COMPLETED. Idempotent. */
-    void completeAfterPayment(Long visitId, Long actorUserId);
 
     /** Cho billing-pharmacy-service lập hóa đơn: chỉ dịch vụ COMPLETED. */
     List<BillableServiceResponse> billableServices(Long visitId);

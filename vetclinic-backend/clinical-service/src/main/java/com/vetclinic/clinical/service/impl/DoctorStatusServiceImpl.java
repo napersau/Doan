@@ -30,9 +30,6 @@ public class DoctorStatusServiceImpl implements DoctorStatusService {
                 || visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.WAITING)) {
             return DoctorStatus.BUSY;
         }
-        if (visitRepository.existsByDoctorIdAndStatusAndCallbackPostponedAtIsNull(doctorId, VisitStatus.RESULTS_READY)) {
-            return DoctorStatus.AVAILABLE_PRIORITY_CALLBACK;
-        }
         return DoctorStatus.AVAILABLE;
     }
 
@@ -43,12 +40,9 @@ public class DoctorStatusServiceImpl implements DoctorStatusService {
             throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
         }
         Set<Long> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS, VisitStatus.WAITING));
-        Set<Long> priority = visitRepository.findDoctorIdsWithUnpostponedStatus(VisitStatus.RESULTS_READY);
 
         return response.getData().stream().map(d -> {
-            DoctorStatus status = busy.contains(d.id()) ? DoctorStatus.BUSY
-                    : priority.contains(d.id()) ? DoctorStatus.AVAILABLE_PRIORITY_CALLBACK
-                    : DoctorStatus.AVAILABLE;
+            DoctorStatus status = busy.contains(d.id()) ? DoctorStatus.BUSY : DoctorStatus.AVAILABLE;
             return new DoctorStatusResponse(d.id(), d.fullName(), d.roomNumber(), status);
         }).toList();
     }

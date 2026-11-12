@@ -104,6 +104,7 @@ public class CatalogServiceImpl implements CatalogService {
                 .name(request.name().trim())
                 .category(request.category())
                 .price(request.price())
+                .vatRate(request.vatRate() == null ? java.math.BigDecimal.ZERO.setScale(2) : request.vatRate())
                 .description(blankToNull(request.description()))
                 .active(true)
                 .build();
@@ -117,6 +118,9 @@ public class CatalogServiceImpl implements CatalogService {
                 .orElseThrow(() -> new AppException(ErrorCode.SERVICE_NOT_FOUND));
         if (request.name() != null) {
             service.setName(request.name().trim());
+        }
+        if (request.vatRate() != null) {
+            service.setVatRate(request.vatRate());   // chỉ áp dụng cho chỉ định MỚI: hóa đơn đã lập giữ thuế suất đã snapshot
         }
         if (request.price() != null) {
             service.setPrice(request.price());

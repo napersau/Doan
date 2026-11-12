@@ -50,22 +50,6 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success("Đã bắt đầu thực hiện", paraclinicService.start(id)));
     }
 
-    /** EX-06 / EX-09: tạm hoãn do khách vắng mặt hoặc thú cưng đang ở phòng kia. */
-    @PostMapping("/service-details/{id}/postpone")
-    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<ServiceDetailResponse>> postpone(
-            @PathVariable Long id, @Valid @RequestBody(required = false) OptionalReasonRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã tạm hoãn, chuyển sang tab ca tạm hoãn",
-                paraclinicService.postpone(id, request == null ? null : request.reason())));
-    }
-
-    /** EX-07: khách quay lại, ghim vào vị trí ưu tiên kế tiếp. */
-    @PostMapping("/service-details/{id}/recall")
-    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<ServiceDetailResponse>> recall(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã ghim vào vị trí ưu tiên kế tiếp", paraclinicService.recall(id)));
-    }
-
     /** EX-08: hủy chỉ định (khách xin hủy, thiết bị sự cố, hoặc Bác sĩ đổi hướng xử lý). */
     @PostMapping("/service-details/{id}/cancel")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN','VETERINARIAN')")

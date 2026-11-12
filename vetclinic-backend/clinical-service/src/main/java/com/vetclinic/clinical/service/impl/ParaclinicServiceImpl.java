@@ -4,7 +4,6 @@ import com.vetclinic.clinical.repository.ServiceLabTestItemRepository;
 import com.vetclinic.clinical.dto.response.ReferenceRangeResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.LabEvaluation;
-import com.vetclinic.clinical.constant.QueueState;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -64,12 +63,9 @@ import java.util.stream.Collectors;
 @Service
 public class ParaclinicServiceImpl implements ParaclinicService {
 
-    private static final String POSTPONED = "POSTPONED";
-    private static final String RECALL = "RECALL";
     private static final int MAX_FILES = 10;
 
     private final VisitServiceDetailRepository detailRepository;
-    private final VisitServiceDetailHistoryRepository detailHistoryRepository;
     private final PetVisitRepository visitRepository;
     private final LabTestItemRepository labTestItemRepository;
     private final LabTestReferenceRangeRepository rangeRepository;
@@ -83,7 +79,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     private final TransactionTemplate readCommittedTemplate;
 
     public ParaclinicServiceImpl(VisitServiceDetailRepository detailRepository,
-                                 VisitServiceDetailHistoryRepository detailHistoryRepository,
                                  PetVisitRepository visitRepository, LabTestItemRepository labTestItemRepository,
                                  LabTestReferenceRangeRepository rangeRepository,
                                  ServiceLabTestItemRepository serviceLabItemRepository,
@@ -93,7 +88,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                                  VisitAssembler assembler, ImagingStorage storage,
                                  PlatformTransactionManager transactionManager) {
         this.detailRepository = detailRepository;
-        this.detailHistoryRepository = detailHistoryRepository;
         this.visitRepository = visitRepository;
         this.labTestItemRepository = labTestItemRepository;
         this.rangeRepository = rangeRepository;
@@ -126,9 +120,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         List<Long> visitIds = details.stream().map(VisitServiceDetail::getVisitId).distinct().toList();
         Map<Long, PetVisit> visits = visitRepository.findWithPetByIdIn(visitIds).stream()
                 .collect(Collectors.toMap(PetVisit::getId, v -> v));
-        Map<Long, List<VisitServiceDetailHistory>> histories = detailHistoryRepository
-                .findByVisitServiceDetailIdInOrderByIdAsc(details.stream().map(VisitServiceDetail::getId).toList())
-                .stream().collect(Collectors.groupingBy(VisitServiceDetailHistory::getVisitServiceDetailId));
         Map<Long, List<VisitServiceDetail>> siblings = detailRepository.findByVisitIdInOrderByIdAsc(visitIds).stream()
                 .collect(Collectors.groupingBy(VisitServiceDetail::getVisitId));
 
@@ -139,43 +130,11 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     PetVisit v = visits.get(d.getVisitId());
                     return new QueueItemResponse(d.getId(), v.getId(), v.getVisitCode(), v.getPet().getId(),
                             v.getPet().getName(), v.getPet().getSpecies().getName(), d.getService().getId(),
-                            d.getService().getName(), category, v.isEmergency(), d.getStatus(),
-                            queueState(d, histories.getOrDefault(d.getId(), List.of())),
+                            d.getService().getName(), category, v.isEmergency(), d.getStatus(), d.getSkipCount(),
                             otherRoomStatus(other, siblings.getOrDefault(d.getVisitId(), List.of())),
                             d.getNotes(), d.getCreatedAt());
                 })
-                .sorted(QUEUE_ORDER)
-                .toList();
-    }
-
-    private static final Comparator<QueueItemResponse> QUEUE_ORDER = Comparator
-            // đang thực hiện trước, ca tạm hoãn xếp cuối
-            .comparingInt((QueueItemResponse i) -> i.queueState() == QueueState.IN_PROGRESS ? 0
-                    : i.queueState() == QueueState.POSTPONED ? 2 : 1)
-            // FR-21 / EX-04: ca cấp cứu nhảy lên đầu
-            .thenComparing(QueueItemResponse::emergency, Comparator.reverseOrder())
-            // EX-07: khách quay lại được gọi ngay sau ca đang làm, không phải xếp lại từ đầu
-            .thenComparingInt(i -> i.queueState() == QueueState.NEXT_IN_LINE ? 0 : 1)
-            .thenComparing(QueueItemResponse::orderedAt)
-            .thenComparing(QueueItemResponse::serviceDetailId);
-
-    private static QueueState queueState(VisitServiceDetail detail, List<VisitServiceDetailHistory> histories) {
-        if (detail.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
-            return QueueState.IN_PROGRESS;
-        }
-        String last = lastQueueAction(histories);
-        return POSTPONED.equals(last) ? QueueState.POSTPONED : RECALL.equals(last) ? QueueState.NEXT_IN_LINE : QueueState.WAITING;
-    }
-
-    /** Hành động gần nhất trong số POSTPONED / RECALL (các hành động khác không ảnh hưởng vị trí trong hàng đợi). */
-    private static String lastQueueAction(List<VisitServiceDetailHistory> histories) {
-        for (int i = histories.size() - 1; i >= 0; i--) {
-            String action = histories.get(i).getAction();
-            if (POSTPONED.equals(action) || RECALL.equals(action)) {
-                return action;
-            }
-        }
-        return null;
+                .toList();   // đã đúng thứ tự hàng đợi từ truy vấn: (cấp cứu chưa bị lùi) rồi queue_order
     }
 
     /** FR-36: huy hiệu liên phòng, vd. "LAB_IN_PROGRESS" khi thú cưng đang lấy máu bên phòng Lab. */
@@ -204,43 +163,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         assertOperator(c.detail(), false);
         requireDetailStatus(c.detail(), ServiceDetailStatus.PENDING, "Chỉ bắt đầu thực hiện được chỉ định đang chờ (PENDING)");
         requireVisitWaitingResults(c.visit());
-        if (isPostponed(detailId)) {
-            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS,
-                    "Ca đang tạm hoãn do vắng mặt, hãy gọi lại (Recall) trước khi bắt đầu");
-        }
         setStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", actor, null);
-        return assembler.toServiceDetail(c.detail());
-    }
-
-    @Override
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse postpone(Long detailId, String reason) {
-        Long actor = SecurityUtils.getCurrentUserId();
-        Ctx c = lockForAction(detailId);
-        assertOperator(c.detail(), false);
-        requireDetailStatus(c.detail(), ServiceDetailStatus.PENDING, "Chỉ tạm hoãn được chỉ định đang chờ (PENDING)");
-        requireVisitWaitingResults(c.visit());
-        if (isPostponed(detailId)) {
-            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Ca này đã được tạm hoãn trước đó");
-        }
-        // Giữ nguyên PENDING (chưa hao phí vật tư); chỉ ghi vào audit để đưa sang tab "Ca tạm hoãn do vắng mặt"
-        support.recordDetail(detailId, ServiceDetailStatus.PENDING, ServiceDetailStatus.PENDING, POSTPONED, actor,
-                blankToNull(reason));
-        return assembler.toServiceDetail(c.detail());
-    }
-
-    @Override
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse recall(Long detailId) {
-        Long actor = SecurityUtils.getCurrentUserId();
-        Ctx c = lockForAction(detailId);
-        assertOperator(c.detail(), false);
-        requireDetailStatus(c.detail(), ServiceDetailStatus.PENDING, "Chỉ gọi lại được chỉ định đang chờ (PENDING)");
-        if (!isPostponed(detailId)) {
-            throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ gọi lại được ca đang tạm hoãn");
-        }
-        support.recordDetail(detailId, ServiceDetailStatus.PENDING, ServiceDetailStatus.PENDING, RECALL, actor,
-                "Khách đã có mặt trở lại, ghim vào vị trí ưu tiên kế tiếp");
         return assembler.toServiceDetail(c.detail());
     }
 
@@ -255,6 +178,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     "Chỉ hủy được chỉ định đang chờ hoặc đang thực hiện");
         }
         setStatus(c.detail(), ServiceDetailStatus.CANCELLED, "CANCELLED", actor, reason.trim());
+        support.cancelInvoiceOf(c.detail().getId());   // BR-33 / EX-08: dịch vụ CANCELLED <=> hóa đơn CANCELLED, cùng giao dịch
         // EX-08: dịch vụ này là dịch vụ cuối còn dở dang thì ca chuyển sang RESULTS_READY với kết quả đã có
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
@@ -331,7 +255,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     // BR-24: snapshot khoảng tham chiếu để kết quả cũ không đổi nếu Admin chỉnh cấu hình về sau
                     .minValueSnapshot(range.getMinValue())
                     .maxValueSnapshot(range.getMaxValue())
-                    .evaluation(evaluate(item.value(), range))
                     .performedBy(actor)
                     .notes(blankToNull(item.notes()))
                     .build());
@@ -341,17 +264,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
-    }
-
-    /** LOW khi nhỏ hơn ngưỡng dưới, HIGH khi lớn hơn ngưỡng trên, NORMAL khi nằm trong khoảng (gồm cả hai đầu). */
-    static LabEvaluation evaluate(BigDecimal value, LabTestReferenceRange range) {
-        if (value.compareTo(range.getMinValue()) < 0) {
-            return LabEvaluation.LOW;
-        }
-        if (value.compareTo(range.getMaxValue()) > 0) {
-            return LabEvaluation.HIGH;
-        }
-        return LabEvaluation.NORMAL;
     }
 
     /**
@@ -474,12 +386,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
             throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION,
                     "Đợt khám không còn ở trạng thái chờ kết quả cận lâm sàng");
         }
-    }
-
-    private boolean isPostponed(Long detailId) {
-        List<VisitServiceDetailHistory> histories = detailHistoryRepository
-                .findByVisitServiceDetailIdInOrderByIdAsc(Set.of(detailId));
-        return POSTPONED.equals(lastQueueAction(histories));
     }
 
     private static String blankToNull(String value) {

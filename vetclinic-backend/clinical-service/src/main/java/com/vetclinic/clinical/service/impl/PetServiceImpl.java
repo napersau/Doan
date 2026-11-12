@@ -36,6 +36,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -99,7 +100,6 @@ public class PetServiceImpl implements PetService {
                     .gender(request.gender() == null ? PetGender.UNKNOWN : request.gender())
                     .dateOfBirth(request.dateOfBirth())
                     .color(blankToNull(request.color()))
-                    .weight(request.weight())
                     .neutered(Boolean.TRUE.equals(request.neutered()))
                     .identifyingCharacteristics(blankToNull(request.identifyingCharacteristics()))
                     .notes(blankToNull(request.notes()))
@@ -135,9 +135,6 @@ public class PetServiceImpl implements PetService {
         if (request.color() != null) {
             pet.setColor(blankToNull(request.color()));
         }
-        if (request.weight() != null) {
-            pet.setWeight(request.weight());
-        }
         if (request.neutered() != null) {
             pet.setNeutered(request.neutered());
         }
@@ -147,7 +144,7 @@ public class PetServiceImpl implements PetService {
         if (request.notes() != null) {
             pet.setNotes(blankToNull(request.notes()));
         }
-        return mapper.toResponse(petRepository.saveAndFlush(pet));
+        return withLatestWeight(mapper.toResponse(petRepository.saveAndFlush(pet)));
     }
 
     @Override
@@ -155,7 +152,7 @@ public class PetServiceImpl implements PetService {
     public PetResponse getById(Long id) {
         Pet pet = findPet(id);
         assertOwnerAccess(currentActor(), pet);
-        return mapper.toResponse(pet);
+        return withLatestWeight(mapper.toResponse(pet));
     }
 
     @Override
@@ -179,8 +176,25 @@ public class PetServiceImpl implements PetService {
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
                 Sort.by(Sort.Direction.DESC, "id"));
         Page<Pet> result = petRepository.findAll(spec, pageable);
+        Map<Long, java.math.BigDecimal> weights = latestWeights(result.getContent().stream().map(Pet::getId).toList());
         return PageResponse.of(result.getContent(), result.getNumber(), result.getSize(), result.getTotalElements(),
-                result.getTotalPages(), result.isLast(), mapper::toResponse);
+                result.getTotalPages(), result.isLast(), p -> mapper.toResponse(p).withWeight(weights.get(p.getId())));
+    }
+
+    /** pets không còn cột weight (v3.0): cân nặng hiện tại = weight_at_visit của đợt khám gần nhất, null nếu chưa từng được cân. */
+    private PetResponse withLatestWeight(PetResponse pet) {
+        return pet.withWeight(latestWeights(List.of(pet.id())).get(pet.id()));
+    }
+
+    private Map<Long, java.math.BigDecimal> latestWeights(java.util.Collection<Long> petIds) {
+        if (petIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, java.math.BigDecimal> result = new java.util.HashMap<>();
+        for (Object[] row : visitRepository.findLatestWeights(petIds)) {
+            result.put((Long) row[0], (java.math.BigDecimal) row[1]);
+        }
+        return result;
     }
 
     @Override

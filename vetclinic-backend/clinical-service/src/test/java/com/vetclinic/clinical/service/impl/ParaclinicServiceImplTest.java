@@ -1,7 +1,7 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.constant.LabEvaluation;
-import com.vetclinic.clinical.constant.QueueState;
+import com.vetclinic.clinical.constant.PaymentStatus;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -15,6 +15,7 @@ import com.vetclinic.clinical.entity.LabTestItem;
 import com.vetclinic.clinical.entity.LabTestReferenceRange;
 import com.vetclinic.clinical.entity.LabTestResult;
 import com.vetclinic.clinical.entity.PetVisit;
+import com.vetclinic.clinical.entity.ServiceInvoice;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.entity.VisitServiceDetailHistory;
 import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
@@ -24,11 +25,13 @@ import com.vetclinic.clinical.repository.LabTestReferenceRangeRepository;
 import com.vetclinic.clinical.repository.LabTestResultRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
+import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.service.ImagingStorage;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitSupport;
+import com.vetclinic.clinical.service.VisitTimeline;
 import com.vetclinic.common.event.DoctorPriorityCallbackEvent;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -87,6 +90,8 @@ class ParaclinicServiceImplTest {
     @Mock
     private PetVisitStatusHistoryRepository historyRepository;
     @Mock
+    private ServiceInvoiceRepository invoiceRepository;
+    @Mock
     private LabTestItemRepository labTestItemRepository;
     @Mock
     private LabTestReferenceRangeRepository rangeRepository;
@@ -108,12 +113,12 @@ class ParaclinicServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, publisher, CLOCK);
+                detailHistoryRepository, invoiceRepository, publisher, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, labResultRepository, imagingResultRepository,
-                attachmentRepository);
+                attachmentRepository, invoiceRepository, new VisitTimeline(historyRepository));
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new ParaclinicServiceImpl(detailRepository, detailHistoryRepository, visitRepository,
+        service = new ParaclinicServiceImpl(detailRepository, visitRepository,
                 labTestItemRepository, rangeRepository, serviceLabItemRepository, labResultRepository, imagingResultRepository,
                 attachmentRepository, support, assembler, storage, tm);
     }
@@ -126,34 +131,29 @@ class ParaclinicServiceImplTest {
     // ================================================================== hàng đợi
 
     @Test
-    void queue_ordersByInProgressThenEmergencyThenRecalledThenFifoAndPostponedLast_withCrossRoomBadge() {
+    void queue_keepsTheRepositoryOrder_exposesSkipCountAndShowsTheCrossRoomBadge() {
         PetVisit normal = visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR);
         PetVisit emergency = visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR);
         emergency.setEmergency(true);
-        PetVisit recalled = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        PetVisit postponed = visit(13L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        PetVisit working = visit(14L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        PetVisit pushedBack = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
 
         VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.PENDING);
         VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
         VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
-        VisitServiceDetail d4 = detail(4L, 13L, CBC, ServiceDetailStatus.PENDING);
-        VisitServiceDetail d5 = detail(5L, 14L, CBC, ServiceDetailStatus.IN_PROGRESS);
+        d3.setSkipCount(2);   // đã bị "Đẩy lùi 1 bậc" hai lần: vẫn nằm trong hàng đợi, chỉ hiển thị số lần
         // Cùng đợt khám 10 còn có chỉ định siêu âm đang thực hiện bên phòng CĐHA
         VisitServiceDetail imagingSibling = detail(9L, 10L, ULTRASOUND, ServiceDetailStatus.IN_PROGRESS);
 
-        when(detailRepository.findQueue(ServiceCategory.LABORATORY, ServiceDetailStatus.OPEN)).thenReturn(List.of(d1, d2, d3, d4, d5));
-        when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(normal, emergency, recalled, postponed, working));
-        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
-                history(3L, "RECALL"), history(4L, "POSTPONED")));
-        when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(d1, d2, d3, d4, d5, imagingSibling));
+        // Thứ tự do truy vấn quyết định ((cấp cứu AND skip_count = 0) DESC, queue_order ASC): service giữ nguyên, không tự sắp lại
+        when(detailRepository.findQueue(ServiceCategory.LABORATORY, ServiceDetailStatus.OPEN)).thenReturn(List.of(d2, d1, d3));
+        when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(normal, emergency, pushedBack));
+        when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(d1, d2, d3, imagingSibling));
 
         List<QueueItemResponse> queue = service.queue(ServiceCategory.LABORATORY);
 
-        assertThat(queue).extracting(QueueItemResponse::serviceDetailId).containsExactly(5L, 2L, 3L, 1L, 4L);
-        assertThat(queue).extracting(QueueItemResponse::queueState).containsExactly(
-                QueueState.IN_PROGRESS, QueueState.WAITING, QueueState.NEXT_IN_LINE, QueueState.WAITING, QueueState.POSTPONED);
-        assertThat(queue.get(1).emergency()).isTrue();
+        assertThat(queue).extracting(QueueItemResponse::serviceDetailId).containsExactly(2L, 1L, 3L);
+        assertThat(queue).extracting(QueueItemResponse::skipCount).containsExactly(0, 0, 2);
+        assertThat(queue.get(0).emergency()).isTrue();
         // Huy hiệu liên phòng (FR-36): ca 10 đang được siêu âm bên phòng CĐHA
         assertThat(queue.stream().filter(i -> i.serviceDetailId() == 1L).findFirst().orElseThrow().otherRoomStatus())
                 .isEqualTo("IMAGING_IN_PROGRESS");
@@ -165,7 +165,7 @@ class ParaclinicServiceImplTest {
         assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.queue(ServiceCategory.VACCINATION));
     }
 
-    // ================================================================== bắt đầu, tạm hoãn, gọi lại
+    // ================================================================== bắt đầu thực hiện
 
     @Test
     void start_movesPendingToInProgressAndWritesAudit() {
@@ -183,11 +183,9 @@ class ParaclinicServiceImplTest {
     }
 
     @Test
-    void start_refusedForAPostponedCase_wrongRoomTechnician_orVisitNoLongerWaiting() {
+    void start_refusedForTheWrongRoomTechnician_orVisitNoLongerWaiting() {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
-        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(Set.of(1L))).thenReturn(List.of(history(1L, "POSTPONED")));
-        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.start(1L));
 
         // KTV phòng CĐHA không được thao tác chỉ định của phòng Lab
         loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
@@ -197,35 +195,6 @@ class ParaclinicServiceImplTest {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         stubLocks(detail(2L, 101L, CBC, ServiceDetailStatus.PENDING), VisitStatus.CANCELLED);
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.start(2L));
-    }
-
-    @Test
-    void postponeThenRecall_keepsPendingAndOnlyWritesAudit() {
-        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
-        VisitServiceDetail d = stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
-
-        service.postpone(1L, "Khách vắng sau 3 lần gọi");
-        VisitServiceDetailHistory postponed = lastDetailHistory();
-        assertThat(postponed.getAction()).isEqualTo("POSTPONED");
-        assertThat(postponed.getFromStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        assertThat(postponed.getToStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);   // chưa hao phí vật tư
-
-        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(Set.of(1L))).thenReturn(List.of(history(1L, "POSTPONED")));
-        service.recall(1L);
-        assertThat(lastDetailHistory().getAction()).isEqualTo("RECALL");
-        assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-    }
-
-    @Test
-    void recall_requiresAPostponedCase_andPostponeCannotRepeat() {
-        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
-        stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
-
-        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.recall(1L));
-
-        when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(Set.of(1L))).thenReturn(List.of(history(1L, "POSTPONED")));
-        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.postpone(1L, null));
     }
 
     // ================================================================== kết quả xét nghiệm (UC-25)
@@ -248,11 +217,15 @@ class ParaclinicServiceImplTest {
         ArgumentCaptor<List<LabTestResult>> saved = ArgumentCaptor.forClass(List.class);
         verify(labResultRepository).saveAll(saved.capture());
         LabTestResult highWbc = saved.getValue().get(0);
-        assertThat(highWbc.getEvaluation()).isEqualTo(LabEvaluation.HIGH);
+        // Không còn cột evaluation: nhãn tính từ giá trị so với khoảng tham chiếu đã snapshot (DANH_SACH_KIEU_ENUM mục 11)
+        assertThat(LabEvaluation.of(highWbc.getResultValue(), highWbc.getMinValueSnapshot(), highWbc.getMaxValueSnapshot()))
+                .isEqualTo(LabEvaluation.HIGH);
         assertThat(highWbc.getMinValueSnapshot()).isEqualByComparingTo("6.00");   // snapshot (BR-24)
         assertThat(highWbc.getMaxValueSnapshot()).isEqualByComparingTo("17.00");
         assertThat(highWbc.getPerformedBy()).isEqualTo(LAB_TECH);
-        assertThat(saved.getValue().get(1).getEvaluation()).isEqualTo(LabEvaluation.LOW);
+        LabTestResult lowPlt = saved.getValue().get(1);
+        assertThat(LabEvaluation.of(lowPlt.getResultValue(), lowPlt.getMinValueSnapshot(), lowPlt.getMaxValueSnapshot()))
+                .isEqualTo(LabEvaluation.LOW);
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
     }
 
@@ -274,7 +247,9 @@ class ParaclinicServiceImplTest {
 
         ArgumentCaptor<List<LabTestResult>> saved = ArgumentCaptor.forClass(List.class);
         verify(labResultRepository).saveAll(saved.capture());
-        assertThat(saved.getValue().get(0).getEvaluation()).isEqualTo(LabEvaluation.NORMAL);
+        LabTestResult catResult = saved.getValue().get(0);
+        assertThat(LabEvaluation.of(catResult.getResultValue(), catResult.getMinValueSnapshot(), catResult.getMaxValueSnapshot()))
+                .isEqualTo(LabEvaluation.NORMAL);
         verify(rangeRepository, never()).findByLabTestItemIdAndSpeciesId(1L, 1L);
     }
 
@@ -350,12 +325,13 @@ class ParaclinicServiceImplTest {
     }
 
     @Test
-    void evaluate_boundariesAreInclusive() {
-        LabTestReferenceRange range = range(labItem(1L, "WBC"), "6.00", "17.00");
-        assertThat(ParaclinicServiceImpl.evaluate(new BigDecimal("6.00"), range)).isEqualTo(LabEvaluation.NORMAL);
-        assertThat(ParaclinicServiceImpl.evaluate(new BigDecimal("17.00"), range)).isEqualTo(LabEvaluation.NORMAL);
-        assertThat(ParaclinicServiceImpl.evaluate(new BigDecimal("5.99"), range)).isEqualTo(LabEvaluation.LOW);
-        assertThat(ParaclinicServiceImpl.evaluate(new BigDecimal("17.01"), range)).isEqualTo(LabEvaluation.HIGH);
+    void labEvaluation_boundariesAreInclusive() {
+        BigDecimal min = new BigDecimal("6.00");
+        BigDecimal max = new BigDecimal("17.00");
+        assertThat(LabEvaluation.of(new BigDecimal("6.00"), min, max)).isEqualTo(LabEvaluation.NORMAL);
+        assertThat(LabEvaluation.of(new BigDecimal("17.00"), min, max)).isEqualTo(LabEvaluation.NORMAL);
+        assertThat(LabEvaluation.of(new BigDecimal("5.99"), min, max)).isEqualTo(LabEvaluation.LOW);
+        assertThat(LabEvaluation.of(new BigDecimal("17.01"), min, max)).isEqualTo(LabEvaluation.HIGH);
     }
 
     // ================================================================== hủy chỉ định (EX-08)
@@ -393,6 +369,34 @@ class ParaclinicServiceImplTest {
 
         stubLocks(detail(2L, 101L, ULTRASOUND, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
         assertError(ErrorCode.ACCESS_DENIED, () -> service.cancel(2L, "x"));
+    }
+
+    @Test
+    void cancel_alsoCancelsTheServiceInvoiceInTheSameTransaction_BR33() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
+        ServiceInvoice invoice = ServiceInvoice.builder().id(50L).visitServiceDetailId(1L)
+                .unitPrice(new BigDecimal("250000.00")).vatRate(BigDecimal.ZERO).build();
+        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(invoice));
+        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+
+        service.cancel(1L, "Khách xin hủy");
+
+        // Bất biến v3.0: dịch vụ CANCELLED <=> hóa đơn của chính dịch vụ đó CANCELLED
+        assertThat(invoice.getPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
+        verify(invoiceRepository).save(invoice);
+    }
+
+    @Test
+    void cancel_ofAServiceWhoseInvoiceIsAlreadyPaid_isRefused() {
+        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
+        stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
+        ServiceInvoice paid = ServiceInvoice.builder().id(50L).visitServiceDetailId(1L).unitPrice(new BigDecimal("250000.00"))
+                .vatRate(BigDecimal.ZERO).paymentStatus(PaymentStatus.PAID).build();
+        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(paid));
+
+        assertError(ErrorCode.PAID_SERVICE_CANNOT_BE_CANCELLED, () -> service.cancel(1L, "Khách xin hủy"));   // hoàn tiền ngoài phạm vi
+        assertThat(paid.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
     }
 
     // ================================================================== kết quả CĐHA (UC-26)
@@ -516,11 +520,6 @@ class ParaclinicServiceImplTest {
     private static LabTestReferenceRange range(LabTestItem item, String min, String max) {
         return LabTestReferenceRange.builder().labTestItem(item).species(dog())
                 .minValue(new BigDecimal(min)).maxValue(new BigDecimal(max)).build();
-    }
-
-    private static VisitServiceDetailHistory history(long detailId, String action) {
-        return VisitServiceDetailHistory.builder().visitServiceDetailId(detailId).action(action)
-                .fromStatus(ServiceDetailStatus.PENDING).toStatus(ServiceDetailStatus.PENDING).changedByUserId(LAB_TECH).build();
     }
 
     private VisitServiceDetailHistory lastDetailHistory() {

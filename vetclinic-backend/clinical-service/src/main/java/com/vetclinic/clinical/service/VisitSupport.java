@@ -13,6 +13,16 @@ import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.common.event.DoctorPriorityCallbackEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
+import com.vetclinic.clinical.constant.PaymentStatus;
+import com.vetclinic.clinical.entity.ClinicService;
+import com.vetclinic.clinical.entity.ServiceInvoice;
+import com.vetclinic.clinical.entity.VisitServiceDetail;
+import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
+import java.time.LocalDate;
+import java.util.Collection;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -34,6 +44,7 @@ public class VisitSupport {
     private final PetVisitStatusHistoryRepository historyRepository;
     private final VisitServiceDetailRepository detailRepository;
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
+    private final ServiceInvoiceRepository invoiceRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
@@ -77,7 +88,7 @@ public class VisitSupport {
                 .build());
     }
 
-    /** Audit trail tiến độ một chỉ định. action: ORDERED, START_PROCESSING, COMPLETED, CANCELLED, POSTPONED, RECALL. */
+    /** Audit trail tiến độ một chỉ định. action: ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED, SKIPPED. */
     public void recordDetail(Long detailId, ServiceDetailStatus from, ServiceDetailStatus to, String action,
                              Long actorId, String reason) {
         detailHistoryRepository.save(VisitServiceDetailHistory.builder()
@@ -88,6 +99,47 @@ public class VisitSupport {
                 .changedByUserId(actorId)
                 .reason(reason)
                 .build());
+    }
+
+    /**
+     * Lập hóa đơn RIÊNG cho một dòng chỉ định (BR-19, FR-32): đúng một hóa đơn PENDING, snapshot đơn giá và thuế suất hiện hành
+     * của dịch vụ. PHẢI gọi trong CÙNG giao dịch với việc tạo dòng chỉ định. Mã SINV-YYYY-XXXX sinh từ id (không count + 1).
+     */
+    public ServiceInvoice createInvoice(VisitServiceDetail detail, ClinicService service) {
+        ServiceInvoice invoice = invoiceRepository.saveAndFlush(ServiceInvoice.builder()
+                // Mã tạm duy nhất; đổi thành mã theo id ngay bên dưới (id chỉ có sau khi INSERT)
+                .invoiceCode("TMP-" + UUID.randomUUID())
+                .visitServiceDetailId(detail.getId())
+                .unitPrice(service.getPrice())
+                .vatRate(service.getVatRate())
+                .build());
+        invoice.setInvoiceCode(String.format("SINV-%d-%04d", LocalDate.now(clock).getYear(), invoice.getId()));
+        return invoice;
+    }
+
+    /**
+     * BR-33 / EX-08: hủy dịch vụ thì hóa đơn của chính dịch vụ đó chuyển CANCELLED trong CÙNG giao dịch (bất biến "dịch vụ
+     * CANCELLED <=> hóa đơn CANCELLED"). Hóa đơn đã PAID thì không hủy được (CLIN_1310): hoàn tiền ngoài phạm vi.
+     */
+    public void cancelInvoiceOf(Long detailId) {
+        invoiceRepository.findByVisitServiceDetailId(detailId).ifPresent(invoice -> {
+            if (invoice.getPaymentStatus() == PaymentStatus.PAID) {
+                throw new AppException(ErrorCode.PAID_SERVICE_CANNOT_BE_CANCELLED);
+            }
+            if (invoice.getPaymentStatus() == PaymentStatus.PENDING) {
+                invoice.setPaymentStatus(PaymentStatus.CANCELLED);
+                invoiceRepository.save(invoice);
+            }
+        });
+    }
+
+    /** Hóa đơn của nhiều dòng chỉ định theo lô (key = id dòng chỉ định). */
+    public Map<Long, ServiceInvoice> invoicesOf(Collection<Long> detailIds) {
+        if (detailIds.isEmpty()) {
+            return Map.of();
+        }
+        return invoiceRepository.findByVisitServiceDetailIdIn(detailIds).stream()
+                .collect(Collectors.toMap(ServiceInvoice::getVisitServiceDetailId, Function.identity()));
     }
 
     /**
@@ -105,7 +157,6 @@ public class VisitSupport {
         if (open > 0) {
             return;
         }
-        visit.setCallbackPostponedAt(null);
         transition(visit, VisitStatus.RESULTS_READY, actorId,
                 "Đã có đủ kết quả cận lâm sàng, chuyển vào hàng đợi tái khám ưu tiên của Bác sĩ");
         eventPublisher.publishEvent(new DoctorPriorityCallbackEvent(UUID.randomUUID(), clock.instant(), actorId,
