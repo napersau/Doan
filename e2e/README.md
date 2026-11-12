@@ -11,7 +11,8 @@ Mỗi kịch bản in dòng cuối `KET QUA: N dat, M khong dat`.
 | `billing.sh` | kê đơn, hóa đơn, thanh toán, xuất thuốc, kho, EX-14/15/16, đồng thời, DLQ | 151 |
 | `notification.py` | STOMP/WebSocket thật (JWT, quyền đăng ký kênh), 6 sự kiện, email Mailpit, DLQ | 68 |
 | `features.py` | tự đăng ký / đổi vai trò / đặt lại mật khẩu, danh mục xét nghiệm, hàng đợi 3 bậc, bệnh án trọn đời, báo cáo, hết hạn PENDING, hủy hóa đơn + mở lại đợt khám | 138 |
-| `fe_smoke.mjs` | **giao diện thật** trên Chrome headless: một ca khám trọn vẹn qua 6 vai trò (xem mục dưới) | 50 |
+| `fe_smoke.mjs` | **(v2, lỗi thời — chờ Phase 7 xóa)** giao diện thật trên Chrome headless, luồng v2 | 50 |
+| `fe_smoke_v3.mjs` | **giao diện thật v3.0** trên Chrome headless qua Gateway: khung giờ công khai, gọi số/đẩy lùi, dịch vụ tại phòng, CLS, thu từng phần, bán thuốc, báo cáo hai nguồn (cùng khung CDP với `fe_smoke.mjs`; chạy `node e2e/fe_smoke_v3.mjs` khi Gateway :8080 + 5 service đang chạy và `fe/build` đã dựng) | 69 |
 
 ## Chạy
 

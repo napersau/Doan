@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { errorText } from '../lib/labels';
 
 /**
  * Chạy một thao tác ghi (POST/PUT) với trạng thái bận + thông báo. `run(fn, successMessage)` trả về kết quả
@@ -17,7 +18,7 @@ export default function useAction() {
       if (success) setNotice({ type: 'success', text: typeof success === 'function' ? success(result) : success });
       return result === undefined || result === null ? true : result;
     } catch (problem) {
-      setNotice({ type: 'error', text: problem.message || 'Thao tác không thành công.' });
+      setNotice({ type: 'error', text: errorText(problem) });
       return undefined;
     } finally { running.current = false; setBusy(false); }
   }, []);

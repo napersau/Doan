@@ -53,7 +53,8 @@ export const petsApi = {
 };
 
 export const appointmentsApi = {
-  slots: (date) => api.get(`${APPT}/slots`, { date }),
+  // Công khai (Gateway cho qua không cần token) nên Portal xem được khi chưa đăng nhập
+  slots: (date) => api.get(`${APPT}/slots`, { date }, { auth: false }),
   list: (query) => api.get(APPT, query),
   get: (id) => api.get(`${APPT}/${id}`),
   history: (id) => api.get(`${APPT}/${id}/history`),
@@ -67,38 +68,53 @@ export const appointmentsApi = {
 
 export const visitsApi = {
   checkIn: (body) => api.post(`${VISITS}/check-in`, body),
+  // Bảng điều phối: { unassigned, doctors: [{ doctorId, fullName, roomNumber, status, waitingCount, visits }], suggestedDoctorId }
   queue: () => api.get(`${VISITS}/queue`),
+  myQueue: () => api.get(`${VISITS}/my-queue`),
   list: (query) => api.get(VISITS, query),
+  withDebt: () => api.get(`${VISITS}/with-debt`),
   get: (id) => api.get(`${VISITS}/${id}`),
   history: (id) => api.get(`${VISITS}/${id}/history`),
-  assign: (id, doctorId) => api.post(`${VISITS}/${id}/assign`, { doctorId }),
+  assignDoctor: (id, doctorId) => api.post(`${VISITS}/${id}/assign-doctor`, { doctorId }),
+  unassignDoctor: (id) => api.post(`${VISITS}/${id}/unassign-doctor`),
+  callNext: () => api.post(`${VISITS}/call-next`),
+  skip: (id) => api.post(`${VISITS}/${id}/skip`),
   startExam: (id, body) => api.post(`${VISITS}/${id}/start-exam`, body),
-  orderServices: (id, services) => api.post(`${VISITS}/${id}/services`, { services }),
-  callBack: (id) => api.post(`${VISITS}/${id}/call-back`),
-  postponeCallback: (id) => api.post(`${VISITS}/${id}/postpone-callback`),
+  clinicalInfo: (id, body) => api.put(`${VISITS}/${id}/clinical-info`, body),
+  paraclinicalOrders: (id, serviceIds, notes) => api.post(`${VISITS}/${id}/paraclinical-orders`, { serviceIds, notes: notes || null }),
+  inRoomServices: (id, services) => api.post(`${VISITS}/${id}/in-room-services`, { services }),
+  startPhase2: (id) => api.post(`${VISITS}/${id}/start-phase2`),
   closeVisit: (id, body) => api.post(`${VISITS}/${id}/close-visit`, body),
+  cancelExam: (id, reason) => api.post(`${VISITS}/${id}/cancel-exam`, { reason }),
   abandon: (id) => api.post(`${VISITS}/${id}/abandon`),
   cancel: (id, reason) => api.post(`${VISITS}/${id}/cancel`, { reason }),
   reopen: (id, reason) => api.post(`${VISITS}/${id}/reopen`, { reason }),
   doctorsStatus: () => api.get(`${CLIN}/doctors/status`),
   myVisits: () => api.get(`${CLIN}/doctors/me/visits`),
+  // Hóa đơn dịch vụ (mỗi dịch vụ một hóa đơn, thu một phần được)
+  serviceInvoices: (id) => api.get(`${VISITS}/${id}/service-invoices`),
+  confirmServicePayment: (id, invoiceIds) => api.post(`${VISITS}/${id}/service-invoices/confirm-payment`, { invoiceIds }),
+  discountServiceInvoice: (invoiceId, discountAmount) => api.post(`${CLIN}/service-invoices/${invoiceId}/discount`, { discountAmount }),
 };
 
 export const paraclinicApi = {
   labQueue: () => api.get(`${CLIN}/lab-queue`),
   imagingQueue: () => api.get(`${CLIN}/imaging-queue`),
+  callNextLab: () => api.post(`${CLIN}/lab-queue/call-next`),
+  callNextImaging: () => api.post(`${CLIN}/imaging-queue/call-next`),
+  skip: (detailId) => api.post(`${CLIN}/service-details/${detailId}/skip`),
   start: (detailId) => api.post(`${CLIN}/service-details/${detailId}/start`),
-  postpone: (detailId, reason) => api.post(`${CLIN}/service-details/${detailId}/postpone`, reason ? { reason } : {}),
-  recall: (detailId) => api.post(`${CLIN}/service-details/${detailId}/recall`),
+  sampleCollected: (detailId) => api.post(`${CLIN}/service-details/${detailId}/sample-collected`),
+  perform: (detailId) => api.post(`${CLIN}/service-details/${detailId}/perform`),
   cancel: (detailId, reason) => api.post(`${CLIN}/service-details/${detailId}/cancel`, { reason }),
   labForm: (detailId) => api.get(`${CLIN}/service-details/${detailId}/lab-form`),
-  saveLabResults: (detailId, items) => api.post(`${CLIN}/service-details/${detailId}/lab-results`, { items }),
+  saveLabResults: (detailId, results) => api.post(`${CLIN}/lab-results/${detailId}`, { results }),
   saveImagingResult: (detailId, { description, conclusion, files }) => {
     const form = new FormData();
     form.append('description', description);
     form.append('conclusion', conclusion || '');
     files.forEach((file) => form.append('files', file));
-    return api.upload(`${CLIN}/service-details/${detailId}/imaging-result`, form);
+    return api.upload(`${CLIN}/imaging-results/${detailId}`, form);
   },
   attachment: (attachmentId) => api.blob(`${CLIN}/imaging-attachments/${attachmentId}/file`),
 };
@@ -108,34 +124,35 @@ export const pharmacyApi = {
   medicine: (id) => api.get(`${PHARM}/medicines/${id}`),
   createMedicine: (body) => api.post(`${PHARM}/medicines`, body),
   updateMedicine: (id, body) => api.put(`${PHARM}/medicines/${id}`, body),
-  importStock: (id, body) => api.post(`${PHARM}/medicines/${id}/import`, body),
-  adjustStock: (id, body) => api.post(`${PHARM}/medicines/${id}/adjust`, body),
   transactions: (id, query) => api.get(`${PHARM}/medicines/${id}/transactions`, query),
+  importStock: (medicineId, body) => api.post(`${PHARM}/inventory/import`, { medicineId, ...body }),
+  adjustStock: (medicineId, body) => api.post(`${PHARM}/inventory/adjust`, { medicineId, ...body }),
+  // Đơn thuốc v3.0: không giá, không trạng thái; kê vượt tồn chỉ cảnh báo (stockWarnings)
   prescriptions: (query) => api.get(`${PHARM}/prescriptions`, query),
   prescription: (id) => api.get(`${PHARM}/prescriptions/${id}`),
   prescriptionByVisit: (visitId) => api.get(`${PHARM}/prescriptions/by-visit/${visitId}`),
+  printPrescription: (id) => api.get(`${PHARM}/prescriptions/${id}/print`),
   createPrescription: (body) => api.post(`${PHARM}/prescriptions`, body),
   updatePrescription: (id, body) => api.put(`${PHARM}/prescriptions/${id}`, body),
-  cancelPrescription: (id) => api.post(`${PHARM}/prescriptions/${id}/cancel`),
-  dispense: (id) => api.post(`${PHARM}/prescriptions/${id}/dispense`),
+  // Hóa đơn thuốc (chỉ khi khách chọn mua tại phòng khám)
+  createMedicineInvoice: (prescriptionId, body) => api.post(`${PHARM}/prescriptions/${prescriptionId}/medicine-invoices`, body),
 };
 
 export const billingApi = {
-  invoices: (query) => api.get(`${BILL}/invoices`, query),
-  invoice: (id) => api.get(`${BILL}/invoices/${id}`),
-  invoiceByVisit: (visitId) => api.get(`${BILL}/invoices/by-visit/${visitId}`),
-  setDiscount: (id, discountAmount, notes) => api.put(`${BILL}/invoices/${id}/discount`, { discountAmount, notes }),
-  confirmPayment: (id) => api.post(`${BILL}/invoices/${id}/confirm-payment`),
-  cancelInvoice: (id, reason) => api.post(`${BILL}/invoices/${id}/cancel`, { reason }),
-  generateForVisit: (visitId) => api.post(`${BILL}/invoices/from-visit/${visitId}`),
-  revenueReport: (query) => api.get(`${BILL}/reports/revenue`, query),
+  medicineInvoice: (id) => api.get(`${BILL}/medicine-invoices/${id}`),
+  updateMedicineInvoiceItems: (id, body) => api.put(`${BILL}/medicine-invoices/${id}/items`, body),
+  cancelMedicineInvoice: (id) => api.post(`${BILL}/medicine-invoices/${id}/cancel`),
+  confirmMedicinePayment: (id) => api.post(`${BILL}/medicine-invoices/${id}/confirm-payment`),
+  // Doanh thu THUỐC; doanh thu dịch vụ + công nợ ở reportsApi.serviceRevenue (Admin cộng hai nguồn)
+  medicineRevenue: (query) => api.get(`${BILL}/reports/revenue`, query),
 };
 
 export const reportsApi = {
   operations: (query) => api.get(`${CLIN}/reports/operations`, query),
+  serviceRevenue: (query) => api.get(`${CLIN}/reports/revenue`, query),
 };
 
 export const notificationsApi = {
   list: (limit = 50) => api.get('/api/v1/notifications', { limit }),
-  sendEmail: (body) => api.post('/api/v1/notifications/send-email', body),
+  markRead: (id) => api.post(`/api/v1/notifications/${id}/read`),
 };

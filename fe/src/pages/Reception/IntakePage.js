@@ -2,16 +2,29 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import StaffLayout from '../../layouts/StaffLayout';
 import OwnerPetPicker from '../../components/shared/OwnerPetPicker';
-import { AsyncView, Badge, Button, Facts, Field, Notice, PageHead, Panel, Table, Tabs, Textarea } from '../../components/ui';
+import { AsyncView, Badge, Button, Facts, Field, Notice, PageHead, Panel, Select, Table, Tabs, Textarea } from '../../components/ui';
 import { appointmentsApi, visitsApi } from '../../api/endpoints';
 import useAction from '../../hooks/useAction';
 import useAsync from '../../hooks/useAsync';
 import { formatTime, todayIso } from '../../lib/format';
 
+/** Chọn bác sĩ ngay lúc tiếp nhận (tùy chọn). Hệ thống gợi ý bác sĩ ít người chờ nhất; không chọn thì ca vào danh sách chờ phân công. */
+function DoctorPick({ value, onChange }) {
+  const board = useAsync(() => visitsApi.queue(), []);
+  const doctors = board.data?.doctors || [];
+  const suggested = board.data?.suggestedDoctorId;
+  return <Field label="Bác sĩ phụ trách (không bắt buộc)" hint="Lễ tân không cân/đo — bác sĩ làm trong phòng khám. Không chọn thì ca vào danh sách chờ phân công.">
+    <Select value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Chưa chọn — vào danh sách chờ phân công</option>
+      {doctors.map((doctor) => <option key={doctor.doctorId} value={doctor.doctorId}>{doctor.fullName} — phòng {doctor.roomNumber || '?'} — {doctor.waitingCount} ca chờ{doctor.doctorId === suggested ? ' — gợi ý (ít người chờ nhất)' : ''}</option>)}
+    </Select>
+  </Field>;
+}
+
 function CheckedIn({ visit, onAnother }) {
   return <Panel title="Đã tiếp nhận" actions={<Badge tone={visit.emergency ? 'red' : 'green'}>{visit.emergency ? 'Cấp cứu' : 'Chờ khám'}</Badge>}>
-    <Facts items={[['Mã đợt khám', visit.visitCode], ['Thú cưng', `${visit.petName} (${visit.speciesName})`], ['Giờ hẹn', visit.scheduledAt ? 'Đúng khung giờ hẹn' : 'Khách vãng lai hoặc đến trễ — xếp theo giờ đến'], ['Triệu chứng', visit.initialSymptoms]]} />
-    <div className="ui-actions" style={{ marginTop: 18 }}><Link className="ui-button primary" to="/reception/queue">Về bảng điều phối để phân công bác sĩ</Link><Button onClick={onAnother}>Tiếp nhận khách khác</Button></div>
+    <Facts items={[['Mã đợt khám', visit.visitCode], ['Thú cưng', `${visit.petName} (${visit.speciesName})`], ['Hàng đợi', visit.doctorId ? `Đã vào hàng đợi của bác sĩ (phòng ${visit.assignedRoom || '?'})` : 'Danh sách chờ phân công — cần phân công bác sĩ'], ['Thứ tự', visit.emergency ? 'Cấp cứu: đứng đầu hàng đợi' : 'Theo thời điểm tiếp nhận'], ['Triệu chứng', visit.initialSymptoms]]} />
+    <div className="ui-actions" style={{ marginTop: 18 }}><Link className="ui-button primary" to="/reception/queue">{visit.doctorId ? 'Về bảng điều phối' : 'Về bảng điều phối để phân công bác sĩ'}</Link><Button onClick={onAnother}>Tiếp nhận khách khác</Button></div>
   </Panel>;
 }
 
@@ -20,9 +33,10 @@ function Appointments({ onDone }) {
   const [selected, setSelected] = useState(null);
   const [emergency, setEmergency] = useState(false);
   const [symptoms, setSymptoms] = useState('');
+  const [doctorId, setDoctorId] = useState('');
   const action = useAction();
   const checkIn = async () => {
-    const visit = await action.run(() => visitsApi.checkIn({ appointmentId: selected.id, emergency, initialSymptoms: symptoms.trim() || null }));
+    const visit = await action.run(() => visitsApi.checkIn({ appointmentId: selected.id, isEmergency: emergency, initialSymptoms: symptoms.trim() || null, doctorId: doctorId ? Number(doctorId) : null }));
     if (visit && visit !== true) { onDone(visit); list.refresh(); }
   };
   return <div className="ui-cols">
@@ -39,7 +53,8 @@ function Appointments({ onDone }) {
         <Notice notice={action.notice} onClose={action.clear} />
         <Facts items={[['Lịch hẹn', selected.appointmentCode], ['Thú cưng', selected.petName], ['Chủ nuôi', `${selected.ownerName} · ${selected.ownerPhone}`], ['Lý do đặt lịch', selected.reason]]} />
         <Field label="Triệu chứng ban đầu (không bắt buộc)"><Textarea value={symptoms} onChange={(event) => setSymptoms(event.target.value)} maxLength={2000} rows={2} /></Field>
-        <label className="ui-check"><input type="checkbox" checked={emergency} onChange={(event) => setEmergency(event.target.checked)} />Ca cấp cứu (ưu tiên tuyệt đối)</label>
+        <DoctorPick value={doctorId} onChange={setDoctorId} />
+        <label className="ui-check"><input type="checkbox" checked={emergency} onChange={(event) => setEmergency(event.target.checked)} />Ca cấp cứu (đứng đầu hàng đợi)</label>
         <div><Button variant="primary" busy={action.busy} onClick={checkIn}>Tiếp nhận</Button></div>
       </div>}
     </Panel>
@@ -50,6 +65,7 @@ function WalkIn({ onDone }) {
   const [picked, setPicked] = useState({ owner: null, pet: null });
   const [emergency, setEmergency] = useState(false);
   const [symptoms, setSymptoms] = useState('');
+  const [doctorId, setDoctorId] = useState('');
   const [errors, setErrors] = useState({});
   const action = useAction();
   const submit = async (event) => {
@@ -59,7 +75,7 @@ function WalkIn({ onDone }) {
     else if (!picked.pet) found.pet = 'Chọn hoặc thêm thú cưng.';
     setErrors(found);
     if (Object.keys(found).length) return;
-    const visit = await action.run(() => visitsApi.checkIn({ petId: picked.pet.id, emergency, initialSymptoms: symptoms.trim() || null }));
+    const visit = await action.run(() => visitsApi.checkIn({ petId: picked.pet.id, isEmergency: emergency, initialSymptoms: symptoms.trim() || null, doctorId: doctorId ? Number(doctorId) : null }));
     if (visit && visit !== true) onDone(visit);
   };
   return <Panel title="Khách vãng lai" subtitle="Không cần đặt lịch trước. Khách chưa có hồ sơ có thể tạo ngay tại quầy.">
@@ -67,7 +83,8 @@ function WalkIn({ onDone }) {
       <Notice notice={action.notice} onClose={action.clear} />
       <OwnerPetPicker value={picked} onChange={setPicked} errors={errors} />
       <Field label="Triệu chứng ban đầu (không bắt buộc)"><Textarea value={symptoms} onChange={(event) => setSymptoms(event.target.value)} maxLength={2000} rows={2} /></Field>
-      <label className="ui-check"><input type="checkbox" checked={emergency} onChange={(event) => setEmergency(event.target.checked)} />Ca cấp cứu (ưu tiên tuyệt đối, bác sĩ được báo ngay)</label>
+      <DoctorPick value={doctorId} onChange={setDoctorId} />
+      <label className="ui-check"><input type="checkbox" checked={emergency} onChange={(event) => setEmergency(event.target.checked)} />Ca cấp cứu (đứng đầu hàng đợi, bác sĩ được báo ngay)</label>
       <div><Button type="submit" variant="primary" busy={action.busy}>Tiếp nhận</Button></div>
     </form>
   </Panel>;

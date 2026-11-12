@@ -34,7 +34,7 @@ function LabForm({ item, detailId, onDone }) {
     const entries = Object.entries(values).filter(([, entry]) => entry.value !== '' && entry.value !== undefined);
     if (!entries.length) { action.setNotice({ type: 'error', text: 'Nhập ít nhất một chỉ số.' }); return; }
     if (entries.some(([, entry]) => Number.isNaN(Number(entry.value)) || Number(entry.value) < 0)) { action.setNotice({ type: 'error', text: 'Giá trị đo phải là số không âm.' }); return; }
-    const items = entries.map(([id, entry]) => ({ labTestItemId: Number(id), value: Number(entry.value), notes: blankToNull(entry.notes || '') }));
+    const items = entries.map(([id, entry]) => ({ labTestItemId: Number(id), resultValue: Number(entry.value), notes: blankToNull(entry.notes || '') }));
     if (await action.run(() => paraclinicApi.saveLabResults(detailId, items))) onDone();
   };
   const set = (id, key, value) => setValues({ ...values, [id]: { ...values[id], [key]: value } });
@@ -93,7 +93,7 @@ export default function EntryPage({ kind }) {
   return <StaffLayout area={room.area} title="Nhập kết quả">
     <PageHead eyebrow={room.eyebrow} title="Nhập kết quả" />
     <AsyncView state={item}>
-      {(data) => data.queueState !== 'IN_PROGRESS'
+      {(data) => data.status !== 'IN_PROGRESS'
         ? <div className="ui-alert warning"><span>Dịch vụ chưa được bắt đầu. Hãy bấm “Bắt đầu” ở hàng đợi trước khi nhập kết quả.</span> <Link className="ui-link" to={`${room.base}/queue`}>Về hàng đợi</Link></div>
         : <><Header item={data} kind={kind} />{kind === 'lab' ? <LabForm item={data} detailId={detailId} onDone={back} /> : <ImagingForm detailId={detailId} onDone={back} />}</>}
     </AsyncView>

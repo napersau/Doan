@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { paraclinicApi } from '../../api/endpoints';
 import { Badge, Facts, Table } from '../ui';
-import { LAB_EVALUATION, PRESCRIPTION_STATUS, SERVICE_CATEGORY, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
+import { LAB_EVALUATION, SERVICE_CATEGORY, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
 import { formatDateTime, formatMoney, formatNumber } from '../../lib/format';
 
 /** Ảnh CĐHA: tải qua API có xác thực (không dùng thẻ img trực tiếp vì cần Authorization). DICOM chỉ tải về. */
@@ -43,7 +43,6 @@ export function ImagingResults({ results }) {
 export function PrescriptionView({ prescription }) {
   if (!prescription) return <p className="ui-muted">Không có đơn thuốc cho đợt khám này.</p>;
   return <div className="ui-stack" style={{ gap: 12 }}>
-    {prescription.status && <div><Badge map={PRESCRIPTION_STATUS} value={prescription.status} /></div>}
     {prescription.doctorNotes && <p style={{ margin: 0 }}><strong>Lời dặn của bác sĩ:</strong> {prescription.doctorNotes}</p>}
     <Table caption="Đơn thuốc" rowKey={(row) => row.medicineId} columns={[
       { title: 'Thuốc', render: (row) => <><strong>{row.medicineName}</strong><small>{row.activeIngredient || row.medicineCode}</small></> },

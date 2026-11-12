@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from '../common/Modal';
-import { labelOf, toneOf } from '../../lib/labels';
+import { errorText, labelOf, toneOf } from '../../lib/labels';
 import '../../styles/ui.css';
 
 // Bộ thành phần giao diện dùng chung cho mọi vai trò (khu vực nhân viên dùng khung admin-shell, cổng chủ nuôi dùng customer-shell).
@@ -93,7 +93,7 @@ export function FormDialog({ title, id, onClose, onSubmit, submitLabel = 'Lưu',
     event.preventDefault();
     if (busy) return;
     setBusy(true); setError('');
-    try { await onSubmit(); onClose(); } catch (problem) { if (mounted.current) setError(problem.message || 'Thao tác không thành công.'); } finally { if (mounted.current) setBusy(false); }
+    try { await onSubmit(); onClose(); } catch (problem) { if (mounted.current) setError(errorText(problem)); } finally { if (mounted.current) setBusy(false); }
   };
   return <Modal title={title} id={id || 'dialog-title'} onClose={onClose} busy={busy} className={wide ? 'ui-dialog-wide' : ''}>
     <form className="ui-form" onSubmit={submit} noValidate>

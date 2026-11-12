@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import StaffLayout from '../../layouts/StaffLayout';
 import { AsyncView, Badge, Button, Empty, Notice, PageHead, Panel, Stats } from '../../components/ui';
 import { visitsApi } from '../../api/endpoints';
@@ -9,39 +10,82 @@ import usePolling from '../../hooks/usePolling';
 import { formatTimeOfInstant } from '../../lib/format';
 import { VISIT_STATUS } from '../../lib/labels';
 
-const SECTIONS = [
-  { key: 'RESULTS_READY', title: 'Ca đã có kết quả — mời vào khám tiếp', hint: 'Ưu tiên tuyệt đối: bạn đang giữ khóa ưu tiên tái khám cho tới khi mời hoặc tạm hoãn.' },
-  { key: 'IN_PROGRESS', title: 'Đang khám', hint: 'Tiếp tục thăm khám, chỉ định, kê đơn và chốt ca.' },
-  { key: 'WAITING', title: 'Được phân công — chờ khám', hint: 'Lễ tân đã phân công; bấm Bắt đầu khám khi thú cưng vào phòng.' },
-];
+async function load() {
+  const [queue, mine] = await Promise.all([visitsApi.myQueue(), visitsApi.myVisits()]);
+  return { queue, inProgress: mine.filter((visit) => visit.status === 'IN_PROGRESS') };
+}
 
+function VisitLine({ visit, highlight, children }) {
+  return <li style={highlight ? { background: 'var(--ui-raised)', borderRadius: 8 } : undefined}>
+    <div><strong>{visit.petName}</strong> <small style={{ display: 'inline' }}>({visit.speciesName})</small>{' '}
+      {visit.emergency && visit.skipCount === 0 && <span className="ui-emergency">CẤP CỨU</span>}
+      {visit.skipCount > 0 && <Badge tone="amber">Đã bị lùi {visit.skipCount} lần</Badge>}
+      <small>{visit.visitCode} · tiếp nhận {formatTimeOfInstant(visit.checkedInAt)}{visit.initialSymptoms ? ` · ${visit.initialSymptoms}` : ''}</small></div>
+    <div className="ui-actions"><Badge map={VISIT_STATUS} value={visit.status} />{children}</div>
+  </li>;
+}
+
+/**
+ * Hàng đợi riêng của bác sĩ (v3.0). "Gọi số tiếp theo" chỉ gọi người đứng đầu hàng đợi và KHÔNG đổi trạng thái ca; thú cưng vào phòng thì
+ * bấm "Bắt đầu khám" (hoặc "Bắt đầu giai đoạn 2" với ca đã có kết quả). Gọi mà không thấy → "Đẩy lùi 1 bậc": ca lùi sau người kế tiếp, người kế tiếp được gọi ngay.
+ */
 export default function TodayPage() {
-  const visits = useAsync(() => visitsApi.myVisits(), []);
+  const board = useAsync(load, []);
+  const [called, setCalled] = useState(null);
   const action = useAction();
-  useNotificationEvents(() => visits.refresh(), ['PRIORITY_CALLBACK', 'VISIT_CHECKED_IN']);
-  usePolling(visits.refresh, 20000);
-  const call = async (visit, fn, text) => { if (await action.run(() => fn(visit.id), text)) visits.refresh(); };
+  const navigate = useNavigate();
+  useNotificationEvents(() => board.refresh(), ['VISIT_CHECKED_IN', 'RESULTS_READY', 'PATIENT_CALLED']);
+  usePolling(board.refresh, 20000);
 
-  return <StaffLayout area="vet" title="Ca khám của tôi">
-    <PageHead eyebrow="BÁC SĨ" title="Ca khám của tôi" actions={<Button onClick={visits.reload}>Làm mới</Button>}>Các ca lễ tân đã phân công cho bạn. Ca đang chờ kết quả cận lâm sàng không hiện ở đây (bạn được giải phóng để nhận ca khác) và quay lại khi đủ kết quả.</PageHead>
+  const callNext = async () => {
+    const visit = await action.run(() => visitsApi.callNext());
+    if (visit && visit !== true) { setCalled(visit); board.refresh(); }
+  };
+  const skip = async (visit) => {
+    const next = await action.run(() => visitsApi.skip(visit.id), `Đã đẩy lùi ${visit.petName} một bậc.`);
+    if (next) { setCalled(next === true ? null : next); board.refresh(); }
+  };
+  const start = async (visit) => {
+    if (visit.status === 'RESULTS_READY') {
+      if (!(await action.run(() => visitsApi.startPhase2(visit.id)))) return;
+    }
+    setCalled(null);
+    navigate(`/vet/visits/${visit.id}`);
+  };
+
+  return <StaffLayout area="vet" title="Hàng đợi của tôi">
+    <PageHead eyebrow="BÁC SĨ" title="Hàng đợi của tôi" actions={<Button onClick={board.reload}>Làm mới</Button>}>
+      Cấp cứu trước, rồi theo thứ tự đến. Ca đã có kết quả cận lâm sàng tự lên đầu hàng đợi.
+    </PageHead>
     <Notice notice={action.notice} onClose={action.clear} />
-    <AsyncView state={visits}>
-      {(items) => {
-        const by = (key) => items.filter((visit) => visit.status === key);
+    <AsyncView state={board}>
+      {({ queue, inProgress }) => {
+        const ready = queue.filter((visit) => visit.status === 'RESULTS_READY').length;
+        const busy = inProgress.length > 0;
+        const calledVisit = called && queue.find((visit) => visit.id === called.id);
         return <>
-          <Stats items={[['Đã có kết quả', by('RESULTS_READY').length, 'Cần mời vào khám tiếp', by('RESULTS_READY').length ? 'amber' : ''], ['Đang khám', by('IN_PROGRESS').length], ['Chờ khám', by('WAITING').length]]} />
-          {items.length === 0 && <Panel><Empty title="Chưa có ca nào">Khi lễ tân phân công ca cho bạn, ca sẽ hiện ở đây ngay (và bạn nhận thông báo).</Empty></Panel>}
-          {SECTIONS.map((section) => by(section.key).length > 0 && <Panel key={section.key} title={section.title} subtitle={section.hint}>
-            <ul className="ui-list">{by(section.key).map((visit) => <li key={visit.id}>
-              <div><strong>{visit.petName}</strong> <small style={{ display: 'inline' }}>({visit.speciesName})</small> {visit.emergency && <span className="ui-emergency">CẤP CỨU</span>}
-                <small>{visit.visitCode} · tiếp nhận {formatTimeOfInstant(visit.checkedInAt)}{visit.initialSymptoms ? ` · ${visit.initialSymptoms}` : ''}</small></div>
-              <div className="ui-actions"><Badge map={VISIT_STATUS} value={visit.status} />
-                {visit.status === 'RESULTS_READY' && <>
-                  <Button className="small primary" onClick={() => call(visit, visitsApi.callBack, `Đã mời ${visit.petName} vào khám tiếp.`)}>Mời vào khám</Button>
-                  {!visit.callbackPostponed && <Button className="small" onClick={() => call(visit, visitsApi.postponeCallback, 'Đã tạm hoãn; bạn có thể nhận ca khác.')}>Tạm hoãn</Button>}</>}
-                <Link className="ui-button small" to={`/vet/visits/${visit.id}`}>Mở hồ sơ</Link></div>
-            </li>)}</ul>
-          </Panel>)}
+          <Stats items={[['Đang khám', inProgress.length], ['Đang chờ', queue.length], ['Đã có kết quả', ready, ready ? 'Đứng đầu hàng đợi' : undefined, ready ? 'amber' : '']]} />
+
+          {busy && <Panel title="Đang khám" subtitle="Hoàn tất hoặc chốt ca đang khám trước khi gọi số tiếp theo.">
+            <ul className="ui-list">{inProgress.map((visit) => <VisitLine key={visit.id} visit={visit}><Link className="ui-button small primary" to={`/vet/visits/${visit.id}`}>Mở hồ sơ</Link></VisitLine>)}</ul>
+          </Panel>}
+
+          {calledVisit && <div className="ui-alert info" role="status" style={{ alignItems: 'center' }}>
+            <span>Đang gọi <strong>{calledVisit.petName}</strong> ({calledVisit.visitCode}) vào phòng{calledVisit.assignedRoom ? ` ${calledVisit.assignedRoom}` : ''}. Khách vào phòng thì bấm Bắt đầu; không thấy khách thì Đẩy lùi 1 bậc.</span>
+            <span className="ui-actions"><Button className="small primary" onClick={() => start(calledVisit)}>{calledVisit.status === 'RESULTS_READY' ? 'Bắt đầu giai đoạn 2' : 'Bắt đầu khám'}</Button>
+              <Button className="small" onClick={() => skip(calledVisit)}>Không thấy khách — Đẩy lùi 1 bậc</Button></span>
+          </div>}
+
+          <Panel title="Hàng đợi" subtitle="Người đứng đầu sẽ được gọi khi bấm Gọi số tiếp theo."
+            actions={<Button variant="primary" disabled={busy || queue.length === 0} busy={action.busy} onClick={callNext}>Gọi số tiếp theo</Button>}>
+            {queue.length === 0 ? <Empty title="Hàng đợi trống">Lễ tân xếp ca cho bạn thì ca hiện ở đây ngay (và bạn nhận thông báo).</Empty>
+              : <ul className="ui-list">{queue.map((visit, index) => <VisitLine key={visit.id} visit={visit} highlight={index === 0}>
+                {index === 0 && <Badge tone="blue">Kế tiếp</Badge>}
+                {visit.status === 'RESULTS_READY' && <Badge tone="green">Có kết quả</Badge>}
+                <Link className="ui-button small" to={`/vet/visits/${visit.id}`}>Xem hồ sơ</Link>
+              </VisitLine>)}</ul>}
+            {busy && queue.length > 0 && <p className="ui-muted" style={{ marginBottom: 0 }}>Bạn đang có ca đang khám nên chưa gọi số tiếp theo được.</p>}
+          </Panel>
         </>;
       }}
     </AsyncView>

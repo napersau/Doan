@@ -10,7 +10,7 @@ import { INVENTORY_TYPE } from '../../lib/labels';
 
 function MedicineDialog({ medicine, onClose, onSaved }) {
   const editing = Boolean(medicine);
-  const [form, setForm] = useState({ code: medicine?.code || '', name: medicine?.name || '', activeIngredient: medicine?.activeIngredient || '', dosageForm: medicine?.dosageForm || '', unit: medicine?.unit || '', salePrice: medicine?.salePrice ?? '', initialStock: 0, minStockAlert: medicine?.minStockAlert ?? 10, active: medicine?.active ?? true });
+  const [form, setForm] = useState({ code: medicine?.code || '', name: medicine?.name || '', activeIngredient: medicine?.activeIngredient || '', dosageForm: medicine?.dosageForm || '', unit: medicine?.unit || '', salePrice: medicine?.salePrice ?? '', vatPercent: medicine ? Math.round(Number(medicine.vatRate) * 100) : 5, initialStock: 0, minStockAlert: medicine?.minStockAlert ?? 10, active: medicine?.active ?? true });
   const [errors, setErrors] = useState({});
   const set = (key) => (event) => setForm({ ...form, [key]: event.target.type === 'checkbox' ? event.target.checked : event.target.value });
   const submit = async () => {
@@ -20,9 +20,10 @@ function MedicineDialog({ medicine, onClose, onSaved }) {
     if (!form.dosageForm.trim()) found.dosageForm = 'Nhập dạng bào chế.';
     if (!form.unit.trim()) found.unit = 'Nhập đơn vị tính.';
     if (form.salePrice === '' || Number(form.salePrice) < 0) found.salePrice = 'Giá bán không được âm.';
+    if (form.vatPercent === '' || Number(form.vatPercent) < 0 || Number(form.vatPercent) > 100) found.vatPercent = 'VAT từ 0 đến 100%.';
     setErrors(found);
     if (Object.keys(found).length) throw new Error('Vui lòng kiểm tra lại các trường được đánh dấu.');
-    const common = { name: form.name.trim(), activeIngredient: blankToNull(form.activeIngredient), dosageForm: form.dosageForm.trim(), unit: form.unit.trim(), salePrice: Number(form.salePrice), minStockAlert: Number(form.minStockAlert) };
+    const common = { name: form.name.trim(), activeIngredient: blankToNull(form.activeIngredient), dosageForm: form.dosageForm.trim(), unit: form.unit.trim(), salePrice: Number(form.salePrice), vatRate: Number(form.vatPercent) / 100, minStockAlert: Number(form.minStockAlert) };
     try {
       onSaved(editing ? await pharmacyApi.updateMedicine(medicine.id, { ...common, active: form.active }) : await pharmacyApi.createMedicine({ ...common, code: form.code.trim().toUpperCase(), initialStock: Number(form.initialStock) }));
     } catch (problem) { setErrors(mapFieldErrors(problem)); throw problem; }
@@ -35,6 +36,7 @@ function MedicineDialog({ medicine, onClose, onSaved }) {
       <Field label="Dạng bào chế *" error={errors.dosageForm}><Input value={form.dosageForm} onChange={set('dosageForm')} maxLength={50} placeholder="Viên nén, siro, ống tiêm…" /></Field>
       <Field label="Đơn vị tính *" error={errors.unit}><Input value={form.unit} onChange={set('unit')} maxLength={30} placeholder="viên, chai, ống…" /></Field>
       <Field label="Giá bán (VND) *" error={errors.salePrice}><Input type="number" min="0" step="500" value={form.salePrice} onChange={set('salePrice')} /></Field>
+      <Field label="VAT (%) *" error={errors.vatPercent} hint="Chốt vào hóa đơn thuốc lúc lập; đổi VAT không ảnh hưởng hóa đơn đã lập."><Input type="number" min="0" max="100" step="1" value={form.vatPercent} onChange={set('vatPercent')} /></Field>
       <Field label="Ngưỡng cảnh báo tồn kho" error={errors.minStockAlert}><Input type="number" min="0" value={form.minStockAlert} onChange={set('minStockAlert')} /></Field>
       {!editing && <Field label="Tồn kho ban đầu" error={errors.initialStock}><Input type="number" min="0" value={form.initialStock} onChange={set('initialStock')} /></Field>}
       {editing && <label className="ui-check"><input type="checkbox" checked={form.active} onChange={set('active')} />Đang kinh doanh</label>}
@@ -66,8 +68,8 @@ function TransactionsDialog({ medicine, onClose }) {
     <AsyncView state={list} isEmpty={(data) => data.items.length === 0} empty="Chưa có giao dịch kho nào.">{(data) => <>
       <Table caption="Nhật ký kho" rows={data.items} columns={[
         { title: 'Thời gian', render: (row) => formatDateTime(row.createdAt) }, { title: 'Loại', render: (row) => INVENTORY_TYPE[row.transactionType] },
-        { title: 'Số lượng', align: 'right', render: (row) => (row.transactionType === 'ADJUSTMENT' && row.quantity > 0 ? `+${row.quantity}` : row.quantity) },
-        { title: 'Tồn sau', align: 'right', key: 'balanceAfter' }, { title: 'Ghi chú', render: (row) => row.notes || '—' }]} />
+        { title: 'Số lượng', align: 'right', render: (row) => <strong style={{ color: row.quantity < 0 ? 'var(--ui-danger, #c0392b)' : undefined }}>{row.quantity > 0 ? `+${row.quantity}` : row.quantity}</strong> },
+        { title: 'Hóa đơn thuốc', render: (row) => (row.medicineInvoiceId ? `#${row.medicineInvoiceId}` : '—') }, { title: 'Ghi chú', render: (row) => row.notes || '—' }]} />
       <Pager page={data} onChange={setPage} /></>}</AsyncView>
   </FormDialog>;
 }
@@ -84,7 +86,7 @@ export default function MedicinesPage() {
   const done = (text) => (saved) => { setDialog(null); setNotice({ type: 'success', text: typeof text === 'function' ? text(saved) : text }); list.refresh(); };
 
   return <StaffLayout area="admin" title="Thuốc & kho">
-    <PageHead eyebrow="KHO THUỐC" title="Thuốc & kho" actions={<Button variant="primary" onClick={() => setDialog({ type: 'edit' })}>+ Thêm thuốc</Button>}>Quản lý danh mục thuốc, giá bán và tồn kho. Mọi lần nhập, điều chỉnh, xuất theo đơn đều được ghi nhật ký; tồn kho chạm ngưỡng sẽ báo cho quản trị viên.</PageHead>
+    <PageHead eyebrow="KHO THUỐC" title="Thuốc & kho" actions={<Button variant="primary" onClick={() => setDialog({ type: 'edit' })}>+ Thêm thuốc</Button>}>Quản lý danh mục thuốc, giá bán và tồn kho. Mọi lần nhập, điều chỉnh, bán thuốc đều được ghi nhật ký (số lượng có dấu: + nhập, − xuất); tồn kho chạm ngưỡng sẽ báo cho quản trị viên.</PageHead>
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <div className="ui-toolbar">
       <SearchBox value={keyword} onChange={(value) => { setKeyword(value); setPage(0); }} placeholder="Mã, tên hoặc hoạt chất" label="Tìm thuốc" />
@@ -97,7 +99,7 @@ export default function MedicinesPage() {
           <Table caption="Thuốc" rows={data.items} columns={[
             { title: 'Thuốc', render: (row) => <><strong>{row.name}</strong><small>{row.code} · {row.activeIngredient || '—'}</small></> },
             { title: 'Dạng / đơn vị', render: (row) => `${row.dosageForm} (${row.unit})` },
-            { title: 'Giá bán', align: 'right', render: (row) => formatMoney(row.salePrice) },
+            { title: 'Giá bán', align: 'right', render: (row) => <>{formatMoney(row.salePrice)}<small>VAT {Math.round(Number(row.vatRate) * 100)}%</small></> },
             { title: 'Tồn kho', align: 'right', render: (row) => <>{row.stockQuantity}<small>Ngưỡng {row.minStockAlert}</small></> },
             { title: 'Trạng thái', render: (row) => <>{row.active ? <Badge tone="green">Đang bán</Badge> : <Badge tone="gray">Ngừng</Badge>} {row.lowStock && <Badge tone="amber">Sắp hết</Badge>}</> },
             { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
