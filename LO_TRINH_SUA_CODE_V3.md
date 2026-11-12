@@ -12,7 +12,7 @@
 | **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
 | **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
 | **Phase 2** `appointment-service` | ✅ **ĐÃ XONG** (12/11/2026) | Khối A + B xong; 68 test pass + chạy thật trên schema v3.0 |
-| Phase 3 `clinical-service` | 🟨 **ĐANG LÀM** — **Khối A ✅ xong (12/11)**, Khối B chưa | **Bước kế tiếp: 3.B1 (check-in + hai danh sách `queue`/`my-queue`)** |
+| Phase 3 `clinical-service` | 🟨 **ĐANG LÀM** — **Khối A ✅ xong (12/11)**; **Khối B: 3.B1–3.B5 ✅ xong (12/11)**, 3.B6–3.B14 chưa | **Bước kế tiếp: 3.B6 (hàng đợi Lab/CĐHA: call-next, skip, sample-collected, huy hiệu `labStatus`)** |
 | Phase 4 `billing-pharmacy-service` | ⬜ chưa làm | |
 | Phase 5 `notification-service` | ⬜ chưa làm | |
 | Phase 6 Gateway + FE | ⬜ chưa làm | |
@@ -162,11 +162,11 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 | Bước | Nghiệp vụ | Việc chính | Kiểm thử |
 |---|---|---|---|
-| [ ] **3.B1** | Check-in + hai danh sách | `CheckInRequest` thêm `doctorId?`; chặn `CLIN_1306`; `GET /pet-visits/queue` (chờ phân công + hàng đợi từng bác sĩ + `waitingCount` + `suggestedDoctorId`), `GET /my-queue` | Task 3.2 |
-| [ ] **3.B2** | Phân công | đổi `/assign` → `/assign-doctor` (không kiểm tra bác sĩ rảnh, giữ `queue_order`, kiểm `version`), thêm `/unassign-doctor`; `doctors/status` chỉ `BUSY`/`AVAILABLE` | Task 3.3.1–3.3.2b |
-| [ ] **3.B3** | Gọi số + Đẩy lùi (phòng khám) | `POST /call-next` (`CLIN_1302`/`CLIN_1303`, `PatientCalledEvent`), `POST /{id}/skip` — công thức Q4 (3 trường hợp), dùng `@Version` | Task 3.3.2c–d; test đủ 3 trường hợp công thức |
-| [ ] **3.B4** | Bắt đầu khám (T02) | kiểm tra đúng bác sĩ được gán (`CLIN_1311`), không có ca `IN_PROGRESS`; tự tạo dịch vụ `EXAM_GEN` + hóa đơn; `PUT /{id}/clinical-info` | Task 3.3.3–3.3.4 |
-| [ ] **3.B5** | Chỉ định CLS (T04) + dịch vụ tại phòng | `paraclinical-orders`: kiểm `weight/temperature` (`CLIN_1308`), dịch vụ tại phòng xong (`CLIN_1309`); `in-room-services`; `service-details/{id}/perform`; ca → `WAITING_RESULTS` | Task 3.4 |
+| [x] **3.B1** | Check-in + hai danh sách | `CheckInRequest` thêm `doctorId?`; chặn `CLIN_1306`; `GET /pet-visits/queue` (chờ phân công + hàng đợi từng bác sĩ + `waitingCount` + `suggestedDoctorId`), `GET /my-queue` | Task 3.2 |
+| [x] **3.B2** | Phân công | đổi `/assign` → `/assign-doctor` (không kiểm tra bác sĩ rảnh, giữ `queue_order`, kiểm `version`), thêm `/unassign-doctor`; `doctors/status` chỉ `BUSY`/`AVAILABLE` | Task 3.3.1–3.3.2b |
+| [x] **3.B3** | Gọi số + Đẩy lùi (phòng khám) | `POST /call-next` (`CLIN_1302`/`CLIN_1303`, `PatientCalledEvent`), `POST /{id}/skip` — công thức Q4 (3 trường hợp), dùng `@Version` | Task 3.3.2c–d; test đủ 3 trường hợp công thức |
+| [x] **3.B4** | Bắt đầu khám (T02) | kiểm tra đúng bác sĩ được gán (`CLIN_1311`), không có ca `IN_PROGRESS`; tự tạo dịch vụ `EXAM_GEN` + hóa đơn; `PUT /{id}/clinical-info` | Task 3.3.3–3.3.4 |
+| [x] **3.B5** | Chỉ định CLS (T04) + dịch vụ tại phòng | `paraclinical-orders`: kiểm `weight/temperature` (`CLIN_1308`), dịch vụ tại phòng xong (`CLIN_1309`); `in-room-services`; `service-details/{id}/perform`; ca → `WAITING_RESULTS` | Task 3.4 |
 | [ ] **3.B6** | Hàng đợi Lab/CĐHA | `lab-queue`/`imaging-queue` sắp theo `queue_order`; `call-next`, `service-details/{id}/skip` (`action=SKIPPED`), `start`, `sample-collected`, huy hiệu liên phòng `labStatus`; **xóa** `postpone`/`recall`/tab hoãn | Task 3.5, 3.6 |
 | [ ] **3.B7** | Kết quả CLS | Lab: bắt buộc đủ chỉ số của gói (`service_lab_test_items`); CĐHA multipart giữ nguyên | Task 3.5, 3.6 |
 | [ ] **3.B8** | Hủy dịch vụ CLS (EX-08) | hủy dịch vụ ⇒ hóa đơn `CANCELLED` cùng giao dịch; `CLIN_1310` nếu hóa đơn đã `PAID` | Task 3.5/EX-08 |
