@@ -160,6 +160,28 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
         });
     }
 
+    @Override
+    public VisitResponse call(Long visitId) {
+        Long doctorId = SecurityUtils.getCurrentUserId();
+        String room = roomOf(doctorId);   // Feign NGOÀI transaction
+        return transactionTemplate.execute(tx -> {
+            PetVisit visit = visitRepository.findById(visitId)
+                    .orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
+            if (visit.getDoctorId() == null || !visit.getDoctorId().equals(doctorId)) {
+                throw new AppException(ErrorCode.NOT_ASSIGNED_DOCTOR);
+            }
+            if (visit.getStatus() != VisitStatus.WAITING && visit.getStatus() != VisitStatus.RESULTS_READY) {
+                throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION,
+                        "Chỉ gọi được ca đang chờ trong hàng đợi (WAITING hoặc RESULTS_READY)");
+            }
+            if (visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)) {
+                throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE);   // BR-12: đang khám dở thì chưa được gọi thêm
+            }
+            publishCalled(visit, ACTION_CALLED, doctorId, room);   // không đổi trạng thái, không đổi thứ tự hàng đợi
+            return assembler.summary(visit).withAssignedRoom(room);
+        });
+    }
+
     private static int indexOf(List<PetVisit> queue, Long visitId) {
         for (int i = 0; i < queue.size(); i++) {
             if (queue.get(i).getId().equals(visitId)) {

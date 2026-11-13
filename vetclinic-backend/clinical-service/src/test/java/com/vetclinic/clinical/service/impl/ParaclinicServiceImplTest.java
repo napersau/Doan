@@ -315,6 +315,33 @@ class ParaclinicServiceImplTest {
     }
 
     @Test
+    void call_aSpecificPendingEntry_onlyAnnounces_neverReordersNorChangesTheStatus() {
+        loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
+        VisitServiceDetail first = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        VisitServiceDetail second = detail(2L, 11L, ULTRASOUND, ServiceDetailStatus.PENDING);
+        long orderFirst = first.getQueueOrder();
+        long orderSecond = second.getQueueOrder();
+        PetVisit visit11 = visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        lenient().when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(first, second));
+        lenient().when(authClient.getUser(IMAGING_TECH)).thenReturn(ApiResponse.success(
+                new UserSummaryResponse(IMAGING_TECH, "KTV Dũng", "0933333333", RoleCode.IMAGING_TECHNICIAN, "P202", "ACTIVE")));
+        when(visitRepository.findWithPetById(11L)).thenReturn(Optional.of(visit11));
+        when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(visit11));
+        when(detailRepository.findById(2L)).thenReturn(Optional.of(second));
+
+        QueueItemResponse called = service.call(2L);   // người đầu hàng vắng: gọi thẳng người thứ hai
+
+        assertThat(called.visitId()).isEqualTo(11L);
+        assertThat(second.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);
+        assertThat(second.getSkipCount()).isZero();
+        assertThat(first.getQueueOrder()).isEqualTo(orderFirst);
+        assertThat(second.getQueueOrder()).isEqualTo(orderSecond);
+        PatientCalledEvent[] events = publishedCalls(1);
+        assertThat(events[0].action()).isEqualTo("CALLED");
+        assertThat(events[0].visitId()).isEqualTo(11L);
+    }
+
+    @Test
     void skip_nobodyBehind_keepsThePosition_butStillCountsTheSkip() {
         loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
         VisitServiceDetail d1 = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);

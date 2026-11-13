@@ -240,14 +240,13 @@ async function main() {
     await b.goto('/reception/queue');
     check('bảng điều phối có hàng đợi riêng của bác sĩ', await b.hasText(STAFF.vet.fullName) && await b.hasText(owner.pet), (await b.text()).slice(0, 400));
 
-    step('3. Bác sĩ: gọi số, đẩy lùi, khám, dịch vụ tại phòng, chỉ định cận lâm sàng');
+    step('3. Bác sĩ: gọi số, gọi lại, khám, dịch vụ tại phòng, chỉ định cận lâm sàng');
     check('bác sĩ đăng nhập', await b.login(STAFF.vet.phoneNumber, PASSWORD));
     check('thấy ca trong hàng đợi riêng', await b.hasText(owner.pet));
     await b.click('Gọi số tiếp theo');
-    check('gọi số: hiện khung đang gọi', await b.hasText('Đang gọi'), (await b.text()).slice(0, 300));
-    await b.click('Đẩy lùi 1 bậc');
-    check('đẩy lùi 1 bậc', await b.hasText('Đã đẩy lùi'), (await b.text()).slice(0, 300));
-    await b.waitFor('document.body.innerText.includes("Đang gọi")', 6000);
+    check('gọi số: dòng hiện "Đã gọi lúc"', await b.hasText('Đã gọi lúc'), (await b.text()).slice(0, 300));
+    await b.click('Gọi lại');
+    check('gọi lại một ca (khách vắng / quay lại) không đổi thứ tự', await b.hasText('Đã gọi') && await b.hasText('Gọi lại'), (await b.text()).slice(0, 300));
     await b.click('Bắt đầu khám', 'button');
     check('mở hồ sơ để bắt đầu khám', await b.waitFor('location.pathname.startsWith("/vet/visits/")', 10000));
     await b.fill('Cân nặng', '12.5'); await b.fill('Thân nhiệt', '39.1'); await b.click('Bắt đầu khám', 'button[type=submit]');
@@ -267,7 +266,7 @@ async function main() {
     check('KTV xét nghiệm đăng nhập', await b.login(STAFF.lab.phoneNumber, PASSWORD));
     check('thấy ca CBC trong hàng đợi lab', await b.hasText(owner.pet));
     await b.click('Gọi số tiếp theo');
-    check('lab gọi số', await b.hasText('Đang gọi'));
+    check('lab gọi số', await b.hasText('Đã gọi lúc'));
     await b.click('Bắt đầu', 'button');
     check('lab bắt đầu: giai đoạn lấy mẫu', await b.hasText('Đang lấy mẫu'), (await b.text()).slice(0, 300));
     await b.click('Đã lấy mẫu');

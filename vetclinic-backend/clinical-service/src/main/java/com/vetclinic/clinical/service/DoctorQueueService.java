@@ -29,4 +29,9 @@ public interface DoctorQueueService {
      * chính ca đó nếu không còn ai phía sau. Không ghi lịch sử trạng thái vì trạng thái không đổi.
      */
     VisitResponse skip(Long visitId);
+
+    /**
+     * "Gọi" một ca cụ thể trong hàng đợi của chính Bác sĩ (không nhất thiết là người đứng đầu): chỉ phát thông báo, **không đổi trạng thái, không đổi thứ tự**. Gọi lại khi khách quay lại là gọi thêm một lần.
+     */
+    VisitResponse call(Long visitId);
 }

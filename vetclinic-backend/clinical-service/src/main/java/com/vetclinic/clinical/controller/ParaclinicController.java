@@ -57,7 +57,14 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success("Đã gọi số tiếp theo", paraclinicService.callNext(ServiceCategory.IMAGING)));
     }
 
-    /** BR-34 / EX-06: khách vắng khi gọi số -> "Đẩy lùi 1 bậc" rồi gọi ngay người kế tiếp. */
+    /** "Gọi" một ca bất kỳ trong hàng đợi phòng mình (khách vắng thì gọi ca khác, thứ tự giữ nguyên). Không đổi trạng thái hay thứ tự. */
+    @PostMapping("/service-details/{id}/call")
+    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
+    public ResponseEntity<ApiResponse<QueueItemResponse>> call(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã gọi bệnh nhân", paraclinicService.call(id)));
+    }
+
+    /** (Không còn dùng trên giao diện) Đẩy lùi 1 bậc: giữ lại cho tương thích API. */
     @PostMapping("/service-details/{id}/skip")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
     public ResponseEntity<ApiResponse<QueueItemResponse>> skip(@PathVariable Long id) {

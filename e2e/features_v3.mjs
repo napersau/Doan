@@ -365,6 +365,13 @@ async function main() {
   const q1 = (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
   const g1rows = q1.filter((i) => i.visitId === g1.v);
   check('hai dịch vụ CĐHA cùng đợt khám nằm liền nhau trong hàng đợi', g1rows.length === 2 && Math.abs(q1.indexOf(g1rows[0]) - q1.indexOf(g1rows[1])) === 1);
+  // "Gọi" một ca bất kỳ (không nhất thiết đứng đầu): chỉ thông báo, không đổi trạng thái / thứ tự
+  const g2row = q1.find((i) => i.visitId === g2.v);
+  const callOne = await call('POST', `${CLIN}/service-details/${g2row.serviceDetailId}/call`, { token: T.img });
+  const q1b = (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
+  check('Gọi một ca bất kỳ trong hàng đợi CĐHA: 200, không đổi thứ tự và không tăng skipCount', callOne.status === 200 && callOne.data?.visitId === g2.v
+    && q1b.map((i) => i.serviceDetailId).join() === q1.map((i) => i.serviceDetailId).join() && q1b.every((i) => i.skipCount === (q1.find((x) => x.serviceDetailId === i.serviceDetailId) || {}).skipCount), brief(callOne));
+  check('KTV Lab không gọi được ca của phòng CĐHA (403)', (await call('POST', `${CLIN}/service-details/${g2row.serviceDetailId}/call`, { token: T.lab })).status === 403);
   const sk = await call('POST', `${CLIN}/service-details/${g1rows[0].serviceDetailId}/skip`, { token: T.img });
   const q2 = (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
   check('Đẩy lùi 1 lần: cả hai dịch vụ của ca cùng bị lùi (skipCount = 1) và ca kế tiếp được gọi', q2.filter((i) => i.visitId === g1.v).every((i) => i.skipCount === 1) && sk.data?.visitId === g2.v, brief(sk));

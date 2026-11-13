@@ -59,6 +59,7 @@ public class VisitController {
     }
 
     /**
+     * (Không còn dùng trên giao diện — thay bằng {@code /{id}/call}; giữ lại cho tương thích API.)
      * Q4 "Đẩy lùi 1 bậc" (EX-10): gọi mà khách vắng. Ca giữ trạng thái, skip_count + 1, xếp ngay sau người kế tiếp; người kế tiếp
      * được gọi ngay và là dữ liệu trả về.
      */
@@ -66,6 +67,16 @@ public class VisitController {
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> skip(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success("Đã đẩy lùi 1 bậc, gọi người kế tiếp", doctorQueueService.skip(id)));
+    }
+
+    /**
+     * "Gọi" một ca bất kỳ trong hàng đợi của mình (khách vắng thì gọi ca khác, thứ tự giữ nguyên; khách quay lại thì gọi lại).
+     * Chỉ phát thông báo gọi số, không đổi trạng thái hay thứ tự. CLIN_1302 nếu đang khám dở, CLIN_1311 nếu ca không thuộc mình.
+     */
+    @PostMapping("/{id}/call")
+    @PreAuthorize("hasRole('VETERINARIAN')")
+    public ResponseEntity<ApiResponse<VisitResponse>> call(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Đã gọi bệnh nhân", doctorQueueService.call(id)));
     }
 
     /** Hàng đợi của chính Bác sĩ đang đăng nhập (ca WAITING và RESULTS_READY, ca có kết quả đứng đầu). */

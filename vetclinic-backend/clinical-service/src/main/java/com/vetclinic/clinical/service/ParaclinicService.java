@@ -36,6 +36,9 @@ public interface ParaclinicService {
      */
     QueueItemResponse skip(Long detailId);
 
+    /** "Gọi" một ca cụ thể trong hàng đợi phòng mình (không nhất thiết đứng đầu): chỉ phát thông báo, không đổi trạng thái hay thứ tự. */
+    QueueItemResponse call(Long detailId);
+
     /** Phòng Lab: ghi nhận đã lấy mẫu (action SAMPLE_COLLECTED, trạng thái vẫn IN_PROGRESS) để bên CĐHA thấy huy hiệu liên phòng. */
     ServiceDetailResponse sampleCollected(Long detailId);
 

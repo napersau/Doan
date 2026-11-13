@@ -61,6 +61,7 @@ function HistoryDialog({ visit, onClose }) {
 function VisitCell({ visit }) {
   return <>
     <strong>{visit.petName}</strong>{visit.emergency && visit.skipCount === 0 && <span className="ui-emergency"> · CẤP CỨU</span>}
+    {visit.emergency && visit.skipCount > 0 && <Badge tone="amber">Cấp cứu · đã mất ưu tiên</Badge>}
     {visit.skipCount > 0 && <Badge tone="amber">Đã bị lùi {visit.skipCount} lần</Badge>}
     <small>{visit.speciesName} · {visit.visitCode}</small>
   </>;

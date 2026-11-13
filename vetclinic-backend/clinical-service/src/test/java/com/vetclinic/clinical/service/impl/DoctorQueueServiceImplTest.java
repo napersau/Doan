@@ -279,4 +279,43 @@ class DoctorQueueServiceImplTest {
         assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.skip(3L));
         verify(visitRepository, never()).save(any());
     }
+
+    @Test
+    void call_aVisitInTheMiddle_onlyAnnounces_neverReordersNorChangesTheStatus() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        PetVisit a = queued(1L, VisitStatus.WAITING, 100L);
+        PetVisit c = queued(3L, VisitStatus.WAITING, 300L);
+        when(visitRepository.findById(3L)).thenReturn(Optional.of(c));
+
+        VisitResponse response = service.call(3L);   // khách đầu hàng vắng: gọi thẳng ca thứ ba
+
+        assertThat(response.id()).isEqualTo(3L);
+        assertThat(response.assignedRoom()).isEqualTo("P101");
+        assertThat(c.getStatus()).isEqualTo(VisitStatus.WAITING);
+        assertThat(c.getQueueOrder()).isEqualTo(300L);
+        assertThat(a.getQueueOrder()).isEqualTo(100L);
+        assertThat(c.getSkipCount()).isZero();   // không còn "bị lùi": gọi lại bao nhiêu lần cũng không mất ưu tiên
+        verify(visitRepository, never()).save(any());
+        List<PatientCalledEvent> calls = publishedCalls();
+        assertThat(calls).extracting(PatientCalledEvent::action).containsExactly("CALLED");
+        assertThat(calls.get(0).visitId()).isEqualTo(3L);
+    }
+
+    @Test
+    void call_isRefusedForOthersVisits_wrongStatus_whileExamining_andUnknownVisit() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        stubRoom("P101");
+        when(visitRepository.findById(1L)).thenReturn(Optional.of(visit(1L, VisitStatus.WAITING, OTHER_DOCTOR)));
+        when(visitRepository.findById(2L)).thenReturn(Optional.of(visit(2L, VisitStatus.IN_PROGRESS, DOCTOR)));
+        when(visitRepository.findById(3L)).thenReturn(Optional.of(queued(3L, VisitStatus.WAITING, 100L)));
+        when(visitRepository.findById(9L)).thenReturn(Optional.empty());
+        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
+
+        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.call(1L));
+        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.call(2L));
+        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.call(3L));
+        assertError(ErrorCode.VISIT_NOT_FOUND, () -> service.call(9L));
+        assertThat(publishedCalls()).isEmpty();
+    }
 }

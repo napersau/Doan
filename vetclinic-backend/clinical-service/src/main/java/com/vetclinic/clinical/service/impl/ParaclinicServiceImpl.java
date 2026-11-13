@@ -229,6 +229,23 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     }
 
     @Override
+    public QueueItemResponse call(Long detailId) {
+        Long actor = SecurityUtils.getCurrentUserId();
+        ServiceCategory category = readCommittedTemplate.execute(tx -> detailRepository.findById(detailId)
+                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND)).getService().getCategory());
+        requireParaclinical(category);
+        assertTechnicianOf(category);
+        String room = roomOf(actor);   // Feign NGOÀI transaction
+        return readCommittedTemplate.execute(tx -> {
+            VisitServiceDetail detail = detailRepository.findById(detailId)
+                    .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
+            requireDetailStatus(detail, ServiceDetailStatus.PENDING, "Chỉ gọi được chỉ định đang chờ trong hàng đợi (PENDING)");
+            publishCalled(detail, visitWithPet(detail.getVisitId()), CALLED, actor, room, category);   // không đổi trạng thái, không đổi thứ tự
+            return toItems(category, List.of(detail)).get(0);
+        });
+    }
+
+    @Override
     public QueueItemResponse skip(Long detailId) {
         Long actor = SecurityUtils.getCurrentUserId();
         // dịch vụ của chỉ định là LAZY: phải đọc nhóm dịch vụ TRONG transaction (đây là bước đọc nhanh trước khi gọi Feign lấy số phòng)
