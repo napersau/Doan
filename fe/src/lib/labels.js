@@ -75,7 +75,6 @@ export const ERROR_HINTS = {
   BILL_1409: 'Bác sĩ chưa chốt chuyên môn nên chưa thu tiền / bán thuốc được.',
   PHARM_1406: 'Kho không đủ thuốc để bán. Hãy sửa số lượng trong hóa đơn hoặc báo kho nhập thêm.',
   PHARM_1407: 'Đơn thuốc này đã lập hóa đơn thuốc rồi (mỗi đơn chỉ một hóa đơn).',
-  PHARM_1410: 'Số lượng mua vượt số lượng bác sĩ đã kê.',
   PHARM_1411: 'Đơn thuốc đã khóa (ca đã chốt hoặc đã có hóa đơn thuốc) nên không sửa được.',
   SYS_1005: 'Dữ liệu vừa được người khác thay đổi. Hãy tải lại rồi thao tác lại.',
 };

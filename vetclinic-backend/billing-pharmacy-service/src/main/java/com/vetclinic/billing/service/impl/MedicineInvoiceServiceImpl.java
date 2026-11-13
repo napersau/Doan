@@ -128,12 +128,12 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
             if (line.quantity() < 1) {
                 throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Số lượng mua phải lớn hơn 0");
             }
-            assertWithinPrescribed(item, line.quantity());
             Medicine medicine = item.getMedicine();
             if (!medicine.isActive()) {
                 throw new AppException(ErrorCode.MEDICINE_NOT_FOUND,
                         "Thuốc [" + medicine.getName() + "] đã ngừng kinh doanh, không thể bán");
             }
+            assertWithinStock(medicine, line.quantity());   // số lượng kê chỉ để tham khảo: mua nhiều / ít / bằng đều được, nhưng không vượt tồn kho
             invoice.addItem(MedicineInvoiceItem.builder().prescriptionItem(item).quantity(line.quantity())
                     .unitPrice(medicine.getSalePrice()).vatRate(medicine.getVatRate()).build());   // snapshot giá / VAT (BR-26)
         }
@@ -186,7 +186,7 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
             if (line.quantity() == 0) {
                 invoice.getItems().remove(item);   // quantity = 0: bỏ dòng khỏi hóa đơn
             } else {
-                assertWithinPrescribed(item.getPrescriptionItem(), line.quantity());
+                assertWithinStock(item.getPrescriptionItem().getMedicine(), line.quantity());
                 item.setQuantity(line.quantity());   // giữ nguyên snapshot unit_price / vat_rate
             }
         }
@@ -288,11 +288,15 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
         }
     }
 
-    private static void assertWithinPrescribed(PrescriptionItem item, int quantity) {
-        if (quantity > item.getQuantity()) {
-            throw new AppException(ErrorCode.PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED,
-                    "Số lượng mua thuốc [" + item.getMedicine().getName() + "] (" + quantity
-                            + ") vượt số lượng bác sĩ đã kê (" + item.getQuantity() + ")");
+    /**
+     * Số lượng bác sĩ kê chỉ để tham khảo (khách có thể mua nhiều hơn / ít hơn / bằng), nhưng không được bán quá tồn kho hiện tại.
+     * Kiểm tra sớm ở bước lập / sửa hóa đơn; lúc thu tiền vẫn kiểm tra lại bằng UPDATE nguyên tử (kho có thể đổi giữa hai bước, EX-15).
+     * Mức tồn tối thiểu ({@code min_stock_alert}) chỉ là ngưỡng cảnh báo cho Admin, không chặn bán.
+     */
+    private static void assertWithinStock(Medicine medicine, int quantity) {
+        if (quantity > medicine.getStockQuantity()) {
+            throw new AppException(ErrorCode.INSUFFICIENT_STOCK, "Không thể bán thuốc [" + medicine.getName() + "] với số lượng "
+                    + quantity + ": trong kho chỉ còn " + medicine.getStockQuantity() + " " + medicine.getUnit());
         }
     }
 

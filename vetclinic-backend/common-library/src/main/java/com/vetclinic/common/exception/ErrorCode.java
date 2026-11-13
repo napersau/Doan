@@ -85,7 +85,6 @@ public enum ErrorCode {
     PRESCRIPTION_ALREADY_INVOICED("PHARM_1407", "Đơn thuốc này đã được lập hóa đơn thuốc trước đó", HttpStatus.CONFLICT),
     INVOICE_ALREADY_CANCELLED("BILL_1408", "Hóa đơn này đã bị hủy", HttpStatus.CONFLICT),
     VISIT_NOT_READY_FOR_PAYMENT("BILL_1409", "Đợt khám chưa được Bác sĩ chốt chuyên môn", HttpStatus.BAD_REQUEST),
-    PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED("PHARM_1410", "Số lượng mua không được vượt quá số lượng Bác sĩ đã kê", HttpStatus.BAD_REQUEST),
     PRESCRIPTION_LOCKED("PHARM_1411", "Đơn thuốc đã khóa (đợt khám đã chốt hoặc đơn đã được bán), không thể chỉnh sửa", HttpStatus.CONFLICT),
     // Mã chỉ có trong code (không có trong Quy chuẩn §5.1), giữ nguyên số đã dùng
     INVALID_STOCK_ADJUSTMENT("PHARM_1412", "Điều chỉnh làm tồn kho âm, không thể thực hiện", HttpStatus.BAD_REQUEST),

@@ -12,6 +12,8 @@ public record PrescriptionItemResponse(
         String dosage,
         String frequency,
         int durationDays,
-        String instructions
+        String instructions,
+        int stockQuantity,    // tồn kho hiện tại (để lễ tân thấy khi bán; không dùng để chặn kê đơn)
+        int minStockAlert     // ngưỡng tồn tối thiểu: dưới mức này hệ thống cảnh báo Admin
 ) {
 }

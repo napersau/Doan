@@ -1138,7 +1138,7 @@ Visit
 
 **Hóa đơn thuốc (`medicine_invoices` + `medicine_invoice_items`, thuộc `billing-pharmacy-service`) lưu:**
 - Mã hóa đơn (`MINV-YYYY-XXXX`), đơn thuốc tương ứng (tối đa 1 hóa đơn / đơn thuốc).
-- Từng thuốc khách mua: số lượng (≤ số lượng kê), đơn giá và thuế suất snapshot lúc lập hóa đơn.
+- Từng thuốc khách mua: số lượng (số kê chỉ tham khảo; không vượt tồn kho), đơn giá và thuế suất snapshot lúc lập hóa đơn.
 - Giảm giá, trạng thái thanh toán, thu ngân, thời điểm thanh toán.
 
 **Không lưu:** tổng tiền dịch vụ, tổng tiền thuốc, tổng phải thanh toán (tính được, xem mục 28) và **phương thức thanh toán** (khách trả ngoài quầy, hệ thống không tích hợp VietQR / máy POS trong phạm vi đồ án).
@@ -1173,7 +1173,7 @@ Khách hàng **không bắt buộc** mua thuốc tại phòng khám.
             └── Khách mua tại phòng khám
                    │
                    ↓
-            Chọn thuốc & số lượng (được mua một phần, ≤ số lượng kê)
+            Chọn thuốc & số lượng (nhiều / ít / bằng số kê, ≤ tồn kho)
                    ↓
             Lập hóa đơn thuốc (PENDING, chốt đơn giá & thuế suất)
                    ↓
@@ -1390,7 +1390,7 @@ Hóa đơn `CANCELLED` không tính vào doanh thu. Số tiền tính qua `v_ser
 - **BR-29:** Thuốc chỉ bị trừ tồn kho khi hóa đơn thuốc được xác nhận thanh toán; chuyển `PAID`, trừ kho và ghi nhật ký `EXPORT_SALE` diễn ra trong cùng một giao dịch.
 - **BR-30:** Không được bán (xuất kho) vượt quá số lượng tồn kho tại thời điểm xác nhận; khi kê đơn, số lượng vượt tồn kho chỉ bị cảnh báo.
 - **BR-31:** Mỗi đơn thuốc có tối đa một hóa đơn thuốc; hóa đơn thuốc đã thanh toán không được xác nhận lại, nên một đơn thuốc không bị trừ kho nhiều hơn một lần.
-- **BR-32:** Khách hàng được tự chọn mua thuốc tại phòng khám hoặc mua ngoài theo đơn in; được mua một phần đơn với số lượng mỗi thuốc không vượt số lượng kê.
+- **BR-32:** Khách hàng được tự chọn mua thuốc tại phòng khám hoặc mua ngoài theo đơn in; được mua nhiều hơn, ít hơn hoặc bằng số lượng kê (số kê chỉ để tham khảo), nhưng không vượt tồn kho hiện tại.
 
 ---
 
@@ -1688,3 +1688,4 @@ USER
 | Mục 40 (rà soát 10/11) | BR-32 nằm trước BR-29 | Xếp lại theo thứ tự số | Trình bày |
 | Mục 2, 4, 5.3, 8, 9, 10, 11, 12, 15, 16, 17, 17.1, 17.2, 17.3, 42.2, 41 (rà soát 11/11) | Một hàng đợi chung ở sảnh; Lễ tân chỉ phân công khi bác sĩ rảnh, phân xong bác sĩ thành `BUSY`; Khóa ưu tiên chặn Lễ tân; phòng CLS "Tạm hoãn" sang tab riêng rồi "Recall" ghim "Ưu tiên kế tiếp"; GĐ 2 hoãn ngược `IN_PROGRESS → RESULTS_READY` | Mỗi bác sĩ có hàng đợi riêng, Lễ tân xếp ca ngay khi tiếp nhận (gợi ý bác sĩ ít người chờ); bác sĩ / KTV "Gọi số tiếp theo"; gọi không thấy thì "Đẩy lùi 1 bậc"; ca có kết quả tự lên đầu hàng đợi bác sĩ; trạng thái bác sĩ còn `AVAILABLE` / `BUSY`; sửa BR-11, BR-12, thêm BR-34 | Lễ tân không phải chờ bác sĩ rảnh; một cơ chế hàng đợi cho phòng khám, Xét nghiệm, CĐHA |
 | Mục 3, 5.3, 8, 9, 15, 17, BR-09, BR-12, BR-34 (cập nhật 13/11) | "Gọi số tiếp theo" + "Đẩy lùi 1 bậc" (ca vắng xuống ngay sau người kế tiếp, đếm số lần lùi, ca cấp cứu bị lùi mất ưu tiên); mỗi dịch vụ CLS là một dòng hàng đợi | "Gọi" theo từng dòng (không đổi thứ tự), khách vắng thì gọi ca khác, khách quay lại thì gọi lại; ca cấp cứu luôn giữ ưu tiên; dịch vụ cùng đợt khám, cùng phòng gộp thành một ca | Đẩy lùi 1 bậc làm hai ca đầu hàng đổi chỗ mãi mãi (ca thứ 3, 4 không được gọi); gọi theo từng dòng giống thực tế phòng khám |
+| Mục bán thuốc, BR-32 (cập nhật 13/11) | Số lượng mua mỗi thuốc không vượt số lượng bác sĩ kê | Số kê chỉ tham khảo; mua nhiều hơn / ít hơn / bằng, không vượt tồn kho; màn hình bán thuốc hiện tồn kho | Khách thực tế có thể cần khác đơn; ràng buộc đúng là tồn kho |

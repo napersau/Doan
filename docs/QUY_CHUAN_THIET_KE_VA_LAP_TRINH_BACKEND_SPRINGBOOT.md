@@ -315,7 +315,6 @@ public enum ErrorCode {
     MEDICINE_NOT_FOUND("PHARM_1405", "Không tìm thấy thuốc trong danh mục kho", HttpStatus.NOT_FOUND),
     INSUFFICIENT_STOCK("PHARM_1406", "Số lượng tồn kho không đủ để bán", HttpStatus.CONFLICT),
     PRESCRIPTION_ALREADY_INVOICED("PHARM_1407", "Đơn thuốc này đã được lập hóa đơn thuốc trước đó", HttpStatus.CONFLICT),
-    PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED("PHARM_1410", "Số lượng mua không được vượt quá số lượng Bác sĩ đã kê", HttpStatus.BAD_REQUEST),
     PRESCRIPTION_LOCKED("PHARM_1411", "Đơn thuốc đã khóa (đợt khám đã chốt hoặc đơn đã được bán), không thể chỉnh sửa", HttpStatus.CONFLICT);
 
     private final String code;
@@ -573,7 +572,7 @@ public interface MedicineRepository extends JpaRepository<Medicine, Long> {
 
 ### 8.2. Mẫu chuẩn: Bán thuốc theo đơn & Trừ kho (`billing-pharmacy-service`)
 Quy trình gồm 2 bước chính và 1 thao tác sửa (UC-36):
-1. **Lập hóa đơn thuốc** (`PENDING`): khách chọn thuốc và số lượng (≤ số lượng kê), snapshot `unitPrice = medicines.sale_price`, `vatRate = medicines.vat_rate`.
+1. **Lập hóa đơn thuốc** (`PENDING`): khách chọn thuốc và số lượng (số lượng kê chỉ để tham khảo; không vượt tồn kho), snapshot `unitPrice = medicines.sale_price`, `vatRate = medicines.vat_rate`.
    - **Sửa hóa đơn thuốc** khi còn `PENDING` (khách bớt thuốc, hoặc sau EX-15): cập nhật / xóa dòng, giữ snapshot giá đã chốt, kiểm tra lại giảm giá. Không lập hóa đơn mới vì `prescription_id UNIQUE`; hóa đơn đã hủy là kết thúc.
 2. **Xác nhận thanh toán & xuất thuốc:** trong **một giao dịch**: trừ kho có điều kiện → ghi `inventory_transactions` (`EXPORT_SALE`, `quantity` âm) → hóa đơn `PAID`. Thiếu kho ở bất kỳ dòng nào thì rollback toàn bộ (EX-15).
 
@@ -647,10 +646,10 @@ public class MedicineSaleServiceImpl implements MedicineSaleService {
         for (var line : request.items()) {                                            // khách được mua một phần đơn
             PrescriptionItem pi = prescribed.get(line.prescriptionItemId());
             if (pi == null) throw new AppException(ErrorCode.INVALID_INPUT_DATA);
-            if (line.quantity() > pi.getQuantity()) {
-                throw new AppException(ErrorCode.PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED);
-            }
             Medicine med = pi.getMedicine();
+            if (line.quantity() > med.getStockQuantity()) {                           // số kê chỉ tham khảo; chỉ chặn khi vượt tồn kho
+                throw new AppException(ErrorCode.INSUFFICIENT_STOCK);
+            }
             invoice.addItem(MedicineInvoiceItem.builder()
                     .prescriptionItem(pi)
                     .quantity(line.quantity())
@@ -685,8 +684,8 @@ public class MedicineSaleServiceImpl implements MedicineSaleService {
             int qty = entry.getValue();
             if (qty == 0) {
                 invoice.removeItem(item);                                             // orphanRemoval = true
-            } else if (qty < 0 || qty > item.getPrescriptionItem().getQuantity()) {
-                throw new AppException(ErrorCode.PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED);
+            } else if (qty < 0 || qty > item.getPrescriptionItem().getMedicine().getStockQuantity()) {
+                throw new AppException(ErrorCode.INSUFFICIENT_STOCK);                 // không bán quá tồn kho
             } else {
                 item.setQuantity(qty);                                                // giữ unitPrice, vatRate
             }
@@ -1860,3 +1859,4 @@ public class AppointmentNoShowScheduler {
 | Tổng kết (rà soát 10/11) | "Sprint 1 - Tuần 8" | Sprint 1 - Tuần 9 | Khớp Kế hoạch |
 | 3.2, 5.1, 11.2 (rà soát 11/11) | `findWaitingQueue()` hàng đợi sảnh chung; `CLIN_1303 DOCTOR_PRIORITY_LOCKED`; không có API gọi số / đẩy lùi | Hàng đợi riêng từng Bác sĩ: `findDoctorQueue`, `findUnassigned`, `countWaitingByDoctor`; `DoctorQueueServiceImpl` (`callNext`, `skip`), `QueueOrders`; `CLIN_1303 QUEUE_EMPTY` (vẫn 39 mã); thêm `GET …/queue`, `…/my-queue`, `POST …/call-next`, `…/{id}/skip`, `service-details/{id}/skip` | Mô hình hàng đợi riêng + Đẩy lùi 1 bậc |
 | 3.2, 6b (cập nhật 13/11) | `POST …/{id}/skip`, `service-details/{id}/skip`; mã mẫu `skip` (Đẩy lùi 1 bậc) và ghi chú về `rest` | `POST …/{id}/call`, `service-details/{id}/call`; mã mẫu `call` (không đổi trạng thái/thứ tự); ghi chú vì sao bỏ đẩy lùi | Đẩy lùi 1 bậc làm hai ca đầu hàng đổi chỗ mãi mãi và làm ca cấp cứu mất ưu tiên; gọi theo từng dòng giống thực tế phòng khám |
+| 5.1, 8.2 (cập nhật 13/11) | `PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED` (`PHARM_1410`): mua ≤ số lượng kê; mã mẫu `createInvoice` / `updateItems` chặn theo số kê | Bỏ mã `PHARM_1410` (còn 38 mã); mã mẫu chặn theo tồn kho bằng `INSUFFICIENT_STOCK` (`PHARM_1406`); số kê chỉ để tham khảo | Khách có thể mua nhiều hơn / ít hơn đơn; ràng buộc đúng là tồn kho (kiểm tra sớm, và kiểm tra lại nguyên tử lúc thu tiền) |

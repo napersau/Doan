@@ -361,7 +361,7 @@ erDiagram
         bigint id PK "Khóa chính, tự tăng"
         bigint medicine_invoice_id FK "Hóa đơn thuốc chứa dòng này"
         bigint prescription_item_id FK "Dòng thuốc trong đơn được mua"
-        int quantity "Số lượng khách mua (≤ số kê)"
+        int quantity "Số lượng khách mua (số kê chỉ tham khảo; ≤ tồn kho lúc lập)"
         decimal(12,2) unit_price "Giá bán chốt lúc lập hóa đơn"
         decimal(4,2) vat_rate "Thuế suất chốt lúc lập hóa đơn"
     }
@@ -716,7 +716,7 @@ erDiagram
 | `id` | BIGINT | PK, AUTO_INCREMENT | Khóa chính, tự tăng |
 | `medicine_invoice_id` | BIGINT | FK → medicine_invoices(id), ON DELETE CASCADE, NOT NULL | Hóa đơn thuốc chứa dòng này |
 | `prescription_item_id` | BIGINT | FK → prescription_items(id), NOT NULL | Dòng thuốc trong đơn được mua |
-| `quantity` | INT | NOT NULL | Số lượng khách mua (≤ số kê) |
+| `quantity` | INT | NOT NULL | Số lượng khách mua; có thể khác số bác sĩ kê (chỉ tham khảo), nhưng ≤ tồn kho lúc lập / sửa hóa đơn |
 | `unit_price` | DECIMAL(12, 2) | NOT NULL | Giá bán chốt lúc lập hóa đơn |
 | `vat_rate` | DECIMAL(4, 2) | NOT NULL | Thuế suất chốt lúc lập hóa đơn |
 

@@ -29,6 +29,7 @@ async function call(method, url, { token, body, form } = {}) {
   try { json = text ? JSON.parse(text) : {}; } catch { json = { message: text }; }
   return { status: response.status, code: json.errorCode, data: json.data, message: json.message };
 }
+const brief = (res) => `${res.status}${res.code ? `/${res.code}` : ''} ${String(res.message || '').slice(0, 120)}`;
 const CLIN = '/api/v1/clinical';
 const PHARM = '/api/v1/pharmacy';
 const BILL = '/api/v1/billing';
@@ -118,11 +119,14 @@ async function main() {
   const rx2 = await call('POST', `${PHARM}/prescriptions`, { token: T.doc3, body: rx(v2, 4, 10) });   // Drontal tồn 100
   await close(T.doc3, v2);
   const stock4 = await stockOf(4);
-  await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: 4, delta: -(stock4 - 5), reason: 'e2e đưa tồn về 5' } });
   const mi2 = await call('POST', `${PHARM}/prescriptions/${rx2.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx2.data.items[0].id, quantity: 10 }] } });
+  // kho giảm giữa lúc lập hóa đơn và lúc thu tiền (bán chỗ khác, kiểm kê...): lúc lập còn đủ nên được lập, lúc thu mới thiếu
+  await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: 4, delta: -(stock4 - 5), reason: 'e2e đưa tồn về 5' } });
   const lack = await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec });
   check('EX-15: thiếu kho → 409 PHARM_1406', lack.status === 409 && lack.code === 'PHARM_1406');
   check('EX-15: tồn vẫn 5, không có dòng EXPORT_SALE, hóa đơn vẫn PENDING', (await stockOf(4)) === 5 && sql(`SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_invoice_id=${mi2.data.id}`) === '0' && (await call('GET', `${BILL}/medicine-invoices/${mi2.data.id}`, { token: T.rec })).data.paymentStatus === 'PENDING');
+  const tooMuch = await call('PUT', `${BILL}/medicine-invoices/${mi2.data.id}/items`, { token: T.rec, body: { items: [{ prescriptionItemId: rx2.data.items[0].id, quantity: 6 }] } });
+  check('sửa hóa đơn: không bán quá tồn kho (kho còn 5, sửa lên 6 → 409 PHARM_1406)', tooMuch.status === 409 && tooMuch.code === 'PHARM_1406', brief(tooMuch));
   await call('PUT', `${BILL}/medicine-invoices/${mi2.data.id}/items`, { token: T.rec, body: { items: [{ prescriptionItemId: rx2.data.items[0].id, quantity: 5 }] } });
   check('EX-15: sửa về 5 viên rồi thu lại → PAID, tồn 0', (await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec })).status === 200 && (await stockOf(4)) === 0);
   check('EX-16: thu lần hai → 409 BILL_1403', (await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec })).code === 'BILL_1403');
@@ -133,11 +137,16 @@ async function main() {
   await call('POST', `${CLIN}/pet-visits/call-next`, { token: T.doc3 }); await startExam(T.doc3, v3);
   const rx3 = await call('POST', `${PHARM}/prescriptions`, { token: T.doc3, body: rx(v3, 4, 10) });
   await close(T.doc3, v3);
-  const mi3 = await call('POST', `${PHARM}/prescriptions/${rx3.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx3.data.items[0].id, quantity: 10 }] } });
+  const stockNow = await stockOf(4);
+  const overStock = await call('POST', `${PHARM}/prescriptions/${rx3.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx3.data.items[0].id, quantity: stockNow + 1 }] } });
+  check('lập hóa đơn: không bán quá tồn kho (409 PHARM_1406)', overStock.status === 409 && overStock.code === 'PHARM_1406', brief(overStock));
+  const mi3 = await call('POST', `${PHARM}/prescriptions/${rx3.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx3.data.items[0].id, quantity: 12 }] } });
+  check('số lượng bác sĩ kê chỉ để tham khảo: kê 10, khách mua 12 (≤ tồn) vẫn lập được', mi3.status === 201 && mi3.data.items[0].quantity === 12 && mi3.data.items[0].prescribedQuantity === 10, brief(mi3));
+  check('hóa đơn trả kèm tồn kho hiện tại để màn hình bán thuốc hiển thị', mi3.data.items[0].stockQuantity === stockNow, brief(mi3));
   const before = await stockOf(4);
   const race = await Promise.all([1, 2, 3, 4, 5].map(() => call('POST', `${BILL}/medicine-invoices/${mi3.data.id}/confirm-payment`, { token: T.rec })));
   check('EX-16 đồng thời: đúng 1/5 yêu cầu thu được, 4 bị từ chối 409', race.filter((r) => r.status === 200).length === 1 && race.filter((r) => r.status === 409).length === 4, race.map((r) => r.status).join(','));
-  check('EX-16 đồng thời: kho chỉ trừ đúng một lần', (await stockOf(4)) === before - 10);
+  check('EX-16 đồng thời: kho chỉ trừ đúng một lần', (await stockOf(4)) === before - 12);
   check('bất biến kho giữ nguyên sau EX-15/16 (thuốc #4)', sql(`SELECT (SELECT SUM(quantity) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_id=4) - stock_quantity FROM pet_clinic_billing_pharmacy_db.medicines WHERE id=4`) === '0');
 
   step('C. Đua RESULTS_READY: hai KTV hoàn tất cùng lúc (không kẹt WAITING_RESULTS)');

@@ -294,7 +294,7 @@
   - **Vũ Hồng Linh:**
     * Cắt và ghép API các màn hình tài chính & dược:
       - Màn hình Thu ngân – Hóa đơn dịch vụ: Bảng kê từng hóa đơn dịch vụ, giảm giá từng hóa đơn, xác nhận thanh toán, in phiếu thu, danh sách công nợ.
-      - Màn hình Bán thuốc theo đơn: Chọn thuốc / số lượng khách mua (≤ số lượng kê), lập hóa đơn thuốc, xác nhận thanh toán & xuất thuốc, in đơn cho khách mua ngoài.
+      - Màn hình Bán thuốc theo đơn: Chọn thuốc / số lượng khách mua (số kê chỉ tham khảo; không vượt tồn kho), lập hóa đơn thuốc, xác nhận thanh toán & xuất thuốc, in đơn cho khách mua ngoài.
       - Màn hình Quản trị kho dược (Admin): Danh sách thuốc, nhập kho, kiểm kê tồn kho, cảnh báo thuốc sắp hết.
       - Tích hợp WebSocket client: Nhận chuông và popup thông báo thời gian thực.
 - **Kết quả đầu ra (Milestone 4 - Ngày 08/11/2026):**

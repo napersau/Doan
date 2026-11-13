@@ -456,7 +456,7 @@ flowchart TD
         C_CHECK_BILL["Kiểm tra bảng kê các hóa đơn dịch vụ"]
         C_MAKE_PAYMENT["Thanh toán bên ngoài quầy\n(tiền mặt hoặc chuyển khoản)"]
         C_DECIDE_BUY{"Mua thuốc tại\nphòng khám?"}
-        C_CHOOSE_ITEMS["Chọn thuốc & số lượng muốn mua\n(được mua một phần đơn)"]
+        C_CHOOSE_ITEMS["Chọn thuốc & số lượng muốn mua\n(nhiều / ít / bằng số kê, không quá tồn kho)"]
         C_PAY_MED["Thanh toán tiền thuốc"]
         C_RECEIVE["Nhận thuốc, phiếu hướng dẫn & ra về"]
         C_OUTSIDE["Nhận đơn thuốc in, ra về mua ngoài"]

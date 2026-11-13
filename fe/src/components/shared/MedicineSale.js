@@ -10,6 +10,18 @@ import { PAYMENT_STATUS } from '../../lib/labels';
 
 const SELLABLE = ['WAITING_PAYMENT', 'COMPLETED'];
 
+/** Tồn kho của một dòng thuốc kèm cảnh báo: hết hàng / còn dưới mức tối thiểu / số mua vượt tồn. */
+function StockCell({ stock, minStock, quantity }) {
+  const qty = Number(quantity);
+  const over = Number.isFinite(qty) && qty > stock;
+  const remaining = Number.isFinite(qty) && qty >= 0 ? stock - qty : stock;
+  return <>
+    <strong style={{ color: stock === 0 ? 'var(--ui-danger, #f87171)' : undefined }}>{stock === 0 ? 'Hết hàng' : stock}</strong>
+    {over && <small style={{ color: 'var(--ui-danger, #f87171)' }}>Vượt tồn kho (tối đa {stock})</small>}
+    {!over && stock > 0 && remaining < minStock && <small style={{ color: 'var(--ui-warning, #fbbf24)' }}>Sau khi bán còn {remaining}, dưới mức tối thiểu {minStock}</small>}
+  </>;
+}
+
 /** In đơn cho khách mua thuốc ngoài (BR-32): không tạo hóa đơn, không đổi gì trong hệ thống. */
 function PrintDialog({ prescriptionId, onClose }) {
   const printable = useAsync(() => pharmacyApi.printPrescription(prescriptionId), [prescriptionId]);
@@ -40,6 +52,8 @@ function InvoiceEditor({ invoiceId, onChanged }) {
   const save = async () => {
     const items = data.items.map((item) => ({ prescriptionItemId: item.prescriptionItemId, quantity: Number(quantities[item.prescriptionItemId]) }));
     if (items.some((line) => !Number.isInteger(line.quantity) || line.quantity < 0)) { action.setNotice({ type: 'error', text: 'Số lượng phải là số nguyên không âm (0 = bỏ dòng khỏi hóa đơn).' }); return; }
+    const tooMany = data.items.find((item) => Number(quantities[item.prescriptionItemId]) > item.stockQuantity);
+    if (tooMany) { action.setNotice({ type: 'error', text: `Thuốc ${tooMany.medicineName} chỉ còn ${tooMany.stockQuantity} ${tooMany.unit} trong kho, không bán quá số này.` }); return; }
     if (await action.run(() => billingApi.updateMedicineInvoiceItems(invoiceId, { items, discountAmount: Number(discount) || 0 }), 'Đã cập nhật hóa đơn thuốc.')) reload();
   };
 
@@ -52,13 +66,14 @@ function InvoiceEditor({ invoiceId, onChanged }) {
       <Table caption="Thuốc trong hóa đơn" rowKey="id" rows={inv.items} columns={[
         { title: 'Thuốc', render: (row) => <><strong>{row.medicineName}</strong><small>{row.medicineCode}</small></> },
         { title: 'Số lượng mua', render: (row) => (pending
-          ? <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Input type="number" min="0" max={row.prescribedQuantity} aria-label={`Số lượng ${row.medicineName}`} style={{ maxWidth: 90 }} value={quantities[row.prescriptionItemId] ?? ''} onChange={(event) => setQuantities({ ...quantities, [row.prescriptionItemId]: event.target.value })} /><span className="ui-muted">/ {row.prescribedQuantity} {row.unit} đã kê</span></div>
-          : `${row.quantity} / ${row.prescribedQuantity} ${row.unit}`) },
+          ? <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Input type="number" min="0" max={row.stockQuantity} aria-label={`Số lượng ${row.medicineName}`} style={{ maxWidth: 90 }} value={quantities[row.prescriptionItemId] ?? ''} onChange={(event) => setQuantities({ ...quantities, [row.prescriptionItemId]: event.target.value })} /><span className="ui-muted">{row.unit} · bác sĩ kê {row.prescribedQuantity}</span></div>
+          : `${row.quantity} ${row.unit} (bác sĩ kê ${row.prescribedQuantity})`) },
+        ...(pending ? [{ title: 'Tồn kho', render: (row) => <StockCell stock={row.stockQuantity} minStock={row.minStockAlert} quantity={quantities[row.prescriptionItemId]} /> }] : []),
         { title: 'Đơn giá (đã chốt)', align: 'right', render: (row) => <>{formatMoney(row.unitPrice)}<small>VAT {Math.round(Number(row.vatRate) * 100)}%</small></> },
         { title: 'Thành tiền', align: 'right', render: (row) => formatMoney(Number(row.amountBeforeVat) + Number(row.vatAmount)) }]} />
       {pending && <>
         <Field label="Giảm giá (VND)" hint="Không vượt quá tổng tiền thuốc của hóa đơn này."><Input type="number" min="0" step="1000" style={{ maxWidth: 200 }} value={discount} onChange={(event) => setDiscount(event.target.value)} /></Field>
-        <p className="ui-muted" style={{ margin: 0 }}>Nếu kho không đủ thuốc: sửa số lượng (0 để bỏ dòng) rồi thu lại — cả hóa đơn chỉ được thu khi đủ kho cho mọi dòng.</p>
+        <p className="ui-muted" style={{ margin: 0 }}>Số lượng bác sĩ kê chỉ để tham khảo: khách có thể mua nhiều hơn, ít hơn hoặc bằng, nhưng không quá tồn kho. Nếu kho vừa thay đổi và không đủ: sửa số lượng (0 để bỏ dòng) rồi thu lại.</p>
         <div className="ui-actions ui-no-print">
           <Button variant="primary" onClick={() => setDialog('pay')}>Thu tiền thuốc</Button>
           <Button busy={action.busy} onClick={save}>Lưu thay đổi</Button>
@@ -73,26 +88,44 @@ function InvoiceEditor({ invoiceId, onChanged }) {
   }}</AsyncView>;
 }
 
-/** Lập hóa đơn thuốc từ đơn: khách chọn mua một phần hoặc toàn bộ (mua ngoài thì chỉ in đơn). */
+/**
+ * Lập hóa đơn thuốc từ đơn: số lượng bác sĩ kê chỉ để THAM KHẢO. Khách mua nhiều hơn / ít hơn / bằng đều được, nhưng không quá tồn kho
+ * (mua ngoài thì chỉ in đơn). Mức tồn tối thiểu chỉ cảnh báo, không chặn bán.
+ */
 function CreateInvoice({ prescription, visitStatus, onCreated }) {  // onCreated(text) chạy sau khi lập xong
-  const [picked, setPicked] = useState(() => Object.fromEntries(prescription.items.map((item) => [item.id, { checked: true, quantity: String(item.quantity) }])));
+  const [picked, setPicked] = useState(() => Object.fromEntries(prescription.items.map((item) => [item.id,
+    { checked: item.stockQuantity > 0, quantity: String(Math.min(item.quantity, item.stockQuantity)) }])));
   const [discount, setDiscount] = useState('0');
   const action = useAction();
   const create = async () => {
-    const items = prescription.items.filter((item) => picked[item.id]?.checked).map((item) => ({ prescriptionItemId: item.id, quantity: Number(picked[item.id].quantity) }));
+    const chosen = prescription.items.filter((item) => picked[item.id]?.checked);
+    const items = chosen.map((item) => ({ prescriptionItemId: item.id, quantity: Number(picked[item.id].quantity) }));
     if (!items.length) { action.setNotice({ type: 'error', text: 'Chọn ít nhất một thuốc khách mua tại phòng khám.' }); return; }
     if (items.some((line) => !Number.isInteger(line.quantity) || line.quantity < 1)) { action.setNotice({ type: 'error', text: 'Số lượng mua phải là số nguyên dương.' }); return; }
+    const tooMany = chosen.find((item) => Number(picked[item.id].quantity) > item.stockQuantity);
+    if (tooMany) { action.setNotice({ type: 'error', text: `Thuốc ${tooMany.medicineName} chỉ còn ${tooMany.stockQuantity} ${tooMany.unit} trong kho, không bán quá số này.` }); return; }
     if (await action.run(() => pharmacyApi.createMedicineInvoice(prescription.id, { items, discountAmount: Number(discount) || 0 }))) onCreated('Đã lập hóa đơn thuốc. Thu tiền thuốc để trừ kho.');
   };
   const set = (id, patch) => setPicked({ ...picked, [id]: { ...picked[id], ...patch } });
   return <div className="ui-stack" style={{ gap: 12 }}>
     <Notice notice={action.notice} onClose={action.clear} />
     {!SELLABLE.includes(visitStatus) && <div className="ui-alert warning" role="status"><span>Bác sĩ chưa chốt ca nên chưa lập hóa đơn thuốc được.</span></div>}
-    <p className="ui-muted" style={{ margin: 0 }}>Khách có thể mua một phần đơn tại phòng khám hoặc mua ngoài. Giá và VAT được chốt theo danh mục lúc lập hóa đơn.</p>
-    {prescription.items.map((item) => <div key={item.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 160px', gap: 12, alignItems: 'center' }}>
-      <label className="ui-check"><input type="checkbox" checked={Boolean(picked[item.id]?.checked)} onChange={() => set(item.id, { checked: !picked[item.id]?.checked })} /><span><strong>{item.medicineName}</strong> <small className="ui-muted">đã kê {item.quantity} {item.unit}</small></span></label>
-      <Input type="number" min="1" max={item.quantity} aria-label={`Số lượng mua ${item.medicineName}`} disabled={!picked[item.id]?.checked} value={picked[item.id]?.quantity ?? ''} onChange={(event) => set(item.id, { quantity: event.target.value })} />
-    </div>)}
+    <p className="ui-muted" style={{ margin: 0 }}>Số lượng bác sĩ kê chỉ để tham khảo: khách có thể mua nhiều hơn, ít hơn hoặc bằng, nhưng không quá tồn kho. Giá và VAT được chốt theo danh mục lúc lập hóa đơn; mua ngoài thì in đơn.</p>
+    <div className="ui-table-scroll"><table className="ui-table">
+      <caption className="ui-sr-only">Chọn thuốc khách mua tại phòng khám</caption>
+      <thead><tr><th>Mua</th><th>Thuốc</th><th>Bác sĩ kê</th><th>Tồn kho</th><th>Số lượng mua</th></tr></thead>
+      <tbody>{prescription.items.map((item) => {
+        const soldOut = item.stockQuantity === 0;
+        return <tr key={item.id}>
+          <td><input type="checkbox" aria-label={`Mua ${item.medicineName}`} disabled={soldOut} checked={Boolean(picked[item.id]?.checked)} onChange={() => set(item.id, { checked: !picked[item.id]?.checked })} /></td>
+          <td><strong>{item.medicineName}</strong>{item.activeIngredient && <small>{item.activeIngredient}</small>}</td>
+          <td>{item.quantity} {item.unit}</td>
+          <td><StockCell stock={item.stockQuantity} minStock={item.minStockAlert} quantity={picked[item.id]?.checked ? picked[item.id]?.quantity : 0} /></td>
+          <td style={{ maxWidth: 150 }}>{soldOut ? <span className="ui-muted">Khách mua ngoài</span>
+            : <Input type="number" min="1" max={item.stockQuantity} aria-label={`Số lượng mua ${item.medicineName}`} disabled={!picked[item.id]?.checked} value={picked[item.id]?.quantity ?? ''} onChange={(event) => set(item.id, { quantity: event.target.value })} />}</td>
+        </tr>;
+      })}</tbody>
+    </table></div>
     <Field label="Giảm giá (VND)"><Input type="number" min="0" step="1000" style={{ maxWidth: 200 }} value={discount} onChange={(event) => setDiscount(event.target.value)} /></Field>
     <div className="ui-actions"><Button variant="primary" disabled={!SELLABLE.includes(visitStatus)} busy={action.busy} onClick={create}>Lập hóa đơn thuốc</Button></div>
   </div>;

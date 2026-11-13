@@ -60,7 +60,8 @@ public class BillingAssembler {
         Medicine medicine = item.getMedicine();
         return new PrescriptionItemResponse(item.getId(), medicine.getId(), medicine.getCode(), medicine.getName(),
                 medicine.getActiveIngredient(), medicine.getUnit(), item.getQuantity(), item.getDosage(),
-                item.getFrequency(), item.getDurationDays(), item.getInstructions());
+                item.getFrequency(), item.getDurationDays(), item.getInstructions(), medicine.getStockQuantity(),
+                medicine.getMinStockAlert());
     }
 
     // ------------------------------------------------------------------ hóa đơn thuốc
@@ -91,7 +92,8 @@ public class BillingAssembler {
         return new MedicineInvoiceItemResponse(item.getId(), prescribed.getId(), medicine.getId(), medicine.getCode(),
                 medicine.getName(), medicine.getUnit(), item.getQuantity(), prescribed.getQuantity(), item.getUnitPrice(),
                 item.getVatRate(), MedicineInvoiceAmounts.money(base),
-                MedicineInvoiceAmounts.money(base.multiply(item.getVatRate())));
+                MedicineInvoiceAmounts.money(base.multiply(item.getVatRate())), medicine.getStockQuantity(),
+                medicine.getMinStockAlert());
     }
 
     // ------------------------------------------------------------------ kho

@@ -11,7 +11,7 @@ public interface MedicineInvoiceService {
 
     /**
      * Lập hóa đơn thuốc cho một đơn (khách có thể mua một phần). Đợt khám phải đang WAITING_PAYMENT / COMPLETED (BILL_1409);
-     * mỗi đơn chỉ được một hóa đơn thuốc, kể cả hóa đơn đã hủy (PHARM_1407); số lượng mua ≤ số lượng kê (PHARM_1410);
+     * mỗi đơn chỉ được một hóa đơn thuốc, kể cả hóa đơn đã hủy (PHARM_1407); số lượng bác sĩ kê chỉ để tham khảo, khách mua nhiều / ít / bằng đều được nhưng không vượt tồn kho (PHARM_1406);
      * snapshot giá bán và VAT hiện hành; giảm giá ≤ tổng tiền thuốc (BILL_1402). Trạng thái PENDING, mã MINV-YYYY-XXXX.
      */
     MedicineInvoiceResponse create(Long prescriptionId, MedicineInvoiceRequest request);
@@ -19,8 +19,8 @@ public interface MedicineInvoiceService {
     MedicineInvoiceResponse getById(Long id);
 
     /**
-     * Sửa hóa đơn khi còn PENDING (BILL_1403 nếu đã thu, BILL_1408 nếu đã hủy): quantity = 0 bỏ dòng, quantity ≤ số lượng kê
-     * (PHARM_1410), còn ít nhất một dòng, giữ nguyên snapshot giá, kiểm tra lại giảm giá (BILL_1402). Dùng để xử lý EX-15.
+     * Sửa hóa đơn khi còn PENDING (BILL_1403 nếu đã thu, BILL_1408 nếu đã hủy): quantity = 0 bỏ dòng, quantity ≤ tồn kho
+     * (PHARM_1406), còn ít nhất một dòng, giữ nguyên snapshot giá, kiểm tra lại giảm giá (BILL_1402). Dùng để xử lý EX-15.
      */
     MedicineInvoiceResponse updateItems(Long id, MedicineInvoiceRequest request);
 

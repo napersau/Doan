@@ -109,7 +109,7 @@
 - **Người thực hiện:** Lưu Minh Hiển
 - **Mục tiêu:** Cung cấp bộ khung lớp dùng chung cho các microservices, nạp cấu hình servlet bằng Auto-Configuration có điều kiện (Quy chuẩn mục 2.2).
 - [ ] **1.3.1** Xây dựng `ApiResponse<T>` (trường `status`, `errorCode`, `message`, `data`, `timestamp`) và `PageResponse<T>` (Quy chuẩn Chương 4).
-- [ ] **1.3.2** Xây dựng `ErrorCode` (**39 mã lỗi** dạng chuỗi `SYS_xxxx`, `AUTH_xxxx`, `APPT_xxxx`, `CLIN_xxxx`, `BILL_xxxx`, `PHARM_xxxx`) và `AppException`.
+- [ ] **1.3.2** Xây dựng `ErrorCode` (**38 mã lỗi** dạng chuỗi `SYS_xxxx`, `AUTH_xxxx`, `APPT_xxxx`, `CLIN_xxxx`, `BILL_xxxx`, `PHARM_xxxx`) và `AppException`.
 - [ ] **1.3.3** Đặt `GlobalExceptionHandler`, `FeignExceptionHandler`, `CommonSecurityConfig`, `HeaderAuthenticationFilter`, `FeignClientInterceptor`, `CustomFeignErrorDecoder` trong package `com.vetclinic.common.web`; tạo `CommonWebAutoConfiguration` (`@ConditionalOnWebApplication(SERVLET)`) và file `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. Phụ thuộc servlet / security / openfeign khai báo `<optional>true</optional>`.
 - [ ] **1.3.4** Định nghĩa **10 Java Enum khớp CSDL** (`RoleCode`, `UserStatus`, `PetGender`, `BookingChannel`, `AppointmentStatus`, `VisitStatus`, `ServiceCategory`, `ServiceDetailStatus`, `PaymentStatus`, `InventoryTransactionType`) + enum tầng ứng dụng `LabEvaluation`; định nghĩa lớp cơ sở `BaseEvent` và 9 lớp sự kiện theo Kiến trúc mục 5.2.
 
@@ -557,9 +557,9 @@
 ### Task 4.3: Lập Hóa đơn Thuốc khi Khách chọn Mua tại Phòng khám
 - **Người thực hiện:** Lưu Minh Hiển (Phụ trách FR-56, FR-61, FR-62, UC-36, BR-26, BR-32, EX-14)
 - **Mục tiêu:** Khách được mua tại phòng khám (một phần hoặc toàn bộ đơn) hoặc mua ngoài. Giá thuốc chốt tại thời điểm lập hóa đơn thuốc.
-- [ ] **4.3.1** API Lập hóa đơn thuốc (`POST /api/v1/pharmacy/prescriptions/{id}/medicine-invoices`), body `{items: [{prescriptionItemId, quantity}], discountAmount}` (Quy chuẩn 8.2 `createInvoice`): Facade kiểm tra ca `WAITING_PAYMENT` / `COMPLETED` qua Feign; chặn nếu đơn đã có hóa đơn thuốc (`PHARM_1407`); `quantity ≤` số lượng kê (`PHARM_1410`); snapshot `unit_price = medicines.sale_price`, `vat_rate = medicines.vat_rate`; giảm giá ≤ tổng tiền thuốc (`BILL_1402`); trạng thái `PENDING`, mã `MINV-YYYY-XXXX`.
+- [ ] **4.3.1** API Lập hóa đơn thuốc (`POST /api/v1/pharmacy/prescriptions/{id}/medicine-invoices`), body `{items: [{prescriptionItemId, quantity}], discountAmount}` (Quy chuẩn 8.2 `createInvoice`): Facade kiểm tra ca `WAITING_PAYMENT` / `COMPLETED` qua Feign; chặn nếu đơn đã có hóa đơn thuốc (`PHARM_1407`); số lượng kê chỉ để tham khảo (mua nhiều / ít / bằng đều được), `quantity ≤` tồn kho (`PHARM_1406`); snapshot `unit_price = medicines.sale_price`, `vat_rate = medicines.vat_rate`; giảm giá ≤ tổng tiền thuốc (`BILL_1402`); trạng thái `PENDING`, mã `MINV-YYYY-XXXX`.
 - [ ] **4.3.2** API Hủy hóa đơn thuốc khi khách đổi ý (`POST /api/v1/billing/medicine-invoices/{id}/cancel`): `PENDING → CANCELLED`, kho không đổi. Hủy là kết thúc: đơn này không lập lại hóa đơn thuốc.
-- [ ] **4.3.4** API Sửa hóa đơn thuốc (`PUT /api/v1/billing/medicine-invoices/{id}/items`, body `{"items": [{"prescriptionItemId": 1, "quantity": 5}], "discountAmount": 0}`, Quy chuẩn 8.2 `updateItems`): chỉ khi `PENDING` (`BILL_1403` / `BILL_1408`); `quantity = 0` để bỏ dòng, `quantity ≤` số lượng kê (`PHARM_1410`); còn ít nhất 1 dòng; giữ snapshot giá; kiểm tra lại giảm giá (`BILL_1402`).
+- [ ] **4.3.4** API Sửa hóa đơn thuốc (`PUT /api/v1/billing/medicine-invoices/{id}/items`, body `{"items": [{"prescriptionItemId": 1, "quantity": 5}], "discountAmount": 0}`, Quy chuẩn 8.2 `updateItems`): chỉ khi `PENDING` (`BILL_1403` / `BILL_1408`); `quantity = 0` để bỏ dòng, `quantity ≤` tồn kho (`PHARM_1406`); còn ít nhất 1 dòng; giữ snapshot giá; kiểm tra lại giảm giá (`BILL_1402`).
 - [ ] **4.3.3** API In đơn thuốc cho khách mua ngoài (`GET /api/v1/pharmacy/prescriptions/{id}/print`), không tạo hóa đơn.
 
 > **Hướng dẫn Kiểm thử Task 4.3:**
@@ -570,7 +570,7 @@
 >      -d '{"items": [{"prescriptionItemId": 1, "quantity": 10}], "discountAmount": 0}'
 >    ```
 > 2. **Kết quả kỳ vọng:** `201 Created`; `medicine_invoice_items`: `unit_price = 15000.00`, `vat_rate = 0.05`; `SELECT payable_amount FROM v_medicine_invoice_amounts WHERE invoice_id = 1;` → `157500.00` (10 × 15.000 × 1,05).
-> 3. Lập hóa đơn thứ hai cho cùng đơn → `409`, mã `PHARM_1407`. Mua 12 viên → `400`, mã `PHARM_1410`.
+> 3. Lập hóa đơn thứ hai cho cùng đơn → `409`, mã `PHARM_1407`. Mua 12 viên khi chỉ kê 10 (tồn đủ) → `201` (số kê chỉ tham khảo); mua vượt tồn kho → `409`, mã `PHARM_1406`.
 > 4. Sửa hóa đơn #1 về 8 viên (`PUT …/medicine-invoices/1/items`) → `payable_amount = 126000.00`; sửa lại 10 viên → `157500.00` (đơn giá vẫn 15.000 dù danh mục có đổi giá).
 
 ---
@@ -734,7 +734,7 @@
 | Đầu tài liệu, 1.1 | Spring Boot "4.1.11" | Spring Boot 4.1.1, Spring Cloud 2025.1.2 | Không có bản 4.1.11 |
 | 1.2, ma trận | 23 bảng, "20 khóa ngoại", clinical 12 bảng | 25 bảng, 25 khóa ngoại nội bộ, 2 VIEW, clinical 14 bảng | Lược đồ v3.0 (đếm từ `schema_init.sql`) |
 | 1.2.3 (mới) | Test dùng `bs_tien`, id 2, 4, 5, 7, 8 không có trong seed | Thêm `seed_demo_data.sql` với bảng ID cố định | `schema_init.sql` chỉ có tài khoản admin |
-| 1.3 | ApiResponse `{code: 1000}`, `error()`; 30 mã lỗi; 13 enum | Đúng cấu trúc Quy chuẩn; 39 mã lỗi chuỗi; 10 enum + `LabEvaluation`; Auto-Configuration | Khớp Quy chuẩn v3.0 |
+| 1.3 | ApiResponse `{code: 1000}`, `error()`; 30 mã lỗi; 13 enum | Đúng cấu trúc Quy chuẩn; 38 mã lỗi chuỗi; 10 enum + `LabEvaluation`; Auto-Configuration | Khớp Quy chuẩn v3.0 |
 | 1.5, 2.3 | Gateway không trả 401; `/refresh-token` | Gateway trả 401, chặn `/internal/**`; `/refresh` | Khớp Quy chuẩn 10.1, 10.3 |
 | 2.4, 2.6 | `/api/v1/internal/...` qua Gateway; `/available-slots`; đếm slot thiếu `CHECKED_IN` | `/internal/**` gọi trực tiếp cổng service; `/slots`; đếm cả `CHECKED_IN` | Endpoint nội bộ không ra ngoài; lịch đã check-in vẫn chiếm chỗ |
 | 2.5, 2.7 | Entity 17 trường có `owner_id`; body có `endTime`; `cancel_reason` | 9 trường, không `owner_id`, `end_time`; lý do hủy ở bảng lịch sử | Lược đồ v3.0 |
@@ -757,3 +757,4 @@
 | 4.3.4 (mới), 4.4, 5.5.15 (rà soát 10/11) | Không có API sửa hóa đơn thuốc; test EX-15 sửa trực tiếp `stock_quantity` | Thêm `PUT …/medicine-invoices/{id}/items`; test dùng `ADJUSTMENT` rồi sửa hóa đơn và xác nhận lại | EX-15 thực hiện được; giữ bất biến kho |
 | 3.2, 3.3, 3.5, 3.7, 3.8, 5.1, 5.3, 5.4, 5.5 (rà soát 11/11) | Hàng đợi sảnh chung; phân công chỉ cho Bác sĩ `AVAILABLE` (`CLIN_1302` / `CLIN_1303`); CLS `postpone` / `recall`; GĐ 2 `call-in`, `postpone-callback`; Khóa ưu tiên | `GET …/queue` (danh sách chờ + hàng đợi từng Bác sĩ), `…/my-queue`; `assign-doctor` không kiểm tra Bác sĩ rảnh; thêm `call-next`, `skip` (Bác sĩ) và `lab-queue/call-next`, `imaging-queue/call-next`, `service-details/{id}/skip`; `start-phase2`; test 3.3, 3.7, 3.8 và EX-03 → EX-10 viết lại | Mô hình hàng đợi riêng từng Bác sĩ + Đẩy lùi 1 bậc |
 | 3.3, 3.5, 5.3, 5.5 (cập nhật 13/11) | `call-next` + `skip` (Đẩy lùi 1 bậc, xếp sau người kế tiếp, `skip_count + 1`, `action = SKIPPED`); test 2b `skip` rồi "đẩy lùi ca #2 để trả lại thứ tự"; EX-04, EX-06, EX-07, EX-09, EX-10 dùng `skip` | Thêm `POST …/pet-visits/{id}/call` và `…/service-details/{id}/call` (gọi ca bất kỳ, không đổi thứ tự/trạng thái); `call-next` giữ làm phím tắt; đã xóa API `skip` và cột `skip_count`; CLS gộp dịch vụ cùng đợt khám, cùng phòng thành một ca; test 2b và EX-04/06/07/09/10 viết lại | Đẩy lùi 1 bậc làm hai ca đầu hàng đổi chỗ mãi mãi (ca thứ 3, 4 không được gọi) và làm ca cấp cứu mất ưu tiên |
+| 4.3.1, 4.3.4, test 4.3 (cập nhật 13/11) | Số lượng mua ≤ số lượng kê, vượt → `400 PHARM_1410` | Số kê chỉ tham khảo; mua vượt **tồn kho** → `409 PHARM_1406` ngay lúc lập / sửa hóa đơn (lúc thu tiền vẫn kiểm tra lại bằng UPDATE nguyên tử, EX-15); bỏ mã `PHARM_1410` (còn 38 mã); response kèm `stockQuantity`, `minStockAlert` | Khách có thể cần nhiều hơn / ít hơn đơn; ràng buộc đúng là tồn kho |

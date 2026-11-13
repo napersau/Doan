@@ -15,6 +15,8 @@ public record MedicineInvoiceItemResponse(
         BigDecimal unitPrice,
         BigDecimal vatRate,
         BigDecimal amountBeforeVat,
-        BigDecimal vatAmount
+        BigDecimal vatAmount,
+        int stockQuantity,    // tồn kho hiện tại: số lượng mua tối đa khi hóa đơn còn chờ thu
+        int minStockAlert
 ) {
 }

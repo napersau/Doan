@@ -211,12 +211,29 @@ class MedicineInvoiceServiceImplTest {
     }
 
     @Test
-    void create_cannotBuyMoreThanPrescribed() {
+    void create_prescribedQuantityIsOnlyAReference_customerMayBuyMoreLessOrEqual() {
+        Prescription prescription = standardPrescription();   // kê 10 viên Clavamox (tồn 200), 2 viên Drontal (tồn 100)
+        prescriptionReadyToInvoice(prescription, VisitStatus.WAITING_PAYMENT);
+        when(invoiceRepository.findByPrescriptionId(3L)).thenReturn(Optional.empty());
+
+        MedicineInvoiceResponse response = service.create(3L, buy(null, 10, 25, 11, 1));   // nhiều hơn kê (25 > 10) và ít hơn kê (1 < 2)
+
+        assertThat(response.items()).extracting(i -> i.quantity()).containsExactly(25, 1);
+        assertThat(response.items().get(0).stockQuantity()).isEqualTo(200);   // giao diện thấy tồn kho để quyết định số lượng
+        assertThat(response.items().get(0).prescribedQuantity()).isEqualTo(10);
+    }
+
+    @Test
+    void create_cannotBuyMoreThanTheStockInTheWarehouse() {
         Prescription prescription = standardPrescription();
         prescriptionReadyToInvoice(prescription, VisitStatus.WAITING_PAYMENT);
         when(invoiceRepository.findByPrescriptionId(3L)).thenReturn(Optional.empty());
 
-        assertError(ErrorCode.PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED, () -> service.create(3L, buy(null, 10, 12)));
+        assertError(ErrorCode.INSUFFICIENT_STOCK, () -> service.create(3L, buy(null, 10, 201)));   // kho còn 200
+        assertError(ErrorCode.INSUFFICIENT_STOCK, () -> service.create(3L, buy(null, 10, 10, 11, 101)));   // một dòng vượt là từ chối cả hóa đơn
+        verify(invoiceRepository, never()).saveAndFlush(any());
+        // đúng bằng tồn kho thì được (mức tồn tối thiểu chỉ là ngưỡng cảnh báo, không chặn bán)
+        assertThat(service.create(3L, buy(null, 10, 200)).items().get(0).quantity()).isEqualTo(200);
     }
 
     @Test
@@ -305,12 +322,13 @@ class MedicineInvoiceServiceImplTest {
     }
 
     @Test
-    void updateItems_beyondPrescribedOrUnknownLineIsRefused() {
+    void updateItems_beyondStockOrUnknownLineIsRefused_butMoreThanPrescribedIsFine() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         MedicineInvoice invoice = pendingInvoice(standardPrescription(), 10, 0);
         when(invoiceRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(invoice));
 
-        assertError(ErrorCode.PURCHASE_QUANTITY_EXCEEDS_PRESCRIBED, () -> service.updateItems(5L, buy(null, 10, 11)));
+        assertError(ErrorCode.INSUFFICIENT_STOCK, () -> service.updateItems(5L, buy(null, 10, 201)));   // kho còn 200
+        assertThat(service.updateItems(5L, buy(null, 10, 11)).items().get(0).quantity()).isEqualTo(11);   // 11 > 10 đã kê: được
         assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.updateItems(5L, buy(null, 11, 1)));   // dòng 11 chưa có trong hóa đơn
     }
 
