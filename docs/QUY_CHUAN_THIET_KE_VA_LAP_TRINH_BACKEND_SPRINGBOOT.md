@@ -1508,7 +1508,7 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long> {
 
     boolean existsByDoctorIdAndStatus(Long doctorId, VisitStatus status);
 
-    // Hàng đợi riêng của Bác sĩ (Q1): ca WAITING / RESULTS_READY, cấp cứu chưa bị lùi lên đầu, rồi queue_order
+    // Hàng đợi riêng của Bác sĩ (Q1): ca WAITING / RESULTS_READY, cấp cứu lên đầu, rồi queue_order
     // Index idx_visits_queue (doctor_id, status, is_emergency, queue_order)
     @Query("""
             SELECT v FROM PetVisit v

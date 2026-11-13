@@ -400,7 +400,7 @@ Dưới đây là danh mục đầy đủ **39 Ca sử dụng (Use Cases)** củ
 | **UC-25** | Tiếp nhận mẫu, Vận hành máy & Nhập kết quả Xét nghiệm *(Perform Laboratory Tests)* | KTV Xét nghiệm (LAB_TECHNICIAN) | Phân hệ 6: Quản lý & Thực hiện Cận lâm sàng |
 | **UC-26** | Chụp X-quang / Siêu âm, Tải ảnh & Kết luận CĐHA *(Perform Imaging Diagnostics)* | KTV CĐHA (IMAGING_TECHNICIAN) | Phân hệ 6: Quản lý & Thực hiện Cận lâm sàng |
 | **UC-27** | Gọi ca khác / gọi lại khi khách vắng mặt tại phòng CLS *(Call Another / Call Again in Paraclinic)* | KTV Lab / KTV CĐHA | Phân hệ 6: Quản lý & Thực hiện Cận lâm sàng |
-| **UC-28** | Gọi số tiếp theo tại phòng CLS *(Call Next Patient in Paraclinic)* | KTV Lab / KTV CĐHA | Phân hệ 6: Quản lý & Thực hiện Cận lâm sàng |
+| **UC-28** | Gọi bệnh nhân tại phòng CLS: gọi từng ca / "Gọi số tiếp theo" *(Call Patient in Paraclinic)* | KTV Lab / KTV CĐHA | Phân hệ 6: Quản lý & Thực hiện Cận lâm sàng |
 | **UC-29** | Xử lý khách hàng xin hủy dịch vụ cận lâm sàng giữa chừng *(Cancel Paraclinical Service)* | KTV Lab / KTV CĐHA | Phân hệ 6: Quản lý & Thực hiện Cận lâm sàng |
 | **UC-30** | Bác sĩ gọi ca có kết quả (đứng đầu hàng đợi) vào Giai đoạn 2 *(Doctor Callback - Phase 2)* | Bác sĩ (VETERINARIAN) | Phân hệ 7: Hội chẩn Kết quả & Kê đơn (GĐ 2) |
 | **UC-31** | Kê đơn thuốc điện tử *(Electronic Prescription)* | Bác sĩ (VETERINARIAN) | Phân hệ 7: Hội chẩn Kết quả & Kê đơn (GĐ 2) |

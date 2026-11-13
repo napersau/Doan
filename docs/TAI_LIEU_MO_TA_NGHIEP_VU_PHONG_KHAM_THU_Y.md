@@ -698,7 +698,7 @@ Sau khi tiếp nhận tại quầy (từ lịch hẹn hoặc khách vãng lai):
 
 ## 17.1. WAITING_RESULTS – Chờ kết quả cận lâm sàng & Quản lý 2 Hàng đợi chuyên môn độc lập
 
-Khi Bác sĩ xác nhận gửi chỉ định, ca khám chuyển sang trạng thái `WAITING_RESULTS`. Các dịch vụ kỹ thuật **tự động vào 2 Hàng đợi Cận lâm sàng độc lập** tương ứng với 2 phòng chuyên môn riêng biệt (không cần ai xếp), theo thứ tự: ca cấp cứu chưa bị lùi trước, còn lại theo thời điểm chỉ định (`queue_order`).
+Khi Bác sĩ xác nhận gửi chỉ định, ca khám chuyển sang trạng thái `WAITING_RESULTS`. Các dịch vụ kỹ thuật **tự động vào 2 Hàng đợi Cận lâm sàng độc lập** tương ứng với 2 phòng chuyên môn riêng biệt (không cần ai xếp), theo thứ tự: ca cấp cứu trước, còn lại theo thời điểm chỉ định (`queue_order`).
 
 ### 1. Phân tách 2 Phòng chuyên môn & 2 Hàng đợi độc lập
 Hệ thống thiết kế theo mô hình phòng khám quy chuẩn:

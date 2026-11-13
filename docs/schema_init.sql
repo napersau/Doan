@@ -238,7 +238,7 @@ CREATE TABLE IF NOT EXISTS pet_visits (
     doctor_advice TEXT NULL,
     status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
     checked_in_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi (nhỏ gọi trước). Gán = thời điểm tiếp nhận (epoch micro giây); "Đẩy lùi 1 bậc" đặt ra ngay sau người kế tiếp; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1
+    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi (nhỏ gọi trước). Gán = thời điểm tiếp nhận (epoch micro giây); "Đẩy lùi 1 bậc" (dự phòng, giao diện không dùng) đặt ra ngay sau người kế tiếp; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1
     skip_count INT NOT NULL DEFAULT 0, -- Số lần bị "Đẩy lùi 1 bậc" (cơ chế dự phòng, không còn dùng trên giao diện; luôn 0). Nếu > 0 thì ca cấp cứu xếp như ca thường
     version BIGINT NOT NULL DEFAULT 0, -- Khóa lạc quan
     CONSTRAINT fk_visits_pet FOREIGN KEY (pet_id) REFERENCES pets(id),
@@ -274,7 +274,7 @@ CREATE TABLE IF NOT EXISTS visit_service_details (
     status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi phòng XN / CĐHA (nhỏ gọi trước). Gán = thời điểm chỉ định (epoch micro giây); "Đẩy lùi 1 bậc" như pet_visits
+    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi phòng XN / CĐHA (nhỏ gọi trước). Gán = thời điểm chỉ định (epoch micro giây); "Đẩy lùi 1 bậc" (dự phòng) như pet_visits
     skip_count INT NOT NULL DEFAULT 0, -- Số lần bị "Đẩy lùi 1 bậc" (dự phòng, luôn 0); dùng trong thứ tự hàng đợi như pet_visits.skip_count
     CONSTRAINT fk_vsd_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
     CONSTRAINT fk_vsd_service FOREIGN KEY (service_id) REFERENCES services(id),

@@ -759,7 +759,7 @@ Các cột `PRIMARY KEY`, `UNIQUE` và khóa ngoại vật lý được MySQL t�
 
 3. **`pet_clinic_clinical_db`:**
    - Index `pets(owner_id)` để tải danh sách thú cưng của khách hàng.
-   - Compound Index `idx_visits_queue (doctor_id, status, is_emergency, queue_order)` phục vụ hàng đợi riêng của từng Bác sĩ (cấp cứu chưa bị lùi lên đầu, còn lại theo `queue_order`) và danh sách chờ phân công (`doctor_id IS NULL`).
+   - Compound Index `idx_visits_queue (doctor_id, status, is_emergency, queue_order)` phục vụ hàng đợi riêng của từng Bác sĩ (cấp cứu lên đầu, còn lại theo `queue_order`) và danh sách chờ phân công (`doctor_id IS NULL`).
    - Compound Index `pet_visits(doctor_id, status)` phục vụ tính toán động trạng thái `BUSY` / `AVAILABLE` của Bác sĩ.
    - Index `pet_visits(pet_id)` và `pet_visits(receptionist_id)` phục vụ tra cứu bệnh án và truy vết lễ tân tiếp đón.
    - Index `pet_visit_status_histories(visit_id)`, `(changed_by_user_id)` và `visit_service_detail_histories(visit_service_detail_id)`, `(changed_by_user_id)` phục vụ kiểm toán.

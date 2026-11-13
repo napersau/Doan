@@ -94,7 +94,7 @@ flowchart TD
         DOC_DECIDE{"Cần chỉ định\nCận lâm sàng?"}
         DOC_ORDER["Chọn dịch vụ Lab / CĐHA,\nbấm 'Chỉ định & Gửi phòng CLS'"]
         DOC_FAST_RX["Chẩn đoán, thực hiện dịch vụ tại phòng\n(tiêm, tẩy giun...), kê đơn nếu cần"]
-        DOC_CALL_G2["Bấm 'Gọi số tiếp theo' (ca có KQ đứng đầu),\nbấm 'Bắt đầu GĐ 2' khi thú cưng vào phòng"]
+        DOC_CALL_G2["Bấm 'Gọi' ở ca có KQ (đang đứng đầu),\nbấm 'Bắt đầu GĐ 2' khi thú cưng vào phòng"]
         DOC_CONSULT["Phân tích chỉ số máu, ảnh X-quang,\nchẩn đoán xác định & kê đơn thuốc"]
         DOC_CLOSE["Bấm 'Chốt đợt khám & Khóa bệnh án'"]
     end

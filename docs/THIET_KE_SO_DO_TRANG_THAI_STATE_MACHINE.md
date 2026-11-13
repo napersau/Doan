@@ -198,7 +198,7 @@ Hệ thống **không sử dụng cột trạng thái tĩnh trong CSDL** để q
 
 Từ rà soát 11/11, mỗi Bác sĩ có **hàng đợi riêng** (mục 2.4) nên trạng thái Bác sĩ **không còn dùng để quyết định Lễ tân có được phân công hay không**. Lễ tân xếp ca vào hàng đợi của Bác sĩ bất cứ lúc nào; trạng thái chỉ cho biết Bác sĩ có đang khám hay không (hiển thị trên bảng điều phối và chặn Bác sĩ gọi thêm người khi đang khám dở). Còn hai trạng thái:
 - `BUSY`: Bác sĩ đang khám một ca (`IN_PROGRESS`, Giai đoạn 1 hoặc 2).
-- `AVAILABLE`: Bác sĩ không khám ca nào, được bấm *"Gọi số tiếp theo"*.
+- `AVAILABLE`: Bác sĩ không khám ca nào, được bấm *"Gọi"* (hoặc *"Gọi số tiếp theo"*).
 
 Trạng thái `AVAILABLE_PRIORITY_CALLBACK` và cơ chế "Khóa ưu tiên" của bản trước được bỏ: ca vừa có kết quả CLS tự lên đầu hàng đợi của Bác sĩ (Q5), nên không cần chặn Lễ tân.
 
