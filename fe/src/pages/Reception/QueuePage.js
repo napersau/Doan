@@ -60,9 +60,7 @@ function HistoryDialog({ visit, onClose }) {
 
 function VisitCell({ visit }) {
   return <>
-    <strong>{visit.petName}</strong>{visit.emergency && visit.skipCount === 0 && <span className="ui-emergency"> · CẤP CỨU</span>}
-    {visit.emergency && visit.skipCount > 0 && <Badge tone="amber">Cấp cứu · đã mất ưu tiên</Badge>}
-    {visit.skipCount > 0 && <Badge tone="amber">Đã bị lùi {visit.skipCount} lần</Badge>}
+    <strong>{visit.petName}</strong>{visit.emergency && <span className="ui-emergency"> · CẤP CỨU</span>}
     <small>{visit.speciesName} · {visit.visitCode}</small>
   </>;
 }
@@ -85,7 +83,7 @@ export default function QueuePage() {
       {({ board: d, active }) => {
         const doctorName = (id) => d.doctors.find((doctor) => doctor.doctorId === id)?.fullName || (id ? `#${id}` : '—');
         const waitingTotal = d.unassigned.length + d.doctors.reduce((sum, doctor) => sum + doctor.waitingCount, 0);
-        const emergencies = [...d.unassigned, ...d.doctors.flatMap((doctor) => doctor.visits)].filter((visit) => visit.emergency && visit.skipCount === 0).length;
+        const emergencies = [...d.unassigned, ...d.doctors.flatMap((doctor) => doctor.visits)].filter((visit) => visit.emergency).length;
         return <>
           <Stats items={[['Chờ phân công', d.unassigned.length, undefined, d.unassigned.length ? 'amber' : ''],
             ['Tổng ca đang chờ', waitingTotal, `${emergencies} ca cấp cứu`, emergencies ? 'red' : ''],
@@ -106,7 +104,7 @@ export default function QueuePage() {
           <div className="ui-cols">
             {d.doctors.length === 0 && <Panel title="Hàng đợi bác sĩ"><p className="ui-muted">Chưa có bác sĩ nào đang hoạt động.</p></Panel>}
             {d.doctors.map((doctor) => <Panel key={doctor.doctorId} title={`${doctor.fullName} — phòng ${doctor.roomNumber || '?'}`} subtitle={`${doctor.waitingCount} ca đang chờ`} actions={<Badge map={DOCTOR_STATUS} value={doctor.status} />} flush>
-              <Table caption={`Hàng đợi của ${doctor.fullName}`} empty="Hàng đợi trống." rows={doctor.visits} rowClass={(row) => (row.emergency && row.skipCount === 0 ? 'emergency' : '')} columns={[
+              <Table caption={`Hàng đợi của ${doctor.fullName}`} empty="Hàng đợi trống." rows={doctor.visits} rowClass={(row) => (row.emergency ? 'emergency' : '')} columns={[
                 { title: 'Thú cưng', render: (row) => <VisitCell visit={row} /> },
                 { title: 'Trạng thái', render: (row) => <><Badge map={VISIT_STATUS} value={row.status} /><small>đến {formatTimeOfInstant(row.checkedInAt)}</small></> },
                 { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>

@@ -89,7 +89,7 @@
   - Nếu gọi ca cấp cứu mà không thấy, Bác sĩ gọi ca khác; ca cấp cứu **giữ nguyên ưu tiên, vị trí đầu hàng và cảnh báo đỏ** (không còn bị lùi), khách quay lại thì "Gọi lại". *(Từ 13/11/2026; bản trước dùng "Đẩy lùi 1 bậc" nên ca cấp cứu mất ưu tiên ngay sau lần vắng đầu tiên.)*
 - **Biến động CSDL:**
   - Bảng `pet_visits`: Cột `is_emergency = TRUE`.
-  - Nhờ chỉ mục hỗn hợp `idx_visits_queue (doctor_id, status, is_emergency, queue_order)`, câu lệnh `ORDER BY (is_emergency AND skip_count = 0) DESC, queue_order ASC` định vị ca này lên đầu hàng đợi của Bác sĩ với chi phí truy vấn $O(\log N)$.
+  - Nhờ chỉ mục hỗn hợp `idx_visits_queue (doctor_id, status, is_emergency, queue_order)`, câu lệnh `ORDER BY is_emergency DESC, queue_order ASC` định vị ca này lên đầu hàng đợi của Bác sĩ với chi phí truy vấn $O(\log N)$.
 
 ---
 
@@ -119,7 +119,7 @@
     - Mỗi lần gọi gửi **thông báo trên ứng dụng / Cổng thông tin** cho chủ nuôi của ca được gọi (hệ thống không dùng SMS).
 - **Biến động CSDL:**
   - Không có thay đổi dữ liệu hàng đợi: `visit_service_details.status` giữ `'PENDING'`, `queue_order` giữ nguyên, không ghi `visit_service_detail_histories` (chỉ phát `PatientCalledEvent` `action = CALLED` sau commit).
-  - *(Cơ chế "Đẩy lùi 1 bậc" của bản v3.0 đầu — `skip_count + 1`, đổi `queue_order`, `action = 'SKIPPED'` — được bỏ vì làm hai ca đầu hàng đổi chỗ mãi mãi; cột và giá trị vẫn giữ trong lược đồ như cơ chế dự phòng.)*
+  - *(Cơ chế "Đẩy lùi 1 bậc" của bản v3.0 đầu — `skip_count + 1`, đổi `queue_order`, `action = 'SKIPPED'` — được bỏ vì làm hai ca đầu hàng đổi chỗ mãi mãi; cột `skip_count`, giá trị `SKIPPED` và API `skip` đã bị xóa.)*
 
 ### EX-07: Khách hàng quay lại phòng máy sau khi vắng mặt
 - **Bối cảnh thực tế:** Khách hàng quay lại sảnh phòng khám sau khi nhận thông báo trên ứng dụng.
@@ -169,7 +169,7 @@
   - Khi khách quay lại (Bác sĩ nhận thông báo hoặc khách báo tại quầy): Bác sĩ bấm *"Gọi lại"* ở đúng ca đó, rồi bắt đầu khám như bình thường.
 - **Biến động CSDL:**
   - Không có thay đổi: `pet_visits.status` và `queue_order` giữ nguyên; không ghi `pet_visit_status_histories`. Bước chuyển T13 (hoãn ngược `IN_PROGRESS → RESULTS_READY`) của bản trước được bỏ.
-  - *(Cơ chế "Đẩy lùi 1 bậc" của bản v3.0 đầu bị bỏ; `skip_count` giữ trong lược đồ như cơ chế dự phòng, luôn 0.)*
+  - *(Cơ chế "Đẩy lùi 1 bậc" của bản v3.0 đầu và cột `skip_count` đã bị xóa.)*
 
 ### EX-11: Khách hàng bỏ về hẳn không quay lại đọc kết quả cận lâm sàng
 - **Bối cảnh thực tế:** Khách đã làm xét nghiệm và chụp chiếu (hoặc mới làm xong một phần) nhưng tự ý bế thú cưng về nhà; Lễ tân gọi điện xác nhận khách không quay lại, hoặc đã hết ngày làm việc.

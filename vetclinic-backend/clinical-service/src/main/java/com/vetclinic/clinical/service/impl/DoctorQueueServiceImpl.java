@@ -10,7 +10,6 @@ import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.service.DoctorQueueService;
-import com.vetclinic.clinical.service.QueueOrders;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.PatientCalledEvent;
@@ -123,44 +122,6 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
     }
 
     @Override
-    public VisitResponse skip(Long visitId) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
-        String room = roomOf(doctorId);
-        return transactionTemplate.execute(tx -> {
-            PetVisit visit = visitRepository.findByIdForUpdate(visitId)   // khóa dòng + @Version chống đua
-                    .orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
-            if (visit.getDoctorId() == null || !visit.getDoctorId().equals(doctorId)) {
-                throw new AppException(ErrorCode.NOT_ASSIGNED_DOCTOR);
-            }
-            if (visit.getStatus() != VisitStatus.WAITING && visit.getStatus() != VisitStatus.RESULTS_READY) {
-                throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION,
-                        "Chỉ đẩy lùi được ca đang chờ trong hàng đợi (WAITING hoặc RESULTS_READY)");
-            }
-            if (visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)) {
-                throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE);
-            }
-            List<PetVisit> queue = visitRepository.findDoctorVisits(doctorId, WAITING_AND_READY);
-            int index = indexOf(queue, visitId);
-            Long newOrder = QueueOrders.afterPushBack(queue.stream()
-                    .map(v -> new QueueOrders.Entry(v.getQueueOrder(), v.isEmergency() && v.getSkipCount() == 0)).toList(), index);
-
-            visit.setSkipCount(visit.getSkipCount() + 1);   // không giới hạn số lần; ca cấp cứu bị lùi xếp như ca thường
-            if (newOrder != null) {
-                visit.setQueueOrder(newOrder);
-            }
-            visitRepository.save(visit);   // trạng thái không đổi nên không ghi pet_visit_status_histories
-            publishCalled(visit, ACTION_PUSHED_BACK, doctorId, room);   // báo chủ nuôi bị đẩy lùi
-
-            if (newOrder == null) {
-                return assembler.summary(visit).withAssignedRoom(room);   // không còn ai phía sau: giữ nguyên vị trí
-            }
-            PetVisit next = queue.get(index + 1);   // người kế tiếp lên đầu và được gọi ngay
-            publishCalled(next, ACTION_CALLED, doctorId, room);
-            return assembler.summary(next).withAssignedRoom(room);
-        });
-    }
-
-    @Override
     public VisitResponse call(Long visitId) {
         Long doctorId = SecurityUtils.getCurrentUserId();
         String room = roomOf(doctorId);   // Feign NGOÀI transaction
@@ -182,18 +143,9 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
         });
     }
 
-    private static int indexOf(List<PetVisit> queue, Long visitId) {
-        for (int i = 0; i < queue.size(); i++) {
-            if (queue.get(i).getId().equals(visitId)) {
-                return i;
-            }
-        }
-        throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION, "Ca này không nằm trong hàng đợi của bạn");
-    }
-
     private void publishCalled(PetVisit v, String action, Long doctorId, String room) {
         eventPublisher.publishEvent(new PatientCalledEvent(UUID.randomUUID(), clock.instant(), doctorId, action,
-                "DOCTOR_ROOM", v.getId(), v.getVisitCode(), v.getPet().getId(), doctorId, null, room, v.getSkipCount()));
+                "DOCTOR_ROOM", v.getId(), v.getVisitCode(), v.getPet().getId(), doctorId, null, room));
     }
 
     /** Số phòng của chính Bác sĩ để hiển thị khi gọi số; không tra được thì bỏ trống, không làm hỏng việc gọi số. */
@@ -208,5 +160,4 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
 
     private static final List<VisitStatus> WAITING_AND_READY = List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY);
     private static final String ACTION_CALLED = "CALLED";
-    private static final String ACTION_PUSHED_BACK = "PUSHED_BACK";
 }

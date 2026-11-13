@@ -206,8 +206,8 @@ public class NotificationEventListener {
     // ================================================================== visit.patient_called
 
     /**
-     * BR-34 / Q3 / Q4: gọi số (kèm số phòng và mã ca làm số thứ tự) ở phòng bác sĩ / Lab / CĐHA, hoặc báo chủ nuôi bị "Đẩy lùi 1 bậc"
-     * khi gọi không thấy. Gọi số không đổi trạng thái ca. Chủ nuôi nhận thông báo; nhân viên liên quan được làm mới hàng đợi.
+     * BR-34 / Q3: gọi / gọi lại (kèm số phòng và mã ca làm số thứ tự) ở phòng bác sĩ / Lab / CĐHA. Gọi số không đổi trạng thái ca.
+     * Chủ nuôi nhận thông báo; nhân viên liên quan được làm mới hàng đợi.
      */
     @RabbitListener(queues = NotificationRabbitConfig.PATIENT_CALLED_QUEUE)
     public void onPatientCalled(PatientCalledEvent event) {
@@ -221,22 +221,17 @@ public class NotificationEventListener {
                 default -> "phòng khám bác sĩ";
             };
             String room = isBlank(event.roomNumber()) ? place : place + " (phòng " + event.roomNumber() + ")";
-            boolean pushedBack = "PUSHED_BACK".equals(event.action());
             Map<String, Object> data = data("visitId", event.visitId(), "visitCode", event.visitCode(), "petId", event.petId(),
                     "petName", pet, "action", event.action(), "station", event.station(), "doctorId", event.doctorId(),
-                    "serviceDetailId", event.serviceDetailId(), "roomNumber", event.roomNumber(), "skipCount", event.skipCount());
+                    "serviceDetailId", event.serviceDetailId(), "roomNumber", event.roomNumber());
 
-            NotificationMessage forOwner = pushedBack
-                    ? message(NotificationType.PATIENT_CALLED, Severity.WARNING, "Đã gọi nhưng chưa thấy bạn",
-                    "Số " + event.visitCode() + " (" + pet + ") đã được gọi vào " + room + " nhưng vắng mặt nên bị lùi một lượt. "
-                            + "Bạn chỉ cần chờ tới lượt tiếp theo.", data)
-                    : message(NotificationType.PATIENT_CALLED, Severity.CRITICAL, "Mời vào " + room,
+            NotificationMessage forOwner = message(NotificationType.PATIENT_CALLED, Severity.CRITICAL, "Mời vào " + room,
                     "Số " + event.visitCode() + ": mời " + pet + " vào " + room + ".", data);
             visit.map(VisitSummary::ownerId).ifPresent(owner -> dispatcher.toUser(owner, forOwner));
 
             // Làm mới màn hình hàng đợi của người phụ trách: bác sĩ của hàng đợi, hoặc KTV của phòng Lab / CĐHA
             NotificationMessage forStaff = message(NotificationType.PATIENT_CALLED, Severity.INFO,
-                    pushedBack ? "Ca bị đẩy lùi 1 bậc" : "Đã gọi số", "Ca " + event.visitCode() + " (" + pet + ") - " + room, data);
+                    "Đã gọi số", "Ca " + event.visitCode() + " (" + pet + ") - " + room, data);
             if ("LAB".equals(event.station())) {
                 dispatcher.toRole(RoleCode.LAB_TECHNICIAN, forStaff);
             } else if ("IMAGING".equals(event.station())) {

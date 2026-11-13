@@ -17,8 +17,8 @@ public interface ParaclinicService {
     }
 
     /**
-     * Hàng đợi của một phòng (v3.0): ORDER BY (cấp cứu AND skip_count = 0) DESC, queue_order ASC. Không còn tab "ca tạm hoãn" và
-     * "ưu tiên kế tiếp": khách vắng thì "Đẩy lùi 1 bậc" (bước 3.B6) và vẫn nằm trong hàng đợi.
+     * Hàng đợi của một phòng (v3.0): ORDER BY cấp cứu DESC, queue_order ASC. Không còn tab "ca tạm hoãn" và
+     * "ưu tiên kế tiếp": khách vắng thì gọi ca khác (ca vắng giữ nguyên vị trí).
      */
     List<QueueItemResponse> queue(ServiceCategory category);
 
@@ -28,13 +28,6 @@ public interface ParaclinicService {
      * kỹ thuật viên bấm "Bắt đầu" mới chuyển PENDING -> IN_PROGRESS.
      */
     QueueItemResponse callNext(ServiceCategory category);
-
-    /**
-     * BR-34 (Q4): "Đẩy lùi 1 bậc" khi gọi mà khách vắng. skip_count + 1, queue_order mới theo {@link QueueOrders#afterPushBack};
-     * chỉ định giữ {@code PENDING}, ghi lịch sử {@code action = SKIPPED}; gọi ngay người kế tiếp. Trả về chỉ định vừa được gọi
-     * (hoặc chính chỉ định này nếu không còn ai phía sau).
-     */
-    QueueItemResponse skip(Long detailId);
 
     /** "Gọi" một ca cụ thể trong hàng đợi phòng mình (không nhất thiết đứng đầu): chỉ phát thông báo, không đổi trạng thái hay thứ tự. */
     QueueItemResponse call(Long detailId);

@@ -156,22 +156,24 @@ async function main() {
   }
   check('3 vòng hoàn tất đồng thời: không ca nào kẹt ở WAITING_RESULTS', stuck === 0, `kẹt ${stuck}/3`);
 
-  step('D. Đẩy lùi 1 bậc (Q4): 3 trường hợp công thức queue_order');
+  step('D. Gọi theo từng dòng (Q3/Q4): ca vắng giữ nguyên vị trí, ca thứ 3, 4 vẫn gọi được');
   const pets = []; for (let i = 1; i <= 4; i += 1) pets.push(await newPet(`E2E-q${i}`));
   const queue = []; for (const pet of pets) { queue.push((await checkIn(pet, 3)).data.id); await sleep(5); }
   const order = async () => (await call('GET', `${CLIN}/pet-visits/my-queue`, { token: T.doc3 })).data.map((v) => v.id);
   const [A, B, C, D] = queue;
   check('hàng đợi ban đầu theo thứ tự đến [A,B,C,D]', JSON.stringify(await order()) === JSON.stringify([A, B, C, D]));
-  await call('POST', `${CLIN}/pet-visits/call-next`, { token: T.doc3 });
-  const skip1 = await call('POST', `${CLIN}/pet-visits/${A}/skip`, { token: T.doc3 });
-  check('còn ≥2 người sau: A xếp giữa B và C → [B,A,C,D], gọi ngay B', JSON.stringify(await order()) === JSON.stringify([B, A, C, D]) && skip1.data?.id === B);
-  const skip2 = await call('POST', `${CLIN}/pet-visits/${B}/skip`, { token: T.doc3 });
-  check('B (đầu hàng) lùi tiếp: sau A và C → [A,C,B,D] hoặc giữa A–C (trung bình), người kế tiếp được gọi', skip2.status === 200 && (await order())[0] !== B);
-  const last = (await order()).at(-1);
-  const orderBefore = await order();
-  const skipLast = await call('POST', `${CLIN}/pet-visits/${last}/skip`, { token: T.doc3 });
-  check('ca cuối hàng bị lùi: không còn ai phía sau → giữ nguyên vị trí', skipLast.status === 200 && JSON.stringify(await order()) === JSON.stringify(orderBefore));
-  check('skip_count tăng sau mỗi lần lùi', Number(sql(`SELECT skip_count FROM pet_clinic_clinical_db.pet_visits WHERE id=${A}`)) >= 1);
+  const c1 = await call('POST', `${CLIN}/pet-visits/call-next`, { token: T.doc3 });
+  check('"Gọi số tiếp theo" gọi ca đầu hàng (A)', c1.status === 200 && c1.data?.id === A, brief(c1));
+  const cB = await call('POST', `${CLIN}/pet-visits/${B}/call`, { token: T.doc3 });
+  const cC = await call('POST', `${CLIN}/pet-visits/${C}/call`, { token: T.doc3 });
+  const cD = await call('POST', `${CLIN}/pet-visits/${D}/call`, { token: T.doc3 });
+  check('A, B, C vắng: bác sĩ gọi tiếp B, C rồi D (ca thứ 4) đều được, không bị kẹt', [cB, cC, cD].every((r) => r.status === 200) && cD.data?.id === D, brief(cD));
+  check('gọi không đổi thứ tự hàng đợi (vẫn [A,B,C,D]) và không đổi trạng thái', JSON.stringify(await order()) === JSON.stringify([A, B, C, D]));
+  const callAgain = await call('POST', `${CLIN}/pet-visits/${A}/call`, { token: T.doc3 });
+  check('khách A quay lại: "Gọi lại" ca A được, thứ tự vẫn không đổi', callAgain.status === 200 && JSON.stringify(await order()) === JSON.stringify([A, B, C, D]));
+  check('bác sĩ khác không gọi được ca của bác sĩ này → 403 CLIN_1311', (await call('POST', `${CLIN}/pet-visits/${A}/call`, { token: T.doc2 })).code === 'CLIN_1311');
+  check('API "đẩy lùi" đã bị bỏ (không còn endpoint skip)', (await call('POST', `${CLIN}/pet-visits/${A}/skip`, { token: T.doc3 })).status >= 400);
+  check('cột skip_count đã bị xóa khỏi lược đồ', Number(sql("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='pet_clinic_clinical_db' AND column_name='skip_count'")) === 0);
   for (const id of queue) await call('POST', `${CLIN}/pet-visits/${id}/cancel`, { token: T.rec, body: { reason: 'e2e dọn' } });
 
   step('E. Công nợ: khách bỏ về → COMPLETED, thu bù sau');

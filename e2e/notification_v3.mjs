@@ -38,7 +38,7 @@ async function main() {
   // chủ nuôi cần email để nhận thư
   await call('PUT', '/api/v1/auth/me', { token: T.owner, body: { fullName: 'Hoàng Thị Lan', email: 'lan.e2e@example.com' } });
 
-  step('Gọi số / đẩy lùi / có kết quả / hoàn tất / bán thuốc / tồn kho thấp');
+  step('Gọi số / gọi lại / có kết quả / hoàn tất / bán thuốc / tồn kho thấp');
   const pet = (await call('POST', '/api/v1/pets', { token: T.rec, body: { ownerId: 8, speciesId: 2, name: `Noti-${Date.now() % 100000}` } })).data.id;
   const visit = (await call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId: pet, doctorId: 2, isEmergency: false } })).data.id;
   await expectType('chủ nuôi nhận VISIT_CHECKED_IN', T.owner, 'VISIT_CHECKED_IN');
@@ -46,8 +46,8 @@ async function main() {
   await expectType('lễ tân nhận VISIT_CHECKED_IN (kênh vai trò)', T.rec, 'VISIT_CHECKED_IN');
   await call('POST', `${CLIN}/pet-visits/call-next`, { token: T.doc });
   await expectType('gọi số → chủ nuôi nhận PATIENT_CALLED (CALLED)', T.owner, 'PATIENT_CALLED', { contains: '"CALLED"' });
-  await call('POST', `${CLIN}/pet-visits/${visit}/skip`, { token: T.doc });
-  await expectType('đẩy lùi → chủ nuôi nhận PATIENT_CALLED (PUSHED_BACK)', T.owner, 'PATIENT_CALLED', { contains: 'PUSHED_BACK' });
+  await call('POST', `${CLIN}/pet-visits/${visit}/call`, { token: T.doc });
+  await expectType('gọi lại một ca theo id → chủ nuôi nhận PATIENT_CALLED (CALLED)', T.owner, 'PATIENT_CALLED', { contains: '"CALLED"' });
   await call('POST', `${CLIN}/pet-visits/call-next`, { token: T.doc });
   await call('POST', `${CLIN}/pet-visits/${visit}/start-exam`, { token: T.doc, body: { weightAtVisit: 4, temperature: 38.5 } });
   await call('POST', `${CLIN}/pet-visits/${visit}/paraclinical-orders`, { token: T.doc, body: { serviceIds: [5] } });

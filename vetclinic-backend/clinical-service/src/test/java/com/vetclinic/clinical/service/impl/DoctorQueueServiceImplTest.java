@@ -194,93 +194,6 @@ class DoctorQueueServiceImplTest {
     }
 
     @Test
-    void skip_pushesTheCalledVisitBehindTheNextOne_andCallsTheNext() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        stubRoom("P101");
-        PetVisit a = queued(1L, VisitStatus.WAITING, 100L);
-        PetVisit b = queued(2L, VisitStatus.WAITING, 200L);
-        PetVisit c = queued(3L, VisitStatus.WAITING, 300L);
-        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(a));
-        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(a, b, c));
-
-        VisitResponse response = service.skip(1L);
-
-        assertThat(a.getSkipCount()).isEqualTo(1);
-        assertThat(a.getQueueOrder()).isEqualTo(250L);                 // giữa B (200) và C (300): ngay sau người kế tiếp
-        assertThat(a.getStatus()).isEqualTo(VisitStatus.WAITING);      // trạng thái KHÔNG đổi
-        assertThat(response.id()).isEqualTo(2L);                       // người kế tiếp được gọi ngay
-        List<PatientCalledEvent> calls = publishedCalls();
-        assertThat(calls).extracting(PatientCalledEvent::action).containsExactly("PUSHED_BACK", "CALLED");
-        assertThat(calls).extracting(PatientCalledEvent::visitId).containsExactly(1L, 2L);
-        assertThat(calls.get(0).skipCount()).isEqualTo(1);
-    }
-
-    @Test
-    void skip_ofAResultsReadyVisit_keepsItResultsReady_EX10() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        stubRoom("P101");
-        PetVisit ready = queued(1L, VisitStatus.RESULTS_READY, 100L);
-        PetVisit next = queued(2L, VisitStatus.WAITING, 200L);
-        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(ready));
-        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(ready, next));
-
-        service.skip(1L);
-
-        assertThat(ready.getStatus()).isEqualTo(VisitStatus.RESULTS_READY);
-        assertThat(ready.getQueueOrder()).isEqualTo(201L);   // chỉ có một người phía sau: người đó + 1
-    }
-
-    @Test
-    void skip_withNobodyBehind_keepsThePositionButCountsTheMiss() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        stubRoom("P101");
-        PetVisit only = queued(1L, VisitStatus.WAITING, 100L);
-        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(only));
-        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(only));
-
-        VisitResponse response = service.skip(1L);
-
-        assertThat(only.getQueueOrder()).isEqualTo(100L);   // giữ nguyên vị trí
-        assertThat(only.getSkipCount()).isEqualTo(1);
-        assertThat(response.id()).isEqualTo(1L);            // không có ai để gọi tiếp
-        assertThat(publishedCalls()).extracting(PatientCalledEvent::action).containsExactly("PUSHED_BACK");
-    }
-
-    @Test
-    void skip_ofAnEmergency_losesItsPriorityAndIsQueuedLikeARegularCase_EX04() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        stubRoom("P101");
-        PetVisit emergency = queued(1L, VisitStatus.WAITING, 100L);
-        emergency.setEmergency(true);
-        PetVisit regular = queued(2L, VisitStatus.WAITING, 200L);
-        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(emergency));
-        when(visitRepository.findDoctorVisits(DOCTOR, QUEUE_STATUSES)).thenReturn(List.of(emergency, regular));
-
-        service.skip(1L);
-
-        assertThat(emergency.getSkipCount()).isEqualTo(1);       // skip_count > 0: xếp như ca thường từ nay
-        assertThat(emergency.getQueueOrder()).isEqualTo(201L);   // ngay sau ca thường kế tiếp
-    }
-
-    @Test
-    void skip_isRefusedForOthersVisits_wrongStatus_orWhileExamining() {
-        loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        stubRoom("P101");
-        PetVisit others = visit(1L, VisitStatus.WAITING, OTHER_DOCTOR);
-        PetVisit inProgress = visit(2L, VisitStatus.IN_PROGRESS, DOCTOR);
-        PetVisit mine = queued(3L, VisitStatus.WAITING, 100L);
-        when(visitRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(others));
-        when(visitRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(inProgress));
-        when(visitRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(mine));
-        when(visitRepository.existsByDoctorIdAndStatus(DOCTOR, VisitStatus.IN_PROGRESS)).thenReturn(true);
-
-        assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.skip(1L));
-        assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.skip(2L));
-        assertError(ErrorCode.DOCTOR_NOT_AVAILABLE, () -> service.skip(3L));
-        verify(visitRepository, never()).save(any());
-    }
-
-    @Test
     void call_aVisitInTheMiddle_onlyAnnounces_neverReordersNorChangesTheStatus() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         stubRoom("P101");
@@ -295,7 +208,6 @@ class DoctorQueueServiceImplTest {
         assertThat(c.getStatus()).isEqualTo(VisitStatus.WAITING);
         assertThat(c.getQueueOrder()).isEqualTo(300L);
         assertThat(a.getQueueOrder()).isEqualTo(100L);
-        assertThat(c.getSkipCount()).isZero();   // không còn "bị lùi": gọi lại bao nhiêu lần cũng không mất ưu tiên
         verify(visitRepository, never()).save(any());
         List<PatientCalledEvent> calls = publishedCalls();
         assertThat(calls).extracting(PatientCalledEvent::action).containsExactly("CALLED");

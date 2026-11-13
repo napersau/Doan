@@ -138,30 +138,28 @@ class ParaclinicServiceImplTest {
     // ================================================================== hàng đợi
 
     @Test
-    void queue_keepsTheRepositoryOrder_exposesSkipCountAndTheLabStage() {
+    void queue_keepsTheRepositoryOrder_andExposesTheLabStage() {
         PetVisit normal = visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR);
         PetVisit emergency = visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR);
         emergency.setEmergency(true);
-        PetVisit pushedBack = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
+        PetVisit other = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
 
         VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.IN_PROGRESS);
         VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
         VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
-        d3.setSkipCount(2);   // đã bị "Đẩy lùi 1 bậc" hai lần: vẫn nằm trong hàng đợi, chỉ hiển thị số lần
 
-        // Thứ tự do truy vấn quyết định ((cấp cứu AND skip_count = 0) DESC, queue_order ASC): service giữ nguyên, không tự sắp lại
+        // Thứ tự do truy vấn quyết định (cấp cứu DESC, queue_order ASC): service giữ nguyên, không tự sắp lại
         when(detailRepository.findQueue(ServiceCategory.LABORATORY, ServiceDetailStatus.OPEN)).thenReturn(List.of(d2, d1, d3));
-        when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(normal, emergency, pushedBack));
+        when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(normal, emergency, other));
         when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(d1, d2, d3));
-        // d1 đã lấy mẫu xong (đang phân tích); d2, d3 mới chỉ định / đã bị đẩy lùi
+        // d1 đã lấy mẫu xong (đang phân tích); d2, d3 mới chỉ định
         when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
                 history(1L, "ORDERED"), history(2L, "ORDERED"), history(3L, "ORDERED"), history(1L, "START_PROCESSING"),
-                history(3L, "SKIPPED"), history(1L, "SAMPLE_COLLECTED")));
+                history(1L, "SAMPLE_COLLECTED")));
 
         List<QueueItemResponse> queue = service.queue(ServiceCategory.LABORATORY);
 
         assertThat(queue).extracting(QueueItemResponse::serviceDetailId).containsExactly(2L, 1L, 3L);
-        assertThat(queue).extracting(QueueItemResponse::skipCount).containsExactly(0, 0, 2);
         assertThat(queue.get(0).emergency()).isTrue();
         assertThat(queue).extracting(QueueItemResponse::stage).containsExactly("QUEUED", "ANALYZING", "QUEUED");
         assertThat(queue).extracting(QueueItemResponse::labStatus).containsOnlyNulls();   // huy hiệu liên phòng chỉ có ở hàng đợi CĐHA
@@ -252,69 +250,6 @@ class ParaclinicServiceImplTest {
     }
 
     @Test
-    void skip_inTheMiddle_pushesBackBetweenTheNextTwo_keepsPending_logsSkipped_andCallsTheNextOne() {
-        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
-        VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.PENDING);
-        VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
-        VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
-        long o2 = d2.getQueueOrder();
-        long o3 = d3.getQueueOrder();
-        stubQueue(ServiceCategory.LABORATORY, List.of(d1, d2, d3), visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR),
-                visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR), visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR));
-        when(detailRepository.findById(1L)).thenReturn(Optional.of(d1));
-        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d1));
-
-        QueueItemResponse called = service.skip(1L);
-
-        assertThat(d1.getSkipCount()).isEqualTo(1);
-        assertThat(d1.getQueueOrder()).isEqualTo((o2 + o3) / 2);   // Q4: trung bình cộng của hai người kế tiếp
-        assertThat(d1.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        assertThat(called.serviceDetailId()).isEqualTo(2L);   // gọi ngay người kế tiếp
-        ArgumentCaptor<VisitServiceDetailHistory> audit = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
-        verify(detailHistoryRepository).save(audit.capture());
-        assertThat(audit.getValue().getAction()).isEqualTo("SKIPPED");
-        assertThat(audit.getValue().getFromStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        assertThat(audit.getValue().getToStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        PatientCalledEvent[] events = publishedCalls(2);
-        assertThat(events[0].action()).isEqualTo("PUSHED_BACK");
-        assertThat(events[0].serviceDetailId()).isEqualTo(1L);
-        assertThat(events[0].skipCount()).isEqualTo(1);
-        assertThat(events[1].action()).isEqualTo("CALLED");
-        assertThat(events[1].serviceDetailId()).isEqualTo(2L);
-    }
-
-    @Test
-    void skip_pushesBackAllPendingServicesOfTheSameVisitTogether_andCallsTheNextVisit() {
-        // Một ca có siêu âm + X-quang cùng phòng CĐHA: gọi một lần, đẩy lùi cùng nhau, chỉ một thông báo "bị lùi"
-        loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
-        VisitServiceDetail us = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
-        VisitServiceDetail xray = detail(2L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
-        VisitServiceDetail other = detail(3L, 11L, ULTRASOUND, ServiceDetailStatus.PENDING);
-        VisitServiceDetail last = detail(4L, 12L, ULTRASOUND, ServiceDetailStatus.PENDING);
-        long orderOther = other.getQueueOrder();
-        long orderLast = last.getQueueOrder();
-        stubQueue(ServiceCategory.IMAGING, List.of(us, xray, other, last), visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR),
-                visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR), visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR));
-        when(detailRepository.findById(1L)).thenReturn(Optional.of(us));
-        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(us));
-        when(detailRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(xray));
-
-        QueueItemResponse called = service.skip(1L);
-
-        long newOrder = (orderOther + orderLast) / 2;
-        assertThat(us.getSkipCount()).isEqualTo(1);
-        assertThat(xray.getSkipCount()).isEqualTo(1);   // cả nhóm cùng bị lùi
-        assertThat(us.getQueueOrder()).isEqualTo(newOrder);
-        assertThat(xray.getQueueOrder()).isEqualTo(newOrder + 1);   // giữ thứ tự trong nhóm, cùng nằm sau ca kế tiếp
-        assertThat(called.visitId()).isEqualTo(11L);   // ca kế tiếp (đợt khám khác) được gọi ngay, không phải dịch vụ còn lại của ca vừa bị lùi
-        verify(detailHistoryRepository, org.mockito.Mockito.times(2)).save(any(VisitServiceDetailHistory.class));
-        PatientCalledEvent[] events = publishedCalls(2);
-        assertThat(events[0].action()).isEqualTo("PUSHED_BACK");
-        assertThat(events[1].action()).isEqualTo("CALLED");
-        assertThat(events[1].visitId()).isEqualTo(11L);
-    }
-
-    @Test
     void call_aSpecificPendingEntry_onlyAnnounces_neverReordersNorChangesTheStatus() {
         loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
         VisitServiceDetail first = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
@@ -333,7 +268,6 @@ class ParaclinicServiceImplTest {
 
         assertThat(called.visitId()).isEqualTo(11L);
         assertThat(second.getStatus()).isEqualTo(ServiceDetailStatus.PENDING);
-        assertThat(second.getSkipCount()).isZero();
         assertThat(first.getQueueOrder()).isEqualTo(orderFirst);
         assertThat(second.getQueueOrder()).isEqualTo(orderSecond);
         PatientCalledEvent[] events = publishedCalls(1);
@@ -342,61 +276,20 @@ class ParaclinicServiceImplTest {
     }
 
     @Test
-    void skip_nobodyBehind_keepsThePosition_butStillCountsTheSkip() {
-        loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
-        VisitServiceDetail d1 = detail(1L, 10L, ULTRASOUND, ServiceDetailStatus.PENDING);
-        long before = d1.getQueueOrder();
-        stubQueue(ServiceCategory.IMAGING, List.of(d1), visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR));
-        when(detailRepository.findById(1L)).thenReturn(Optional.of(d1));
-        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d1));
-
-        QueueItemResponse result = service.skip(1L);
-
-        assertThat(d1.getSkipCount()).isEqualTo(1);
-        assertThat(d1.getQueueOrder()).isEqualTo(before);   // không còn ai phía sau: giữ nguyên vị trí
-        assertThat(result.serviceDetailId()).isEqualTo(1L);
-        PatientCalledEvent[] events = publishedCalls(1);
-        assertThat(events[0].action()).isEqualTo("PUSHED_BACK");
-        assertThat(events[0].station()).isEqualTo("IMAGING");
-    }
-
-    @Test
-    void skip_emergencyHeadWhoseNextIsAnotherUnskippedEmergency_goesJustBeforeTheFirstRegular() {
-        loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
-        PetVisit e1 = visit(10L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        e1.setEmergency(true);
-        PetVisit e2 = visit(11L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        e2.setEmergency(true);
-        PetVisit r1 = visit(12L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        VisitServiceDetail d1 = detail(1L, 10L, CBC, ServiceDetailStatus.PENDING);
-        VisitServiceDetail d2 = detail(2L, 11L, CBC, ServiceDetailStatus.PENDING);
-        VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
-        stubQueue(ServiceCategory.LABORATORY, List.of(d1, d2, d3), e1, e2, r1);
-        when(detailRepository.findById(1L)).thenReturn(Optional.of(d1));
-        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d1));
-
-        service.skip(1L);
-
-        assertThat(d1.getQueueOrder()).isEqualTo(d3.getQueueOrder() - 1);   // ca cấp cứu bị lùi mất ưu tiên: xếp ngay trước ca thường đầu tiên
-        assertThat(d1.getSkipCount()).isEqualTo(1);
-    }
-
-    @Test
-    void skip_refusedWhenNotPending_orForTheWrongRoom() {
+    void call_refusedWhenNotPending_orForTheWrongRoom() {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         VisitServiceDetail started = detail(1L, 10L, CBC, ServiceDetailStatus.IN_PROGRESS);
         when(detailRepository.findById(1L)).thenReturn(Optional.of(started));
-        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(started));
-        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.skip(1L));   // đã vào phòng thì không đẩy lùi
+        assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.call(1L));   // đã vào phòng thì không gọi nữa
 
         VisitServiceDetail imaging = detail(2L, 11L, ULTRASOUND, ServiceDetailStatus.PENDING);
         when(detailRepository.findById(2L)).thenReturn(Optional.of(imaging));
-        assertError(ErrorCode.ACCESS_DENIED, () -> service.skip(2L));   // KTV Lab không đẩy lùi hàng đợi CĐHA
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.call(2L));   // KTV Lab không gọi hàng đợi CĐHA
 
         VisitServiceDetail inRoom = detail(3L, 12L, DEWORM_SVC, ServiceDetailStatus.PENDING);
         when(detailRepository.findById(3L)).thenReturn(Optional.of(inRoom));
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.skip(3L));   // dịch vụ tại phòng không có hàng đợi
-        assertError(ErrorCode.SERVICE_DETAIL_NOT_FOUND, () -> service.skip(99L));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.call(3L));   // dịch vụ tại phòng không có hàng đợi
+        assertError(ErrorCode.SERVICE_DETAIL_NOT_FOUND, () -> service.call(99L));
         verify(publisher, never()).publishEvent(any(Object.class));
     }
 
@@ -684,11 +577,10 @@ class ParaclinicServiceImplTest {
     }
 
     @Test
-    void resultsReady_Q5_putsTheVisitAtTheHeadOfTheDoctorsQueue_andClearsItsSkipCount() {
+    void resultsReady_Q5_putsTheVisitAtTheHeadOfTheDoctorsQueue() {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         VisitServiceDetail d = detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS);
         PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        visit.setSkipCount(2);
         when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d));
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
         LabTestItem wbc = labItem(1L, "WBC");
@@ -701,8 +593,7 @@ class ParaclinicServiceImplTest {
         service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.RESULTS_READY);
-        assertThat(visit.getQueueOrder()).isEqualTo(4999L);   // MIN - 1: lên đầu hàng đợi (chỉ sau ca cấp cứu chưa bị lùi)
-        assertThat(visit.getSkipCount()).isZero();
+        assertThat(visit.getQueueOrder()).isEqualTo(4999L);   // MIN - 1: lên đầu hàng đợi (chỉ sau ca cấp cứu)
     }
 
     @Test

@@ -72,7 +72,6 @@ class VisitAssemblerTest {
     @Test
     void summary_deriveTimesAndCancelReasonFromTheHistory_andExposesQueueFields() {
         PetVisit cancelled = visit(100L, VisitStatus.CANCELLED, DOCTOR);
-        cancelled.setSkipCount(3);
         when(historyRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
                 h(null, VisitStatus.WAITING, "2026-10-30T01:00:00Z", null),
                 h(VisitStatus.WAITING, VisitStatus.CANCELLED, "2026-10-30T01:05:00Z", "Khách bận")));
@@ -81,7 +80,6 @@ class VisitAssemblerTest {
 
         assertThat(response.cancelReason()).isEqualTo("Khách bận");
         assertThat(response.closedAt()).isEqualTo(Instant.parse("2026-10-30T01:05:00Z"));
-        assertThat(response.skipCount()).isEqualTo(3);
         assertThat(response.queueOrder()).isEqualTo(cancelled.getQueueOrder());
         assertThat(response.assignedRoom()).isNull();   // do VisitEnricher gắn ở controller
         assertThat(response.locked()).isTrue();

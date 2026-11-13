@@ -294,16 +294,16 @@ class NotificationEventListenerTest {
 
     // ================================================================== visit.patient_called
 
-    private static PatientCalledEvent called(String action, String station, Long doctorId, String room, int skipCount) {
+    private static PatientCalledEvent called(String action, String station, Long doctorId, String room) {
         return new PatientCalledEvent(UUID.randomUUID(), NOW, DOCTOR, action, station, 7L, "VIS-2026-7", 11L, doctorId,
-                "LAB".equals(station) || "IMAGING".equals(station) ? 55L : null, room, skipCount);
+                "LAB".equals(station) || "IMAGING".equals(station) ? 55L : null, room);
     }
 
     @Test
     void patientCalled_doctorRoomInvitesTheOwnerWithRoomAndNumber_andRefreshesTheDoctor() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
 
-        listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101", 0));
+        listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101"));
 
         NotificationMessage forOwner = captureUser(OWNER);
         assertThat(forOwner.type()).isEqualTo(NotificationType.PATIENT_CALLED);
@@ -318,8 +318,8 @@ class NotificationEventListenerTest {
     void patientCalled_labAndImagingGoToTheRightTechnicianRole() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
 
-        listener.onPatientCalled(called("CALLED", "LAB", null, "P201", 0));
-        listener.onPatientCalled(called("CALLED", "IMAGING", null, "P202", 0));
+        listener.onPatientCalled(called("CALLED", "LAB", null, "P201"));
+        listener.onPatientCalled(called("CALLED", "IMAGING", null, "P202"));
 
         assertThat(captureUser(OWNER, 2).get(0).title()).contains("Xét nghiệm", "P201");
         assertThat(captureUser(OWNER, 2).get(1).title()).contains("Chẩn đoán hình ảnh", "P202");
@@ -328,22 +328,10 @@ class NotificationEventListenerTest {
     }
 
     @Test
-    void patientCalled_pushedBackTellsTheOwnerTheyWereMissedAndJustNeedToWait() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
-
-        listener.onPatientCalled(called("PUSHED_BACK", "DOCTOR_ROOM", DOCTOR, "P101", 1));
-
-        NotificationMessage forOwner = captureUser(OWNER);
-        assertThat(forOwner.severity()).isEqualTo(Severity.WARNING);
-        assertThat(forOwner.body()).contains("lùi một lượt", "chờ tới lượt");
-        assertThat(forOwner.data()).containsEntry("action", "PUSHED_BACK").containsEntry("skipCount", 1);
-    }
-
-    @Test
     void patientCalled_clinicalDownStillRefreshesStaffButCannotReachTheOwner() {
         when(people.findVisit(7L)).thenReturn(Optional.empty());
 
-        listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, null, 0));
+        listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, null));
 
         verify(dispatcher, never()).toUser(eq(OWNER), any());
         verify(dispatcher).toUser(eq(DOCTOR), any());
@@ -352,7 +340,7 @@ class NotificationEventListenerTest {
     @Test
     void patientCalled_redeliveryDoesNotCallTwice() {
         when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
-        var event = called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101", 0);
+        var event = called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101");
 
         listener.onPatientCalled(event);
         listener.onPatientCalled(event);

@@ -481,7 +481,7 @@ Danh sách chờ phân công và hàng đợi của từng Bác sĩ đều sắp
 2. **Ca có kết quả cận lâm sàng quay lại (chỉ ở hàng đợi Bác sĩ):** khi ca chuyển `RESULTS_READY`, hệ thống đặt `queue_order` nhỏ hơn mọi ca trong hàng đợi của Bác sĩ khám chính, nên ca đứng ngay sau ca cấp cứu.
 3. **Thứ tự tiếp nhận:** Các ca còn lại (có lịch hẹn hoặc vãng lai) theo `queue_order`, khởi tạo bằng thời điểm check-in (đến trước phục vụ trước) và không đổi khi gọi / gọi lại.
 
-Truy vấn: `ORDER BY (is_emergency AND skip_count = 0) DESC, queue_order ASC`, dùng chỉ mục `idx_visits_queue (doctor_id, status, is_emergency, queue_order)`.
+Truy vấn: `ORDER BY is_emergency DESC, queue_order ASC`, dùng chỉ mục `idx_visits_queue (doctor_id, status, is_emergency, queue_order)`.
 
 > **Vì sao không có tầng "khách có hẹn đúng giờ":** lịch hẹn chỉ dùng để giữ chỗ và cân bằng số khách mỗi khung giờ (mục 5.3); khi khách đã đến quầy, thứ tự check-in phản ánh đúng thứ tự đến. Ngoài ra giờ hẹn nằm ở CSDL của `appointment-service`, còn hàng đợi nằm ở `clinical-service`; tầng "đúng giờ hẹn" sẽ cần truy vấn liên service cho mỗi lần tải hàng đợi.
 
@@ -500,7 +500,7 @@ Hệ thống có **bốn loại hàng đợi**, tất cả dùng chung cơ chế
 
 **Gọi:** mỗi ca trong hàng đợi có nút *"Gọi"* (và *"Bắt đầu"*). Người phụ trách hàng đợi (khi không đang làm dở ca nào) bấm *"Gọi"* ở một ca **bất kỳ** (hoặc *"Gọi số tiếp theo"* để gọi ca đứng đầu): hệ thống hiển thị số thứ tự và số phòng trên màn hình sảnh và gửi thông báo đến ứng dụng của chủ nuôi. Gọi **không đổi trạng thái và không đổi thứ tự**: ca chỉ đổi trạng thái khi thú cưng vào phòng và người phụ trách bấm "Bắt đầu khám" / "Bắt đầu Giai đoạn 2" / "Bắt đầu thực hiện".
 
-**Khách vắng / quay lại:** gọi 2–3 lần không thấy, người phụ trách bấm *"Gọi"* ở **ca khác** trong danh sách; ca vắng giữ nguyên vị trí. Ví dụ hàng đợi Bác sĩ A là `[Milo, Lu, Na]`: gọi Milo không thấy → gọi Lu (hàng đợi vẫn là `[Milo, Lu, Na]`). Khi khách quay lại (Bác sĩ nhận thông báo hoặc khách báo tại quầy), Bác sĩ bấm *"Gọi lại"* ở đúng ca đó. Hệ thống không theo dõi việc khách quay lại, nên không bao giờ xảy ra tình trạng hai ca đầu hàng đổi chỗ cho nhau mãi mãi hay ca cấp cứu bị mất ưu tiên. *(Cập nhật 13/11/2026: thay cho cơ chế "Đẩy lùi 1 bậc" của bản v3.0 đầu; cột `skip_count` và hành động `SKIPPED` chỉ còn là cơ chế dự phòng, luôn 0 với dữ liệu mới.)*
+**Khách vắng / quay lại:** gọi 2–3 lần không thấy, người phụ trách bấm *"Gọi"* ở **ca khác** trong danh sách; ca vắng giữ nguyên vị trí. Ví dụ hàng đợi Bác sĩ A là `[Milo, Lu, Na]`: gọi Milo không thấy → gọi Lu (hàng đợi vẫn là `[Milo, Lu, Na]`). Khi khách quay lại (Bác sĩ nhận thông báo hoặc khách báo tại quầy), Bác sĩ bấm *"Gọi lại"* ở đúng ca đó. Hệ thống không theo dõi việc khách quay lại, nên không bao giờ xảy ra tình trạng hai ca đầu hàng đổi chỗ cho nhau mãi mãi hay ca cấp cứu bị mất ưu tiên. *(Cập nhật 13/11/2026: thay cho cơ chế "Đẩy lùi 1 bậc" của bản v3.0 đầu; cột `skip_count`, hành động `SKIPPED` và API đẩy lùi đã bị xóa.)*
 
 **Gộp ca ở phòng Xét nghiệm / CĐHA:** các dịch vụ `PENDING` của **cùng một đợt khám trong cùng phòng** (ví dụ siêu âm + X-quang) hiển thị thành **một ca**: gọi một lần, "Bắt đầu" cả ca; nhập kết quả và hủy vẫn theo từng dịch vụ (mỗi dịch vụ có kết quả và hóa đơn riêng).
 
@@ -602,7 +602,7 @@ Visit lưu:
 - Lễ tân tiếp nhận.
 - Phòng khám (suy ra từ số phòng của Bác sĩ, không lưu riêng trên Visit).
 - Thời gian tiếp nhận.
-- Thứ tự trong hàng đợi (`queue_order`); `skip_count` (số lần đẩy lùi, cơ chế dự phòng, luôn 0).
+- Thứ tự trong hàng đợi (`queue_order`).
 - Thời gian bắt đầu khám, chốt ca, hoàn tất, lý do hủy (lấy từ lịch sử trạng thái `pet_visit_status_histories`, không lưu thành cột riêng).
 - Cân nặng.
 - Thân nhiệt.
@@ -772,7 +772,7 @@ Khi nhân sự phòng Lab / CĐHA nhập đầy đủ kết quả đo đạc (WB
 - Quy trình điều phối tái khám diễn ra qua **3 bước**:
 
 ### Bước 1: Ca lên đầu hàng đợi của Bác sĩ khám chính
-- Hệ thống đặt `queue_order` của ca nhỏ hơn mọi ca trong hàng đợi của Bác sĩ khám chính và `skip_count = 0`, nên ca đứng **đầu hàng đợi**, chỉ sau ca cấp cứu. Nhiều ca cùng có kết quả thì ca nào có kết quả sau đứng trước một chút; Bác sĩ vẫn thấy toàn bộ trong danh sách.
+- Hệ thống đặt `queue_order` của ca nhỏ hơn mọi ca trong hàng đợi của Bác sĩ khám chính, nên ca đứng **đầu hàng đợi**, chỉ sau ca cấp cứu. Nhiều ca cùng có kết quả thì ca nào có kết quả sau đứng trước một chút; Bác sĩ vẫn thấy toàn bộ trong danh sách.
 - **Trên màn hình Bác sĩ:** Huy hiệu thông báo nhẹ (Notification Badge): *"Ca khám [Mã Visit - Tên Pet] đã có kết quả cận lâm sàng"*, không ngắt quãng ca đang khám.
 - **Trên màn hình phòng chờ / Ứng dụng của chủ nuôi:** *"Bé [Tên Pet] đã có đầy đủ kết quả cận lâm sàng. Bác sĩ [Tên Bác sĩ] sẽ mời bạn và bé vào phòng ngay sau ca đang khám. Xin vui lòng chờ tại sảnh."*
 - Lễ tân **không bị khóa**: vẫn xếp ca mới vào hàng đợi Bác sĩ này; ca mới đứng sau ca có kết quả.

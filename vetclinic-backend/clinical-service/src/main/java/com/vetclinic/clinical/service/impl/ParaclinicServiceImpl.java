@@ -75,9 +75,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     private static final String ACTION_SAMPLE_COLLECTED = "SAMPLE_COLLECTED";
     private static final String ACTION_START = "START_PROCESSING";
-    private static final String ACTION_SKIPPED = "SKIPPED";
     private static final String CALLED = "CALLED";
-    private static final String PUSHED_BACK = "PUSHED_BACK";
 
     private final VisitServiceDetailRepository detailRepository;
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
@@ -163,7 +161,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     PetVisit v = visits.get(d.getVisitId());
                     return new QueueItemResponse(d.getId(), v.getId(), v.getVisitCode(), v.getPet().getId(),
                             v.getPet().getName(), v.getPet().getSpecies().getName(), d.getService().getId(),
-                            d.getService().getName(), category, v.isEmergency(), d.getStatus(), d.getSkipCount(),
+                            d.getService().getName(), category, v.isEmergency(), d.getStatus(),
                             category == ServiceCategory.LABORATORY ? labStage(d, latestAction.get(d.getId())) : null,
                             category == ServiceCategory.IMAGING
                                     ? labBadge(siblings.getOrDefault(d.getVisitId(), List.of()), latestAction) : null,
@@ -181,7 +179,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         return latest;
     }
 
-    /** Trạng thái con của dịch vụ Lab: QUEUED (ORDERED/SKIPPED) / SAMPLING (START_PROCESSING) / ANALYZING (SAMPLE_COLLECTED). */
+    /** Trạng thái con của dịch vụ Lab: QUEUED (ORDERED) / SAMPLING (START_PROCESSING) / ANALYZING (SAMPLE_COLLECTED). */
     static String labStage(VisitServiceDetail d, String latestAction) {
         if (d.getStatus() == ServiceDetailStatus.PENDING) {
             return "QUEUED";
@@ -209,7 +207,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         return anyLab ? "SAMPLE_COLLECTED" : null;
     }
 
-    // ================================================================== Gọi số / Đẩy lùi (BR-34)
+    // ================================================================== Gọi số (BR-34)
 
     @Override
     public QueueItemResponse callNext(ServiceCategory category) {
@@ -245,79 +243,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         });
     }
 
-    @Override
-    public QueueItemResponse skip(Long detailId) {
-        Long actor = SecurityUtils.getCurrentUserId();
-        // dịch vụ của chỉ định là LAZY: phải đọc nhóm dịch vụ TRONG transaction (đây là bước đọc nhanh trước khi gọi Feign lấy số phòng)
-        ServiceCategory category = readCommittedTemplate.execute(tx -> detailRepository.findById(detailId)
-                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND)).getService().getCategory());
-        requireParaclinical(category);
-        assertTechnicianOf(category);
-        String room = roomOf(actor);
-        return readCommittedTemplate.execute(tx -> {
-            VisitServiceDetail detail = detailRepository.findByIdForUpdate(detailId)   // khóa dòng chống hai người cùng đẩy lùi
-                    .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
-            requireDetailStatus(detail, ServiceDetailStatus.PENDING, "Chỉ đẩy lùi được chỉ định đang chờ trong hàng đợi (PENDING)");
-            List<VisitServiceDetail> queue = detailRepository.findQueue(category, List.of(ServiceDetailStatus.PENDING));
-            Map<Long, PetVisit> visits = visitRepository.findWithPetByIdIn(
-                            queue.stream().map(VisitServiceDetail::getVisitId).distinct().toList()).stream()
-                    .collect(Collectors.toMap(PetVisit::getId, v -> v));
-
-            // Một "ca" trong phòng = mọi chỉ định đang chờ của CÙNG đợt khám trong CÙNG phòng (vd. siêu âm + X-quang): gọi một lần,
-            // đẩy lùi cùng nhau. Thứ tự các ca = thứ tự xuất hiện đầu tiên trong hàng đợi.
-            List<List<VisitServiceDetail>> groups = groupByVisit(queue);
-            int index = groupIndexOf(groups, detail.getVisitId());
-            List<VisitServiceDetail> group = groups.get(index);
-            for (VisitServiceDetail member : group) {
-                if (!member.getId().equals(detailId)) {
-                    detailRepository.findByIdForUpdate(member.getId());   // khóa cả nhóm, tránh hai người cùng đẩy lùi một ca
-                }
-            }
-            Long newOrder = QueueOrders.afterPushBack(groups.stream()
-                    .map(g -> new QueueOrders.Entry(g.stream().mapToLong(VisitServiceDetail::getQueueOrder).min().orElseThrow(),
-                            visits.get(g.get(0).getVisitId()).isEmergency() && g.stream().allMatch(x -> x.getSkipCount() == 0)))
-                    .toList(), index);
-
-            long offset = 0;
-            for (VisitServiceDetail member : group) {
-                member.setSkipCount(member.getSkipCount() + 1);   // không giới hạn số lần; ca cấp cứu đã bị lùi xếp như ca thường
-                if (newOrder != null) {
-                    member.setQueueOrder(newOrder + offset++);   // giữ nguyên thứ tự trong nhóm, cả nhóm nằm sau người kế tiếp
-                }
-                detailRepository.save(member);
-                // Dịch vụ giữ PENDING (khách quay lại chỉ chờ tới lượt); ghi vết để biết đã bị lùi
-                support.recordDetail(member.getId(), ServiceDetailStatus.PENDING, ServiceDetailStatus.PENDING, ACTION_SKIPPED, actor,
-                        "Vắng mặt khi gọi số: đẩy lùi 1 bậc");
-            }
-            publishCalled(detail, visits.get(detail.getVisitId()), PUSHED_BACK, actor, room, category);   // một thông báo cho cả ca
-
-            if (newOrder == null) {
-                return toItems(category, List.of(detail)).get(0);   // không còn ai phía sau: giữ nguyên vị trí
-            }
-            VisitServiceDetail next = groups.get(index + 1).get(0);   // ca kế tiếp lên đầu và được gọi ngay
-            publishCalled(next, visits.get(next.getVisitId()), CALLED, actor, room, category);
-            return toItems(category, List.of(next)).get(0);
-        });
-    }
-
-    /** Gom hàng đợi (đã sắp theo thứ tự gọi) thành từng ca theo đợt khám, giữ thứ tự xuất hiện đầu tiên. */
-    private static List<List<VisitServiceDetail>> groupByVisit(List<VisitServiceDetail> queue) {
-        Map<Long, List<VisitServiceDetail>> byVisit = new java.util.LinkedHashMap<>();
-        for (VisitServiceDetail d : queue) {
-            byVisit.computeIfAbsent(d.getVisitId(), k -> new java.util.ArrayList<>()).add(d);
-        }
-        return new java.util.ArrayList<>(byVisit.values());
-    }
-
-    private static int groupIndexOf(List<List<VisitServiceDetail>> groups, Long visitId) {
-        for (int i = 0; i < groups.size(); i++) {
-            if (groups.get(i).get(0).getVisitId().equals(visitId)) {
-                return i;
-            }
-        }
-        throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ định này không nằm trong hàng đợi");
-    }
-
     private PetVisit visitWithPet(Long visitId) {
         return visitRepository.findWithPetById(visitId).orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
     }
@@ -325,7 +250,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     private void publishCalled(VisitServiceDetail d, PetVisit v, String action, Long actor, String room, ServiceCategory category) {
         eventPublisher.publishEvent(new PatientCalledEvent(UUID.randomUUID(), clock.instant(), actor, action,
                 category == ServiceCategory.LABORATORY ? "LAB" : "IMAGING", v.getId(), v.getVisitCode(), v.getPet().getId(),
-                v.getDoctorId(), d.getId(), room, d.getSkipCount()));
+                v.getDoctorId(), d.getId(), room));
     }
 
     /** Số phòng của kỹ thuật viên để hiển thị khi gọi số; không tra được thì bỏ trống, không làm hỏng việc gọi số. */

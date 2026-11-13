@@ -182,4 +182,4 @@
 
 > **Rà soát 11/11:** không đổi số lượng enum. `ServiceDetailStatus` và `VisitStatus` chỉ cập nhật mô tả theo mô hình hàng đợi riêng của từng Bác sĩ và cơ chế "Đẩy lùi 1 bậc"; cột `visit_service_detail_histories.action` (VARCHAR, không phải enum) đổi `POSTPONED` / `RECALL` thành `SKIPPED`.
 
-> **Cập nhật 13/11/2026:** hàng đợi dùng "Gọi" theo từng dòng thay cho "Đẩy lùi 1 bậc" (xem State Machine §2.4). Giá trị `SKIPPED` của `visit_service_detail_histories.action` chỉ còn do chức năng đẩy lùi dự phòng ghi, luồng chính không phát sinh; không đổi số lượng enum.
+> **Cập nhật 13/11/2026:** hàng đợi dùng "Gọi" theo từng dòng thay cho "Đẩy lùi 1 bậc" (xem State Machine §2.4). Giá trị `SKIPPED` của `visit_service_detail_histories.action` đã bị bỏ (không còn nơi nào ghi); cột `action` còn 5 giá trị `ORDERED`, `START_PROCESSING`, `SAMPLE_COLLECTED`, `COMPLETED`, `CANCELLED`. Không đổi số lượng enum.

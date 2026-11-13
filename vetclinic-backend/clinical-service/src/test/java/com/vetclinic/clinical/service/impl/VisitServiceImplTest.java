@@ -205,7 +205,6 @@ class VisitServiceImplTest {
 
         assertThat(visit.getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
         assertThat(visit.getQueueOrder()).isEqualTo(1_793_325_600_000_000L);   // 2026-10-30T02:00:00Z
-        assertThat(visit.getSkipCount()).isZero();
         assertThat(lastHistory().getNotes()).contains("lịch hẹn #7");
     }
 

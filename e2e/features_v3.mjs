@@ -268,11 +268,12 @@ async function main() {
   await call('POST', `${CLIN}/pet-visits/${vb.id}/assign-doctor`, { token: T.rec, body: { doctorId: 4 } });
   const queue4 = (await call('GET', `${CLIN}/pet-visits/my-queue`, { token: T.doc4 })).data.map((v) => v.id);
   check('ca cấp cứu (đến sau) đứng trước ca thường trong hàng đợi bác sĩ', queue4.indexOf(vb.id) >= 0 && queue4.indexOf(vb.id) < queue4.indexOf(va.id), JSON.stringify(queue4));
-  check('gọi số: bác sĩ khác không đẩy lùi được ca của người khác', (await call('POST', `${CLIN}/pet-visits/${vb.id}/skip`, { token: T.doc3 })).status >= 400);
+  check('bác sĩ khác không gọi được ca của người khác (403)', (await call('POST', `${CLIN}/pet-visits/${vb.id}/call`, { token: T.doc3 })).status === 403);
   const called = await callNext(T.doc4);
   check('call-next chọn ca cấp cứu trước', called.data?.id === vb.id, brief(called));
-  const skipped = await call('POST', `${CLIN}/pet-visits/${vb.id}/skip`, { token: T.doc4 });
-  check('ca cấp cứu bị đẩy lùi mất ưu tiên (xếp như ca thường), người kế tiếp được gọi', skipped.data?.id === va.id && (await visitOf(vb.id)).skipCount === 1);
+  const callOther = await call('POST', `${CLIN}/pet-visits/${va.id}/call`, { token: T.doc4 });
+  const queueAfter = (await call('GET', `${CLIN}/pet-visits/my-queue`, { token: T.doc4 })).data.map((v) => v.id);
+  check('cấp cứu vắng: gọi ca khác, ca cấp cứu vẫn là cấp cứu và giữ vị trí đầu hàng', callOther.status === 200 && queueAfter[0] === vb.id && (await visitOf(vb.id)).emergency === true, JSON.stringify(queueAfter));
   check('hủy tiếp nhận ca WAITING bắt buộc lý do (400)', (await call('POST', `${CLIN}/pet-visits/${vb.id}/cancel`, { token: T.rec, body: {} })).status === 400);
   check('hủy tiếp nhận ca WAITING (T03) → CANCELLED', (await call('POST', `${CLIN}/pet-visits/${vb.id}/cancel`, { token: T.rec, body: { reason: 'Khách bỏ về' } })).data?.status === 'CANCELLED');
   check('bác sĩ khác bắt đầu khám ca không thuộc mình → CLIN_1311', (await startExam(T.doc3, va.id)).code === 'CLIN_1311');
@@ -369,13 +370,14 @@ async function main() {
   const g2row = q1.find((i) => i.visitId === g2.v);
   const callOne = await call('POST', `${CLIN}/service-details/${g2row.serviceDetailId}/call`, { token: T.img });
   const q1b = (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
-  check('Gọi một ca bất kỳ trong hàng đợi CĐHA: 200, không đổi thứ tự và không tăng skipCount', callOne.status === 200 && callOne.data?.visitId === g2.v
-    && q1b.map((i) => i.serviceDetailId).join() === q1.map((i) => i.serviceDetailId).join() && q1b.every((i) => i.skipCount === (q1.find((x) => x.serviceDetailId === i.serviceDetailId) || {}).skipCount), brief(callOne));
+  check('Gọi một ca bất kỳ trong hàng đợi CĐHA: 200 và không đổi thứ tự', callOne.status === 200 && callOne.data?.visitId === g2.v
+    && q1b.map((i) => i.serviceDetailId).join() === q1.map((i) => i.serviceDetailId).join(), brief(callOne));
   check('KTV Lab không gọi được ca của phòng CĐHA (403)', (await call('POST', `${CLIN}/service-details/${g2row.serviceDetailId}/call`, { token: T.lab })).status === 403);
-  const sk = await call('POST', `${CLIN}/service-details/${g1rows[0].serviceDetailId}/skip`, { token: T.img });
+  const gAgain = await call('POST', `${CLIN}/service-details/${g1rows[0].serviceDetailId}/call`, { token: T.img });
   const q2 = (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
-  check('Đẩy lùi 1 lần: cả hai dịch vụ của ca cùng bị lùi (skipCount = 1) và ca kế tiếp được gọi', q2.filter((i) => i.visitId === g1.v).every((i) => i.skipCount === 1) && sk.data?.visitId === g2.v, brief(sk));
-  check('ca kế tiếp đứng trước ca vừa bị lùi, ca vừa bị lùi vẫn đủ hai dịch vụ', q2.findIndex((i) => i.visitId === g2.v) < q2.findIndex((i) => i.visitId === g1.v) && q2.filter((i) => i.visitId === g1.v).length === 2);
+  check('Gọi lại ca có hai dịch vụ: 200, thứ tự không đổi và ca vẫn đủ hai dịch vụ', gAgain.status === 200 && gAgain.data?.visitId === g1.v
+    && q2.map((i) => i.serviceDetailId).join() === q1.map((i) => i.serviceDetailId).join() && q2.filter((i) => i.visitId === g1.v).length === 2);
+  check('API "đẩy lùi" phòng CĐHA đã bị bỏ', (await call('POST', `${CLIN}/service-details/${g1rows[0].serviceDetailId}/skip`, { token: T.img })).status >= 400);
   await call('POST', `${CLIN}/pet-visits/${g1.v}/abandon`, { token: T.rec });
   await call('POST', `${CLIN}/pet-visits/${g2.v}/abandon`, { token: T.rec });
 

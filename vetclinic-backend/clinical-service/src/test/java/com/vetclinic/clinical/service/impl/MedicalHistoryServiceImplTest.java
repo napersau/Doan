@@ -80,7 +80,7 @@ class MedicalHistoryServiceImplTest {
 
     private static VisitResponse response(long id) {
         return new VisitResponse(id, "VIS-2026-" + id, 11L, "Lu", "PET-2026-11", "Chó", OWNER, null, DOCTOR, RECEPTIONIST, "P01",
-                false, VisitStatus.COMPLETED, true, 0, 0L, BigDecimal.TEN, BigDecimal.TEN, null, null, "Viêm da", null, null,
+                false, VisitStatus.COMPLETED, true, 0L, BigDecimal.TEN, BigDecimal.TEN, null, null, "Viêm da", null, null,
                 null, null, null, null, null, List.of(), List.of(), List.of());
     }
 

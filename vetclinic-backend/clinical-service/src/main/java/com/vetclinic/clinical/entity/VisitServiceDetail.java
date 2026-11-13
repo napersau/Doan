@@ -47,13 +47,10 @@ public class VisitServiceDetail {
 
     /**
      * Thứ tự trong hàng đợi phòng Xét nghiệm / CĐHA, số NHỎ gọi trước (v3.0). Gán = thời điểm chỉ định, epoch micro giây
-     * (QueueOrders). "Đẩy lùi 1 bậc" hoạt động như ở pet_visits.
+     * (QueueOrders). Gọi / gọi lại không đổi giá trị này (như pet_visits).
      */
     @Column(name = "queue_order", nullable = false)
     private long queueOrder;
 
-    /** Số lần bị "Đẩy lùi 1 bậc". Giá/VAT KHÔNG nằm ở đây nữa mà ở service_invoices (1-1 với dòng chỉ định này). */
-    @Column(name = "skip_count", nullable = false)
-    @Builder.Default
-    private int skipCount = 0;
+    // Giá/VAT KHÔNG nằm ở đây mà ở service_invoices (1-1 với dòng chỉ định này).
 }

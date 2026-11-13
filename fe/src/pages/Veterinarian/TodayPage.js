@@ -18,9 +18,7 @@ async function load() {
 function VisitLine({ visit, highlight, children }) {
   return <li style={highlight ? { background: 'var(--ui-raised)', borderRadius: 8 } : undefined}>
     <div><strong>{visit.petName}</strong> <small style={{ display: 'inline' }}>({visit.speciesName})</small>{' '}
-      {visit.emergency && visit.skipCount === 0 && <span className="ui-emergency">CẤP CỨU</span>}
-      {visit.emergency && visit.skipCount > 0 && <Badge tone="amber">Cấp cứu · đã mất ưu tiên</Badge>}
-      {visit.skipCount > 0 && <Badge tone="amber">Đã bị lùi {visit.skipCount} lần</Badge>}
+      {visit.emergency && <span className="ui-emergency">CẤP CỨU</span>}
       <small>{visit.visitCode} · tiếp nhận {formatTimeOfInstant(visit.checkedInAt)}{visit.initialSymptoms ? ` · ${visit.initialSymptoms}` : ''}</small></div>
     <div className="ui-actions"><Badge map={VISIT_STATUS} value={visit.status} />{children}</div>
   </li>;

@@ -76,16 +76,11 @@ public class PetVisit {
 
     /**
      * Thứ tự trong hàng đợi, số NHỎ được gọi trước (v3.0). Gán = thời điểm tiếp nhận tính bằng epoch micro giây
-     * (QueueOrders). "Đẩy lùi 1 bậc" đặt ca ra ngay sau người kế tiếp; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1.
-     * Thứ tự mọi hàng đợi: ORDER BY (is_emergency AND skip_count = 0) DESC, queue_order ASC.
+     * (QueueOrders). Gọi / gọi lại KHÔNG đổi giá trị này; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1.
+     * Thứ tự mọi hàng đợi: ORDER BY is_emergency DESC, queue_order ASC.
      */
     @Column(name = "queue_order", nullable = false)
     private long queueOrder;
-
-    /** Số lần bị "Đẩy lùi 1 bậc" (không giới hạn). Ca cấp cứu đã bị lùi (skip_count > 0) xếp như ca thường. */
-    @Column(name = "skip_count", nullable = false)
-    @Builder.Default
-    private int skipCount = 0;
 
     @Version
     @Column(name = "version", nullable = false)

@@ -64,13 +64,6 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success("Đã gọi bệnh nhân", paraclinicService.call(id)));
     }
 
-    /** (Không còn dùng trên giao diện) Đẩy lùi 1 bậc: giữ lại cho tương thích API. */
-    @PostMapping("/service-details/{id}/skip")
-    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<QueueItemResponse>> skip(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã đẩy lùi 1 bậc", paraclinicService.skip(id)));
-    }
-
     /** Phòng Lab: đã lấy mẫu xong (huy hiệu liên phòng cho CĐHA). */
     @PostMapping("/service-details/{id}/sample-collected")
     @PreAuthorize("hasRole('LAB_TECHNICIAN')")

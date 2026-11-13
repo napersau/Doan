@@ -23,7 +23,7 @@ function ReasonDialog({ title, item, onClose, onSubmit, danger }) {
   </FormDialog>;
 }
 
-/** Gom các dòng của CÙNG đợt khám thành một "ca" (giữ thứ tự xuất hiện đầu tiên): một lần gọi, một lần đẩy lùi. */
+/** Gom các dòng của CÙNG đợt khám thành một "ca" (giữ thứ tự xuất hiện đầu tiên): một lần gọi, một lần bắt đầu. */
 function groupByVisit(items) {
   const map = new Map();
   items.forEach((item) => { if (!map.has(item.visitId)) map.set(item.visitId, []); map.get(item.visitId).push(item); });
@@ -34,7 +34,7 @@ const serviceNames = (rows) => rows.map((r) => r.serviceName).join(' + ');
 /**
  * Hàng đợi Lab / CĐHA (v3.0): hàng đợi tự có khi bác sĩ chỉ định. Mỗi ca có nút "Gọi" (chỉ phát thông báo, KHÔNG đổi trạng thái và KHÔNG đổi thứ tự)
  * và "Bắt đầu" khi khách vào phòng. Khách vắng thì gọi ca khác; khách quay lại thì gọi lại. "Gọi số tiếp theo" là phím tắt gọi người đứng đầu.
- * Nhiều dịch vụ của CÙNG một đợt khám trong CÙNG phòng (vd. siêu âm + X-quang) hiện thành MỘT ca: gọi một lần, bắt đầu / đẩy lùi cùng nhau; nhập kết quả và hủy vẫn theo từng dịch vụ.
+ * Nhiều dịch vụ của CÙNG một đợt khám trong CÙNG phòng (vd. siêu âm + X-quang) hiện thành MỘT ca: gọi một lần, bắt đầu cùng nhau; nhập kết quả và hủy vẫn theo từng dịch vụ.
  */
 export default function QueuePage({ kind }) {
   const room = ROOM[kind];
@@ -69,8 +69,7 @@ export default function QueuePage({ kind }) {
       {(items) => {
         const workingGroups = groupByVisit(items.filter((item) => item.status === 'IN_PROGRESS'));
         const waitingGroups = groupByVisit(items.filter((item) => item.status !== 'IN_PROGRESS'));
-        const isFirstRun = (g) => g.rows.every((r) => r.skipCount === 0);
-        const urgent = waitingGroups.filter((g) => g.head.emergency && isFirstRun(g));
+        const urgent = waitingGroups.filter((g) => g.head.emergency);
         return <>
           <Stats items={[['Đang thực hiện', workingGroups.length], ['Đang chờ', waitingGroups.length], ['Cấp cứu', urgent.length, undefined, urgent.length ? 'red' : '']]} />
 
@@ -86,8 +85,8 @@ export default function QueuePage({ kind }) {
           </Panel>}
 
           <Panel title="Hàng đợi" subtitle="Bấm Gọi để báo chủ nuôi vào phòng; các dịch vụ cùng đợt khám được gọi chung một lượt. Gọi không làm đổi thứ tự." actions={<Button variant="primary" disabled={waitingGroups.length === 0} busy={action.busy} onClick={callNext}>Gọi số tiếp theo</Button>} flush>
-            {waitingGroups.length === 0 ? <Empty>Hiện không có ca nào chờ ở phòng này.</Empty> : <Table caption={room.title} rows={waitingGroups} rowKey="key" rowClass={(g) => (g.head.emergency && isFirstRun(g) ? 'emergency' : '')} columns={[
-              { title: 'Thú cưng', render: (g) => <><strong>{g.head.petName}</strong>{g.head.emergency && isFirstRun(g) && <span className="ui-emergency"> · CẤP CỨU</span>}{calledLabel(g) && <Badge tone="amber">{calledLabel(g)}</Badge>}<small>{g.head.speciesName} · {g.head.visitCode}</small></> },
+            {waitingGroups.length === 0 ? <Empty>Hiện không có ca nào chờ ở phòng này.</Empty> : <Table caption={room.title} rows={waitingGroups} rowKey="key" rowClass={(g) => (g.head.emergency ? 'emergency' : '')} columns={[
+              { title: 'Thú cưng', render: (g) => <><strong>{g.head.petName}</strong>{g.head.emergency && <span className="ui-emergency"> · CẤP CỨU</span>}{calledLabel(g) && <Badge tone="amber">{calledLabel(g)}</Badge>}<small>{g.head.speciesName} · {g.head.visitCode}</small></> },
               { title: 'Dịch vụ', render: (g) => <div style={{ display: 'grid', gap: 6 }}>{g.rows.map((row) => <div key={row.serviceDetailId} className="ui-actions" style={{ justifyContent: 'space-between' }}>
                 <span>{row.serviceName}{row.notes && <small>{row.notes}</small>}</span>
                 {g.rows.length > 1 && <Button className="small danger" onClick={() => setDialog({ item: row })}>Hủy dịch vụ</Button>}</div>)}</div> },

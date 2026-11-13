@@ -24,10 +24,10 @@
 -- (5) Bổ sung bảng nối service_lab_test_items: gói xét nghiệm gồm những chỉ số nào.
 -- (6) Bổ sung cột version (khóa lạc quan @Version) cho các bảng có cập nhật đồng thời.
 -- (7) [Rà soát 11/11] Hàng đợi riêng cho từng Bác sĩ và cho phòng Xét nghiệm / CĐHA:
---     cột queue_order + skip_count ở pet_visits và visit_service_details.
---     Thứ tự: ORDER BY (is_emergency AND skip_count = 0) DESC, queue_order.
+--     cột queue_order ở pet_visits và visit_service_details.
+--     Thứ tự: ORDER BY is_emergency DESC, queue_order.
 --     [Cập nhật 13/11/2026] Gọi theo từng dòng: bác sĩ / KTV bấm "Gọi" ở dòng bất kỳ, không đổi thứ tự (queue_order giữ nguyên).
---     skip_count (số lần "Đẩy lùi 1 bậc") là cơ chế dự phòng, giao diện không còn dùng nên luôn 0 với dữ liệu mới; giữ cột để thứ tự hàng đợi tương thích.
+--     Đã BỎ cơ chế "Đẩy lùi 1 bậc" cùng cột skip_count và hành động SKIPPED (làm hai ca đầu hàng đổi chỗ mãi mãi).
 --
 -- NGUYÊN TẮC TOÀN VẸN DỮ LIỆU LIÊN DỊCH VỤ:
 -- - Bảng cùng Service: ràng buộc FOREIGN KEY vật lý.
@@ -238,11 +238,9 @@ CREATE TABLE IF NOT EXISTS pet_visits (
     doctor_advice TEXT NULL,
     status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
     checked_in_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi (nhỏ gọi trước). Gán = thời điểm tiếp nhận (epoch micro giây); "Đẩy lùi 1 bậc" (dự phòng, giao diện không dùng) đặt ra ngay sau người kế tiếp; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1
-    skip_count INT NOT NULL DEFAULT 0, -- Số lần bị "Đẩy lùi 1 bậc" (cơ chế dự phòng, không còn dùng trên giao diện; luôn 0). Nếu > 0 thì ca cấp cứu xếp như ca thường
+    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi (nhỏ gọi trước). Gán = thời điểm tiếp nhận (epoch micro giây), không đổi khi gọi; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1
     version BIGINT NOT NULL DEFAULT 0, -- Khóa lạc quan
-    CONSTRAINT fk_visits_pet FOREIGN KEY (pet_id) REFERENCES pets(id),
-    CONSTRAINT chk_visits_skip CHECK (skip_count >= 0)
+    CONSTRAINT fk_visits_pet FOREIGN KEY (pet_id) REFERENCES pets(id)
 );
 CREATE INDEX idx_visits_pet ON pet_visits(pet_id);
 CREATE INDEX idx_visits_doctor_status ON pet_visits(doctor_id, status);
@@ -274,24 +272,22 @@ CREATE TABLE IF NOT EXISTS visit_service_details (
     status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi phòng XN / CĐHA (nhỏ gọi trước). Gán = thời điểm chỉ định (epoch micro giây); "Đẩy lùi 1 bậc" (dự phòng) như pet_visits
-    skip_count INT NOT NULL DEFAULT 0, -- Số lần bị "Đẩy lùi 1 bậc" (dự phòng, luôn 0); dùng trong thứ tự hàng đợi như pet_visits.skip_count
+    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi phòng XN / CĐHA (nhỏ gọi trước). Gán = thời điểm chỉ định (epoch micro giây), không đổi khi gọi
     CONSTRAINT fk_vsd_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
     CONSTRAINT fk_vsd_service FOREIGN KEY (service_id) REFERENCES services(id),
-    CONSTRAINT chk_vsd_quantity CHECK (quantity > 0),
-    CONSTRAINT chk_vsd_skip CHECK (skip_count >= 0)
+    CONSTRAINT chk_vsd_quantity CHECK (quantity > 0)
 );
 CREATE INDEX idx_vsd_visit ON visit_service_details(visit_id);
 CREATE INDEX idx_vsd_queue ON visit_service_details(status, queue_order); -- Hàng đợi phòng XN / CĐHA
 
 -- 15. VISIT_SERVICE_DETAIL_HISTORIES (AUDIT TRAIL TIẾN ĐỘ DỊCH VỤ)
--- Action = 'SKIPPED' chỉ do chức năng "Đẩy lùi 1 bậc" dự phòng ghi; luồng gọi số hiện tại ("Gọi" theo từng dòng) không ghi lịch sử vì không đổi trạng thái hay thứ tự.
+-- "Gọi" / "Gọi lại" không ghi lịch sử vì không đổi trạng thái hay thứ tự.
 CREATE TABLE IF NOT EXISTS visit_service_detail_histories (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     visit_service_detail_id BIGINT NOT NULL,
     from_status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NULL,
     to_status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL,
-    action VARCHAR(50) NOT NULL, -- ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED, SKIPPED (dự phòng: đẩy lùi 1 bậc, giao diện không dùng)
+    action VARCHAR(50) NOT NULL, -- ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED
     changed_by_user_id BIGINT NOT NULL, -- LFK: auth.users
     reason TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

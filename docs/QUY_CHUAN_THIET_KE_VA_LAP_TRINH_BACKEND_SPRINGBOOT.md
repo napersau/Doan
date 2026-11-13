@@ -1453,7 +1453,6 @@ public class PetVisitResponse {
     private String clinicalNotes;
     private VisitStatus status;
     private Instant checkedInAt;
-    private int skipCount;         // Số lần bị "Đẩy lùi 1 bậc" (cơ chế dự phòng, luôn 0 – giao diện dùng "Gọi" theo từng dòng)
 }
 ```
 
@@ -1513,7 +1512,7 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long> {
     @Query("""
             SELECT v FROM PetVisit v
             WHERE v.doctorId = :doctorId AND v.status IN :statuses
-            ORDER BY CASE WHEN v.emergency = true AND v.skipCount = 0 THEN 0 ELSE 1 END, v.queueOrder
+            ORDER BY CASE WHEN v.emergency = true THEN 0 ELSE 1 END, v.queueOrder
             """)
     List<PetVisit> findDoctorQueue(@Param("doctorId") Long doctorId,
                                    @Param("statuses") Collection<VisitStatus> statuses);
@@ -1522,7 +1521,7 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long> {
     @Query("""
             SELECT v FROM PetVisit v
             WHERE v.doctorId IS NULL AND v.status = :waiting
-            ORDER BY CASE WHEN v.emergency = true AND v.skipCount = 0 THEN 0 ELSE 1 END, v.queueOrder
+            ORDER BY CASE WHEN v.emergency = true THEN 0 ELSE 1 END, v.queueOrder
             """)
     List<PetVisit> findUnassigned(@Param("waiting") VisitStatus waiting);
 
@@ -1687,7 +1686,7 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
 
     /**
      * Q3 – "Gọi" một ca bất kỳ trong hàng đợi của mình (không nhất thiết đứng đầu). Khách vắng thì gọi ca khác; khách quay lại thì gọi lại.
-     * Chỉ phát PatientCalledEvent: KHÔNG đổi trạng thái, KHÔNG đổi queue_order, KHÔNG tăng skip_count.
+     * Chỉ phát PatientCalledEvent: KHÔNG đổi trạng thái, KHÔNG đổi queue_order.
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -1714,7 +1713,7 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
 }
 ```
 
-> **Lưu ý (cập nhật 13/11/2026):** bản v3.0 đầu tiên dùng "Đẩy lùi 1 bậc" (ca xuống ngay sau người kế tiếp). Khi hai ca đầu hàng cùng vắng, hai ca đó đổi chỗ cho nhau mãi (`[A, B, C, D]`: lùi `A` → `[B, A, C, D]`; lùi `B` → `[A, B, C, D]`) nên ca thứ ba, thứ tư không bao giờ được gọi, và ca cấp cứu bị lùi còn mất ưu tiên. Vì vậy giao diện dùng "Gọi" theo từng dòng; `skip` chỉ còn là chức năng dự phòng ở backend, không dùng. Khi T06 đưa ca về `RESULTS_READY`, đặt `queueOrder = findMinQueueOrder(doctorId, IN_QUEUE).orElse(QueueOrders.now()) - 1` và `skipCount = 0`. Phân công (`assign-doctor`) chỉ kiểm tra ca còn `WAITING` và Bác sĩ `ACTIVE`, **không** kiểm tra Bác sĩ rảnh.
+> **Lưu ý (cập nhật 13/11/2026):** bản v3.0 đầu tiên dùng "Đẩy lùi 1 bậc" (ca xuống ngay sau người kế tiếp). Khi hai ca đầu hàng cùng vắng, hai ca đó đổi chỗ cho nhau mãi (`[A, B, C, D]`: lùi `A` → `[B, A, C, D]`; lùi `B` → `[A, B, C, D]`) nên ca thứ ba, thứ tư không bao giờ được gọi, và ca cấp cứu bị lùi còn mất ưu tiên. Vì vậy giao diện dùng "Gọi" theo từng dòng; API `skip` cùng cột `skip_count` đã được xóa. Khi T06 đưa ca về `RESULTS_READY`, đặt `queueOrder = findMinQueueOrder(doctorId, IN_QUEUE).orElse(QueueOrders.now()) - 1`. Phân công (`assign-doctor`) chỉ kiểm tra ca còn `WAITING` và Bác sĩ `ACTIVE`, **không** kiểm tra Bác sĩ rảnh.
 
 #### 7. REST Controller (`PetVisitController.java`) – làm giàu dữ liệu qua Feign **sau khi** giao dịch đã commit
 ```java

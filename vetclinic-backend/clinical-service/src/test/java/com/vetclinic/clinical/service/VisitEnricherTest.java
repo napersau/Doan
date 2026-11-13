@@ -28,7 +28,7 @@ class VisitEnricherTest {
 
     private static VisitResponse visit(long id, Long doctorId) {
         return new VisitResponse(id, "VIS-" + id, 11L, "Lu", "PET-11", "Chó", 5L, null, doctorId, 9L, null, false,
-                VisitStatus.WAITING, false, 0, 1L, null, null, null, null, null, null, null, null, null, null, null, null,
+                VisitStatus.WAITING, false, 1L, null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null);
     }
 

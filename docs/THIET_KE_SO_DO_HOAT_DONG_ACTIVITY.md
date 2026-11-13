@@ -196,7 +196,7 @@ flowchart TD
         S_CREATE_VISIT["Tạo pet_visits: WAITING (T01)\nqueue_order = thời điểm tiếp nhận\nNếu có hẹn: phát VisitCheckedInEvent"]
         S_SUGGEST["Hiển thị số người đang chờ của từng Bác sĩ,\ngợi ý Bác sĩ ít người chờ nhất"]
         S_ASSIGN["Gán pet_visits.doctor_id (ca vẫn WAITING)\nCa vào hàng đợi của Bác sĩ theo queue_order\nIn phiếu số phòng + số thứ tự"]
-        S_PICK_HEAD["Ca được chọn (mặc định: đầu hàng đợi\nORDER BY (is_emergency AND skip_count = 0) DESC, queue_order)\nPhát PatientCalledEvent (màn hình sảnh + ứng dụng)\nKhông đổi trạng thái và queue_order"]
+        S_PICK_HEAD["Ca được chọn (mặc định: đầu hàng đợi\nORDER BY is_emergency DESC, queue_order)\nPhát PatientCalledEvent (màn hình sảnh + ứng dụng)\nKhông đổi trạng thái và queue_order"]
         S_SKIP["Ca vắng giữ nguyên vị trí (không đổi queue_order,\nkhông đếm lần vắng); ca cấp cứu giữ ưu tiên.\nKhách quay lại: Bác sĩ bấm 'Gọi lại'"]
     end
 

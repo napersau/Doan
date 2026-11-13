@@ -89,7 +89,7 @@ public class VisitSupport {
                 .build());
     }
 
-    /** Audit trail tiến độ một chỉ định. action: ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED, SKIPPED. */
+    /** Audit trail tiến độ một chỉ định. action: ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED. */
     public void recordDetail(Long detailId, ServiceDetailStatus from, ServiceDetailStatus to, String action,
                              Long actorId, String reason) {
         detailHistoryRepository.save(VisitServiceDetailHistory.builder()
@@ -176,7 +176,7 @@ public class VisitSupport {
     /**
      * T06 / Q5 (FR-44): mỗi khi một dịch vụ cận lâm sàng COMPLETED / CANCELLED, nếu không còn dịch vụ Lab / CĐHA nào PENDING hoặc
      * IN_PROGRESS thì HỆ THỐNG tự chuyển ca WAITING_RESULTS -> RESULTS_READY (lịch sử {@code changed_by_user_id = NULL}) và đưa ca
-     * lên ĐẦU hàng đợi của Bác sĩ khám chính (chỉ sau ca cấp cứu): {@code queue_order = MIN(hàng đợi) - 1}, {@code skip_count = 0}.
+     * lên ĐẦU hàng đợi của Bác sĩ khám chính (chỉ sau ca cấp cứu): {@code queue_order = MIN(hàng đợi) - 1}.
      * Phải gọi SAU KHI đã khóa dòng đợt khám (khóa TRƯỚC rồi mới đếm) và trong transaction READ_COMMITTED, để thấy kết quả mới nhất
      * của kỹ thuật viên phòng còn lại vừa commit; nếu đếm trước khi khóa thì hai kỹ thuật viên hoàn tất cùng lúc làm ca kẹt mãi.
      * {@code actorId} là người vừa hoàn tất dịch vụ cuối (chỉ dùng cho event, không ghi vào lịch sử trạng thái).
@@ -195,7 +195,6 @@ public class VisitSupport {
                 doctorId, List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY), visit.getId());
         transition(visit, VisitStatus.RESULTS_READY, null,
                 "Đã có đủ kết quả cận lâm sàng: hệ thống tự chuyển, ca lên đầu hàng đợi của Bác sĩ");
-        visit.setSkipCount(0);
         if (minOrder != null) {
             visit.setQueueOrder(minOrder - 1);
         }

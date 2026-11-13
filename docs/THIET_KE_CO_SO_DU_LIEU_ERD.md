@@ -216,7 +216,6 @@ erDiagram
         enum status "Trạng thái hiện tại của đợt khám: WAITING, IN_PROGRESS, WAITING_RESULTS, RESULTS_READY, WAITING_PAYMENT, COMPLETED, CANCELLED"
         timestamp checked_in_at "Thời điểm tiếp đón"
         bigint queue_order "Thứ tự trong hàng đợi Bác sĩ (nhỏ gọi trước)"
-        int skip_count "Số lần bị đẩy lùi (dự phòng, luôn 0)"
         bigint version "Khóa lạc quan, chống ghi đè đồng thời"
     }
 
@@ -239,7 +238,6 @@ erDiagram
         text notes "Ghi chú chỉ định của bác sĩ"
         timestamp created_at "Thời điểm chỉ định"
         bigint queue_order "Thứ tự trong hàng đợi phòng XN / CĐHA"
-        int skip_count "Số lần bị đẩy lùi (dự phòng, luôn 0)"
     }
 
     VISIT_SERVICE_DETAIL_HISTORIES {
@@ -550,8 +548,7 @@ erDiagram
 | `doctor_advice` | TEXT | NULL | Lời dặn của bác sĩ |
 | `status` | ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') | NOT NULL, DEFAULT 'WAITING' | Trạng thái hiện tại của đợt khám |
 | `checked_in_at` | TIMESTAMP | NOT NULL, DEFAULT NOW() | Thời điểm tiếp đón |
-| `queue_order` | BIGINT | NOT NULL | Thứ tự trong hàng đợi của Bác sĩ (nhỏ được gọi trước). Gán bằng thời điểm tiếp nhận (epoch micro giây) nên ca đến trước đứng trước; giữ nguyên khi đổi Bác sĩ. Gọi / Gọi lại không đổi giá trị này (từ 13/11/2026; cơ chế "Đẩy lùi 1 bậc" dự phòng, giao diện không dùng, gán bằng trung bình cộng `queue_order` của ca ngay sau và ca sau nữa). Ca vừa có kết quả CLS: gán bằng `queue_order` nhỏ nhất trong hàng đợi của Bác sĩ đó − 1 (lên đầu, sau ca cấp cứu) |
-| `skip_count` | INT | NOT NULL, DEFAULT 0, CHECK ≥ 0 | Số lần bị "Đẩy lùi 1 bậc". **Cơ chế dự phòng, giao diện không còn dùng từ 13/11/2026 (luôn 0 với dữ liệu mới)**: khách vắng thì bác sĩ gọi ca khác, không đổi thứ tự. Giữ cột để thứ tự hàng đợi `(is_emergency AND skip_count = 0)` tương thích; nếu > 0 thì ca cấp cứu xếp như ca thường. Đặt lại 0 khi ca chuyển `RESULTS_READY` |
+| `queue_order` | BIGINT | NOT NULL | Thứ tự trong hàng đợi của Bác sĩ (nhỏ được gọi trước). Gán bằng thời điểm tiếp nhận (epoch micro giây) nên ca đến trước đứng trước; giữ nguyên khi đổi Bác sĩ. Gọi / Gọi lại không đổi giá trị này (từ 13/11/2026 đã bỏ cơ chế "Đẩy lùi 1 bậc" cùng cột `skip_count`). Ca vừa có kết quả CLS: gán bằng `queue_order` nhỏ nhất trong hàng đợi của Bác sĩ đó − 1 (lên đầu, sau ca cấp cứu) |
 | `version` | BIGINT | NOT NULL, DEFAULT 0 | Khóa lạc quan, chống ghi đè đồng thời |
 
 #### Bảng `pet_visit_status_histories` (Lịch sử chuyển trạng thái đợt khám)
@@ -577,10 +574,9 @@ erDiagram
 | `status` | ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') | NOT NULL, DEFAULT 'PENDING' | Chờ / đang làm / xong / hủy |
 | `notes` | TEXT | NULL | Ghi chú chỉ định của bác sĩ |
 | `created_at` | TIMESTAMP | NOT NULL, DEFAULT NOW() | Thời điểm chỉ định |
-| `queue_order` | BIGINT | NOT NULL | Thứ tự trong hàng đợi phòng Xét nghiệm / CĐHA (nhỏ được gọi trước). Gán bằng thời điểm chỉ định (epoch micro giây); gọi theo từng dòng không đổi giá trị này (đẩy lùi dự phòng theo cùng quy tắc với `pet_visits.queue_order`) |
-| `skip_count` | INT | NOT NULL, DEFAULT 0 | Số lần dịch vụ bị "Đẩy lùi 1 bậc" (dự phòng, luôn 0); dùng trong thứ tự hàng đợi như `pet_visits.skip_count` |
+| `queue_order` | BIGINT | NOT NULL | Thứ tự trong hàng đợi phòng Xét nghiệm / CĐHA (nhỏ được gọi trước). Gán bằng thời điểm chỉ định (epoch micro giây); gọi theo từng dòng không đổi giá trị này |
 
-*Ràng buộc mức bảng:* `CHECK (quantity > 0)`, `CHECK (skip_count >= 0)`
+*Ràng buộc mức bảng:* `CHECK (quantity > 0)`
 
 #### Bảng `visit_service_detail_histories` (Lịch sử tiến độ thực hiện dịch vụ)
 
@@ -590,7 +586,7 @@ erDiagram
 | `visit_service_detail_id` | BIGINT | FK → visit_service_details(id), ON DELETE CASCADE, NOT NULL | Chỉ định được thao tác |
 | `from_status` | ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') | NULL | Trạng thái trước |
 | `to_status` | ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') | NOT NULL | Trạng thái sau |
-| `action` | VARCHAR(50) | NOT NULL | Hành động: `ORDERED` (chỉ định), `START_PROCESSING` (bắt đầu), `SAMPLE_COLLECTED` (đã lấy mẫu), `COMPLETED` (hoàn tất), `CANCELLED` (hủy), `SKIPPED` (đẩy lùi 1 bậc vì gọi không có mặt; **chỉ do chức năng dự phòng ghi**, luồng "Gọi" theo từng dòng không phát sinh) |
+| `action` | VARCHAR(50) | NOT NULL | Hành động: `ORDERED` (chỉ định), `START_PROCESSING` (bắt đầu), `SAMPLE_COLLECTED` (đã lấy mẫu), `COMPLETED` (hoàn tất), `CANCELLED` (hủy) |
 | `changed_by_user_id` | BIGINT | NOT NULL | **Logical FK** → `pet_clinic_auth_db.users(id)`. Bác sĩ / KTV thao tác |
 | `reason` | TEXT | NULL | Lý do hủy |
 | `created_at` | TIMESTAMP | NOT NULL, DEFAULT NOW() | Thời điểm thao tác |
@@ -786,7 +782,7 @@ Theo nguyên tắc không lưu thuộc tính dẫn xuất, các giá trị sau �
 | Đánh giá chỉ số xét nghiệm | `LOW` nếu `result_value < min_value_snapshot`; `HIGH` nếu `> max_value_snapshot`; ngược lại `NORMAL` | Tầng ứng dụng / truy vấn |
 | Tồn kho sau mỗi giao dịch | `SUM(quantity) OVER (PARTITION BY medicine_id ORDER BY created_at, id)` | Truy vấn window function |
 | Giờ kết thúc khung hẹn | `start_time + 30 phút` | Tầng ứng dụng |
-| Số thứ tự (STT) trong hàng đợi của Bác sĩ | `ROW_NUMBER() OVER (PARTITION BY doctor_id ORDER BY (is_emergency AND skip_count = 0) DESC, queue_order)` trên các ca `WAITING` / `RESULTS_READY` | Truy vấn hàng đợi |
+| Số thứ tự (STT) trong hàng đợi của Bác sĩ | `ROW_NUMBER() OVER (PARTITION BY doctor_id ORDER BY is_emergency DESC, queue_order)` trên các ca `WAITING` / `RESULTS_READY` | Truy vấn hàng đợi |
 | Số người đang chờ của từng Bác sĩ (gợi ý phân công) | `COUNT(*)` ca `WAITING` / `RESULTS_READY` theo `doctor_id` | Truy vấn hàng đợi |
 | Trạng thái Bác sĩ | `BUSY` nếu có ca `IN_PROGRESS`, ngược lại `AVAILABLE` | Truy vấn `idx_visits_doctor_status` |
 | Thời điểm bắt đầu khám / chốt ca / hoàn tất | `created_at` của dòng lịch sử chuyển sang `IN_PROGRESS` / `WAITING_PAYMENT` / `COMPLETED` | `pet_visit_status_histories` |

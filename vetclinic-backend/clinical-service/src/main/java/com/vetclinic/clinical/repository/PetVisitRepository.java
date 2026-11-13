@@ -41,14 +41,14 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
      */
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     @Query("select v from PetVisit v where v.status = com.vetclinic.clinical.constant.VisitStatus.WAITING and v.doctorId is null "
-            + "order by case when (v.emergency = true and v.skipCount = 0) then 0 else 1 end asc, v.queueOrder asc, v.id asc")
+            + "order by case when v.emergency = true then 0 else 1 end asc, v.queueOrder asc, v.id asc")
     List<PetVisit> findUnassignedWaiting();
 
     /** Hàng đợi riêng của nhiều Bác sĩ (ca WAITING và RESULTS_READY), theo thứ tự hàng đợi; nhóm theo doctorId ở tầng ứng dụng. */
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     @Query("select v from PetVisit v where v.doctorId in :doctorIds "
             + "and v.status in (com.vetclinic.clinical.constant.VisitStatus.WAITING, com.vetclinic.clinical.constant.VisitStatus.RESULTS_READY) "
-            + "order by case when (v.emergency = true and v.skipCount = 0) then 0 else 1 end asc, v.queueOrder asc, v.id asc")
+            + "order by case when v.emergency = true then 0 else 1 end asc, v.queueOrder asc, v.id asc")
     List<PetVisit> findQueueOfDoctors(@Param("doctorIds") Collection<Long> doctorIds);
 
     /** Số ca đang chờ (WAITING, RESULTS_READY) của từng Bác sĩ: các dòng [doctorId, count]. */
@@ -73,7 +73,7 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
     /** Các ca của một Bác sĩ (hàng đợi riêng + ca đang khám), cùng thứ tự hàng đợi như findQueueByStatus. */
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     @Query("select v from PetVisit v where v.doctorId = :doctorId and v.status in :statuses "
-            + "order by case when (v.emergency = true and v.skipCount = 0) then 0 else 1 end asc, v.queueOrder asc, v.id asc")
+            + "order by case when v.emergency = true then 0 else 1 end asc, v.queueOrder asc, v.id asc")
     List<PetVisit> findDoctorVisits(@Param("doctorId") Long doctorId, @Param("statuses") Collection<VisitStatus> statuses);
 
     /**

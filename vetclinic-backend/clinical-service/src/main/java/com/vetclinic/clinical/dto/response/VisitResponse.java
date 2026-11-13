@@ -12,7 +12,7 @@ import java.util.List;
  * <p>
  * Lược đồ v3.0 bỏ các cột assigned_room, started_at, closed_at, completed_at, cancel_reason khỏi pet_visits: hình dạng
  * response giữ các trường đó nhưng được SUY RA (phòng từ Bác sĩ qua auth-service, các mốc và lý do hủy từ lịch sử trạng thái).
- * skipCount / queueOrder cho giao diện hàng đợi (số lần bị đẩy lùi, thứ tự).
+ * queueOrder cho giao diện hàng đợi (thứ tự).
  */
 public record VisitResponse(
         Long id,
@@ -29,7 +29,6 @@ public record VisitResponse(
         boolean emergency,
         VisitStatus status,
         boolean locked,
-        int skipCount,
         long queueOrder,
         BigDecimal weightAtVisit,
         BigDecimal temperature,
@@ -51,7 +50,7 @@ public record VisitResponse(
     /** Gắn số phòng của Bác sĩ phụ trách (users.room_number): lấy từ auth-service ở tầng controller, ngoài transaction. */
     public VisitResponse withAssignedRoom(String room) {
         return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId,
-                receptionistId, room, emergency, status, locked, skipCount, queueOrder, weightAtVisit, temperature,
+                receptionistId, room, emergency, status, locked, queueOrder, weightAtVisit, temperature,
                 initialSymptoms, clinicalNotes, diagnosis, treatmentPlan, doctorAdvice, cancelReason, checkedInAt,
                 startedAt, closedAt, completedAt, services, labResults, imagingResults);
     }
