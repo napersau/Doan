@@ -149,7 +149,7 @@
   - **Lưu Minh Hiển:**
     * Thiết kế Sơ đồ trạng thái Lịch hẹn (`APPOINTMENT`: PENDING $\rightarrow$ CONFIRMED $\rightarrow$ CHECKED_IN / CANCELLED / NO_SHOW).
     * Thiết kế Sơ đồ trạng thái Đợt khám cốt lõi (`PET_VISIT`: WAITING $\rightarrow$ IN_PROGRESS $\rightarrow$ WAITING_RESULTS $\rightarrow$ RESULTS_READY $\rightarrow$ IN_PROGRESS $\rightarrow$ WAITING_PAYMENT $\rightarrow$ COMPLETED).
-    * Xây dựng ma trận chuyển đổi trạng thái (T01 → T14, T13 đã bỏ), quy tắc hàng đợi riêng từng Bác sĩ (Q1 → Q5: xếp thứ tự, phân công, gọi số, Đẩy lùi 1 bậc, ca có kết quả lên đầu) và Sơ đồ trạng thái phục vụ của Bác sĩ (`AVAILABLE` / `BUSY`).
+    * Xây dựng ma trận chuyển đổi trạng thái (T01 → T14, T13 đã bỏ), quy tắc hàng đợi riêng từng Bác sĩ (Q1 → Q5: xếp thứ tự, phân công, gọi số theo từng dòng, khách vắng / quay lại, ca có kết quả lên đầu) và Sơ đồ trạng thái phục vụ của Bác sĩ (`AVAILABLE` / `BUSY`).
   - **Nguyễn Đức Khởi:**
     * Thiết kế Sơ đồ trạng thái Dịch vụ kỹ thuật (`VISIT_SERVICE_DETAIL`: PENDING $\rightarrow$ IN_PROGRESS $\rightarrow$ COMPLETED / CANCELLED).
     * Thiết kế Sơ đồ trạng thái Hóa đơn dịch vụ (`SERVICE_INVOICE`: PENDING $\rightarrow$ PAID / CANCELLED – tạo cùng lúc chỉ định, hủy theo dịch vụ).
@@ -167,7 +167,7 @@
 - **Công việc chi tiết từng thành viên:**
   - **Lưu Minh Hiển:**
     * Thiết kế AD-01: Chu trình khám chữa bệnh ngoại trú 2 pha tổng thể (6 phân làn trách nhiệm).
-    * Thiết kế AD-02: Quy trình tiếp đón, xếp ca vào hàng đợi riêng từng Bác sĩ & gọi số / đẩy lùi 1 bậc.
+    * Thiết kế AD-02: Quy trình tiếp đón, xếp ca vào hàng đợi riêng từng Bác sĩ & gọi số theo từng dòng.
     * Thiết kế AD-03: Thăm khám lâm sàng GĐ 1 & Ra chỉ định cận lâm sàng.
   - **Nguyễn Đức Khởi:**
     * Thiết kế AD-04: Tiến trình thực hiện cận lâm sàng song song tại 2 phòng Lab & CĐHA (Fork & Join) và cơ chế chống xung đột liên phòng.
@@ -251,7 +251,7 @@
 ---
 
 ### Tuần 10: Sprint 2 - Khám bệnh Lâm sàng & Cận lâm sàng 2 pha (26/10 – 01/11/2026)
-- **Mục tiêu tuần:** Hoàn thành toàn bộ phân hệ chuyên môn y tế: Bác sĩ khám 2 pha, Hàng đợi riêng từng Bác sĩ (gọi số, đẩy lùi 1 bậc), Hàng đợi Lab & CĐHA tự động.
+- **Mục tiêu tuần:** Hoàn thành toàn bộ phân hệ chuyên môn y tế: Bác sĩ khám 2 pha, Hàng đợi riêng từng Bác sĩ (gọi số theo từng dòng), Hàng đợi Lab & CĐHA tự động.
 - **Công việc chi tiết từng thành viên:**
   - **Lưu Minh Hiển:**
     * Phát triển phân hệ Bác sĩ khám lâm sàng trong `clinical-service` (:8083):
@@ -311,7 +311,7 @@
     * **Cập nhật bộ tài liệu thiết kế lên v3.0 theo góp ý GVHD:** ERD (hóa đơn riêng cho từng dịch vụ, hóa đơn thuốc tùy chọn, bỏ thuộc tính dẫn xuất), State Machine, Activity, Use Case, Ngoại lệ, FR/NFR, Mô tả nghiệp vụ, Kiến trúc, Quy chuẩn Backend, Lộ trình & Kế hoạch; điều chỉnh mã nguồn tương ứng.
     * **Kiểm thử luồng nghiệp vụ chính (Happy Path Testing):** Khách đặt lịch $\rightarrow$ Lễ tân check-in $\rightarrow$ Phân công Bác sĩ $\rightarrow$ Bác sĩ khám & chỉ định $\rightarrow$ Lab & CĐHA trả kết quả $\rightarrow$ Bác sĩ kê đơn & chốt ca $\rightarrow$ Thu ngân thu tiền hóa đơn dịch vụ (ca `COMPLETED`) $\rightarrow$ (tùy chọn) Bán thuốc theo đơn.
     * **Kiểm thử các tình huống ngoại lệ (Edge Cases Testing):**
-      - Test khách vắng mặt khi được gọi tại phòng khám hoặc phòng CLS $\rightarrow$ Bấm "Đẩy lùi 1 bậc" $\rightarrow$ ca đứng sau người kế tiếp, hệ thống gọi người kế tiếp; khách quay lại chờ đến lượt.
+      - Test khách vắng mặt khi được gọi tại phòng khám hoặc phòng CLS $\rightarrow$ Bấm "Gọi" ở ca khác $\rightarrow$ ca vắng giữ nguyên vị trí; khách quay lại thì "Gọi lại".
       - Test khách xin hủy dịch vụ chụp X-quang giữa chừng $\rightarrow$ Hóa đơn X-quang chuyển `CANCELLED`, chỉ còn thu hóa đơn khám và xét nghiệm máu.
       - Test khách bỏ về khi chờ kết quả $\rightarrow$ Hóa đơn dịch vụ đã làm giữ làm công nợ, thu lại ở lần sau.
       - Test hết thuốc trong kho khi xác nhận bán thuốc $\rightarrow$ Giao dịch rollback an toàn, hóa đơn thuốc giữ `PENDING`, thông báo lỗi rõ ràng.
