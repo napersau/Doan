@@ -149,6 +149,7 @@ function PrescriptionTab({ visit }) {
   const [notes, setNotes] = useState('');
   const [warnings, setWarnings] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [focusLast, setFocusLast] = useState(false);
   const action = useAction();
   const current = existing.data || null;
 
@@ -173,21 +174,42 @@ function PrescriptionTab({ visit }) {
     if (saved && saved !== true) { setWarnings(saved.stockWarnings || []); existing.refresh(); }
   };
 
+  const addLine = () => { setLines([...lines, blankLine()]); setFocusLast(true); };
+  useEffect(() => {
+    if (!focusLast) return;
+    setFocusLast(false);
+    const target = document.getElementById(`rx-medicine-${lines.length - 1}`);
+    if (target) target.focus();
+  }, [focusLast, lines.length]);
+  const chosenElsewhere = (index) => new Set(lines.filter((_, position) => position !== index).map((line) => line.medicineId).filter(Boolean));
+
   return <Panel title="Đơn thuốc" subtitle="Đơn không có giá. Kê vượt tồn kho vẫn lưu được (chỉ cảnh báo). Sửa được khi ca còn đang khám và chưa có hóa đơn thuốc.">
     <Notice notice={action.notice} onClose={action.clear} />
     {warnings.length > 0 && <div className="ui-alert warning" role="status"><span><strong>Cảnh báo tồn kho:</strong> {warnings.join('; ')}. Khách có thể mua ngoài phòng khám.</span></div>}
     <AsyncView state={medicines}>{() => <div className="ui-stack" style={{ gap: 14 }}>
-      {lines.map((line, index) => <div key={index} className="ui-panel" style={{ marginBottom: 0 }}><div className="ui-panel-body ui-grid">
-        <Field label="Thuốc" wide><Select value={line.medicineId} onChange={(event) => setLine(index, 'medicineId', event.target.value)}><option value="">Chọn thuốc</option>
-          {meds.map((medicine) => <option key={medicine.id} value={medicine.id}>{medicine.name} — {medicine.unit} — tồn {medicine.stockQuantity}</option>)}</Select></Field>
-        <Field label="Số lượng"><Input type="number" min="1" value={line.quantity} onChange={(event) => setLine(index, 'quantity', event.target.value)} /></Field>
-        <Field label="Số ngày dùng"><Input type="number" min="1" max="365" value={line.durationDays} onChange={(event) => setLine(index, 'durationDays', event.target.value)} /></Field>
-        <Field label="Liều dùng *"><Input value={line.dosage} placeholder="Ví dụ: 1 viên/lần" onChange={(event) => setLine(index, 'dosage', event.target.value)} maxLength={100} /></Field>
-        <Field label="Tần suất *"><Input value={line.frequency} placeholder="Ví dụ: 2 lần/ngày" onChange={(event) => setLine(index, 'frequency', event.target.value)} maxLength={100} /></Field>
-        <Field label="Hướng dẫn" wide><Input value={line.instructions} onChange={(event) => setLine(index, 'instructions', event.target.value)} maxLength={2000} /></Field>
-        {lines.length > 1 && <div><Button className="small danger" onClick={() => setLines(lines.filter((_, position) => position !== index))}>Bỏ dòng này</Button></div>}
-      </div></div>)}
-      <div><Button onClick={() => setLines([...lines, blankLine()])}>+ Thêm thuốc</Button></div>
+      <div className="ui-table-scroll"><table className="ui-table rx-table">
+        <caption className="ui-sr-only">Đơn thuốc</caption>
+        <thead><tr>
+          <th className="rx-stt">STT</th><th>Thuốc</th><th>Số lượng</th><th>Số ngày dùng</th><th>Liều dùng *</th><th>Tần suất *</th><th>Hướng dẫn</th><th aria-label="Thao tác" />
+        </tr></thead>
+        <tbody>{lines.map((line, index) => {
+          const taken = chosenElsewhere(index);
+          const row = `dòng ${index + 1}`;
+          return <tr key={index}>
+            <td className="rx-stt"><strong>{index + 1}</strong></td>
+            <td className="rx-medicine"><Select id={`rx-medicine-${index}`} aria-label={`Thuốc ${row}`} value={line.medicineId} onChange={(event) => setLine(index, 'medicineId', event.target.value)}>
+              <option value="">Chọn thuốc</option>
+              {meds.map((medicine) => <option key={medicine.id} value={medicine.id} disabled={taken.has(String(medicine.id))}>{medicine.name} — {medicine.unit} — tồn {medicine.stockQuantity}</option>)}</Select></td>
+            <td className="rx-number"><Input type="number" min="1" aria-label={`Số lượng ${row}`} value={line.quantity} onChange={(event) => setLine(index, 'quantity', event.target.value)} /></td>
+            <td className="rx-number"><Input type="number" min="1" max="365" aria-label={`Số ngày dùng ${row}`} value={line.durationDays} onChange={(event) => setLine(index, 'durationDays', event.target.value)} /></td>
+            <td className="rx-text"><Input aria-label={`Liều dùng ${row}`} value={line.dosage} placeholder="1 viên/lần" onChange={(event) => setLine(index, 'dosage', event.target.value)} maxLength={100} /></td>
+            <td className="rx-text"><Input aria-label={`Tần suất ${row}`} value={line.frequency} placeholder="2 lần/ngày" onChange={(event) => setLine(index, 'frequency', event.target.value)} maxLength={100} /></td>
+            <td className="rx-note"><Input aria-label={`Hướng dẫn ${row}`} value={line.instructions} placeholder="Sau ăn, uống nhiều nước…" onChange={(event) => setLine(index, 'instructions', event.target.value)} maxLength={2000} /></td>
+            <td className="rx-remove">{lines.length > 1 && <Button className="small danger" aria-label={`Bỏ ${row}`} title="Bỏ dòng này" onClick={() => setLines(lines.filter((_, position) => position !== index))}>×</Button>}</td>
+          </tr>;
+        })}</tbody>
+      </table></div>
+      <div><Button onClick={addLine}>+ Thêm thuốc</Button></div>
       <Field label="Lời dặn chung"><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} rows={2} /></Field>
       <div className="ui-actions"><Button variant="primary" busy={action.busy} onClick={save}>{current ? 'Cập nhật đơn thuốc' : 'Lưu đơn thuốc'}</Button></div>
     </div>}</AsyncView>
