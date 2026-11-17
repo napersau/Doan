@@ -296,7 +296,7 @@ class NotificationEventListenerTest {
 
     private static PatientCalledEvent called(String action, String station, Long doctorId, String room) {
         return new PatientCalledEvent(UUID.randomUUID(), NOW, DOCTOR, action, station, 7L, "VIS-2026-7", 11L, doctorId,
-                "LAB".equals(station) || "IMAGING".equals(station) ? 55L : null, room);
+                60L, 12, room);
     }
 
     @Test
@@ -309,8 +309,9 @@ class NotificationEventListenerTest {
         assertThat(forOwner.type()).isEqualTo(NotificationType.PATIENT_CALLED);
         assertThat(forOwner.severity()).isEqualTo(Severity.CRITICAL);
         assertThat(forOwner.title()).contains("phòng khám bác sĩ", "P101");
-        assertThat(forOwner.body()).contains("VIS-2026-7", "Lu");
-        assertThat(forOwner.data()).containsEntry("station", "DOCTOR_ROOM").containsEntry("roomNumber", "P101");
+        assertThat(forOwner.body()).contains("Mời số 12", "Lu");   // gọi theo số phiếu
+        assertThat(forOwner.data()).containsEntry("station", "DOCTOR_ROOM").containsEntry("roomNumber", "P101")
+                .containsEntry("ticketNo", 12).containsEntry("ticketId", 60L);
         verify(dispatcher).toUser(eq(DOCTOR), any());
     }
 
@@ -344,6 +345,53 @@ class NotificationEventListenerTest {
 
         listener.onPatientCalled(event);
         listener.onPatientCalled(event);
+
+        verify(dispatcher, times(1)).toUser(eq(OWNER), any());
+    }
+
+    // ================================================================== queue.ticket_issued
+
+    private static com.vetclinic.common.event.QueueTicketIssuedEvent issued(String type, Long doctorId, int priority) {
+        return new com.vetclinic.common.event.QueueTicketIssuedEvent(UUID.randomUUID(), NOW, 5L, 60L, type, 8, 7L, "VIS-2026-7",
+                11L, doctorId, priority);
+    }
+
+    @Test
+    void ticketIssued_doctorQueue_givesTheOwnerTheNumber_andRefreshesTheDoctorAndReception() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+
+        listener.onTicketIssued(issued("DOCTOR", DOCTOR, 0));
+
+        NotificationMessage forOwner = captureUser(OWNER);
+        assertThat(forOwner.type()).isEqualTo(NotificationType.TICKET_ISSUED);
+        assertThat(forOwner.title()).contains("Phiếu số 8");
+        assertThat(forOwner.body()).contains("Lu", "phòng khám bác sĩ");
+        verify(dispatcher).toUser(eq(DOCTOR), any());
+        verify(dispatcher).toRole(eq(RoleCode.RECEPTIONIST), any());
+    }
+
+    @Test
+    void ticketIssued_roomQueues_refreshTheRightTechnicians_andAnEmergencyIsCritical() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+
+        listener.onTicketIssued(issued("LABORATORY", null, 2));
+        listener.onTicketIssued(issued("IMAGING", null, 0));
+
+        ArgumentCaptor<NotificationMessage> lab = ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(dispatcher).toRole(eq(RoleCode.LAB_TECHNICIAN), lab.capture());
+        assertThat(lab.getValue().severity()).isEqualTo(Severity.CRITICAL);
+        assertThat(lab.getValue().body()).contains("CẤP CỨU");
+        verify(dispatcher).toRole(eq(RoleCode.IMAGING_TECHNICIAN), any());
+        verify(dispatcher, never()).toRole(eq(RoleCode.RECEPTIONIST), any());
+    }
+
+    @Test
+    void ticketIssued_redeliveryDoesNotNotifyTwice() {
+        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        var event = issued("DOCTOR", null, 0);
+
+        listener.onTicketIssued(event);
+        listener.onTicketIssued(event);
 
         verify(dispatcher, times(1)).toUser(eq(OWNER), any());
     }

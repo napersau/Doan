@@ -6,25 +6,17 @@ import com.vetclinic.clinical.dto.response.VisitResponse;
 import java.util.List;
 
 /**
- * Hàng đợi riêng của từng Bác sĩ (v3.0, thay hàng đợi sảnh chung + "Khóa ưu tiên"). Thứ tự mọi hàng đợi:
- * {@code ORDER BY is_emergency DESC, queue_order ASC}.
+ * Hàng đợi riêng của từng Bác sĩ (cập nhật 17/11/2026): đọc từ PHIẾU XẾP HÀNG DOCTOR đang chờ ({@code queue_tickets},
+ * thứ tự {@code priority DESC, issued_at, id}), không đọc từ pet_visits. Gọi số / bắt đầu phiếu ở {@link QueueTicketService}.
  */
 public interface DoctorQueueService {
 
-    /** UC-20, FR-21: bảng điều phối của Lễ tân: danh sách chờ phân công + hàng đợi từng Bác sĩ + Bác sĩ được gợi ý. */
+    /**
+     * UC-20, FR-21: bảng điều phối của Lễ tân: mục chờ thu phí khám (ca chưa có phiếu), danh sách chờ phân công (phiếu chưa có
+     * Bác sĩ), hàng đợi phiếu của từng Bác sĩ và Bác sĩ được gợi ý (ít phiếu chờ nhất).
+     */
     QueueBoardResponse board();
 
-    /** Hàng đợi của chính Bác sĩ đang đăng nhập (ca WAITING và RESULTS_READY), theo thứ tự gọi. */
+    /** Hàng đợi của chính Bác sĩ đang đăng nhập: các ca có phiếu DOCTOR đang chờ, kèm số phiếu và giờ gọi gần nhất. */
     List<VisitResponse> myQueue();
-
-    /**
-     * Q3 "Gọi số tiếp theo": Bác sĩ KHÔNG có ca IN_PROGRESS (CLIN_1302) chọn ca đầu hàng đợi của mình (CLIN_1303 nếu trống), phát
-     * PatientCalledEvent. Ca CHƯA đổi trạng thái: bệnh nhân vào phòng mới bấm "Bắt đầu khám" (T02) hoặc "Bắt đầu GĐ 2" (T07).
-     */
-    VisitResponse callNext();
-
-    /**
-     * "Gọi" một ca cụ thể trong hàng đợi của chính Bác sĩ (không nhất thiết là người đứng đầu): chỉ phát thông báo, **không đổi trạng thái, không đổi thứ tự**. Gọi lại khi khách quay lại là gọi thêm một lần.
-     */
-    VisitResponse call(Long visitId);
 }

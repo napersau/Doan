@@ -9,6 +9,7 @@ public record UpdateServiceRequest(
         @DecimalMin(value = "0.00", message = "Đơn giá không được âm") @Digits(integer = 10, fraction = 2, message = "Đơn giá tối đa 10 chữ số nguyên và 2 chữ số thập phân") BigDecimal price,
         @DecimalMin(value = "0.00", message = "Thuế suất không được âm") @DecimalMax(value = "1.00", message = "Thuế suất tối đa 1.00 (100%)") @Digits(integer = 1, fraction = 2, message = "Thuế suất dạng 0.05 (5%)") BigDecimal vatRate,
         String description,
-        Boolean active
+        Boolean active,
+        Boolean requiresPrepayment
 ) {
 }

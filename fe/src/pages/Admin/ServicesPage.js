@@ -9,7 +9,7 @@ import { SERVICE_CATEGORY } from '../../lib/labels';
 
 function ServiceDialog({ service, onClose, onSaved }) {
   const editing = Boolean(service);
-  const [form, setForm] = useState({ code: service?.code || '', name: service?.name || '', category: service?.category || 'EXAMINATION', price: service?.price ?? '', vatPercent: service ? Math.round(Number(service.vatRate) * 100) : 0, description: service?.description || '', active: service?.active ?? true });
+  const [form, setForm] = useState({ code: service?.code || '', name: service?.name || '', category: service?.category || 'EXAMINATION', price: service?.price ?? '', vatPercent: service ? Math.round(Number(service.vatRate) * 100) : 0, description: service?.description || '', active: service?.active ?? true, requiresPrepayment: service ? Boolean(service.requiresPrepayment) : true });
   const [errors, setErrors] = useState({});
   const set = (key) => (event) => setForm({ ...form, [key]: event.target.type === 'checkbox' ? event.target.checked : event.target.value });
   const submit = async () => {
@@ -22,8 +22,8 @@ function ServiceDialog({ service, onClose, onSaved }) {
     if (Object.keys(found).length) throw new Error('Vui lòng kiểm tra lại các trường được đánh dấu.');
     try {
       const saved = editing
-        ? await catalogApi.updateService(service.id, { name: form.name.trim(), price: Number(form.price), vatRate: Number(form.vatPercent) / 100, description: blankToNull(form.description), active: form.active })
-        : await catalogApi.createService({ code: form.code.trim().toUpperCase(), name: form.name.trim(), category: form.category, price: Number(form.price), vatRate: Number(form.vatPercent) / 100, description: blankToNull(form.description) });
+        ? await catalogApi.updateService(service.id, { name: form.name.trim(), price: Number(form.price), vatRate: Number(form.vatPercent) / 100, description: blankToNull(form.description), active: form.active, requiresPrepayment: form.requiresPrepayment })
+        : await catalogApi.createService({ code: form.code.trim().toUpperCase(), name: form.name.trim(), category: form.category, price: Number(form.price), vatRate: Number(form.vatPercent) / 100, description: blankToNull(form.description), requiresPrepayment: form.requiresPrepayment });
       onSaved(saved);
     } catch (problem) { setErrors(mapFieldErrors(problem)); throw problem; }
   };
@@ -34,6 +34,7 @@ function ServiceDialog({ service, onClose, onSaved }) {
       <Field label="Tên dịch vụ *" error={errors.name} wide><Input value={form.name} onChange={set('name')} maxLength={150} /></Field>
       <Field label="Đơn giá (VND) *" error={errors.price}><Input type="number" min="0" step="1000" value={form.price} onChange={set('price')} /></Field>
       <Field label="VAT (%) *" error={errors.vatRate} hint="Chốt vào hóa đơn dịch vụ lúc chỉ định; đổi VAT không ảnh hưởng chỉ định cũ."><Input type="number" min="0" max="100" step="1" value={form.vatPercent} onChange={set('vatPercent')} /></Field>
+      <label className="ui-check"><input type="checkbox" checked={form.requiresPrepayment} onChange={set('requiresPrepayment')} />Thu tiền trước (khách nộp xong mới được phát phiếu xếp hàng — thường dùng cho khám, xét nghiệm, CĐHA)</label>
       {editing && <label className="ui-check"><input type="checkbox" checked={form.active} onChange={set('active')} />Đang cung cấp</label>}
       <Field label="Mô tả" wide><Textarea value={form.description} onChange={set('description')} rows={2} /></Field>
     </div>
@@ -56,6 +57,7 @@ export default function ServicesPage() {
           { title: 'Dịch vụ', render: (row) => <><strong>{row.name}</strong><small>{row.code}</small></> },
           { title: 'Nhóm', render: (row) => SERVICE_CATEGORY[row.category] },
           { title: 'Đơn giá', align: 'right', render: (row) => <>{formatMoney(row.price)}<small>VAT {Math.round(Number(row.vatRate) * 100)}%</small></> },
+          { title: 'Thu tiền', render: (row) => (row.requiresPrepayment ? <Badge tone="blue">Thu trước</Badge> : <Badge tone="gray">Khi chốt ca</Badge>) },
           { title: 'Trạng thái', render: (row) => <Badge tone={row.active ? 'green' : 'gray'}>{row.active ? 'Đang cung cấp' : 'Ngừng'}</Badge> },
           { title: '', align: 'right', render: (row) => <Button className="small" onClick={() => setDialog({ service: row })}>Sửa</Button> }]} />}
       </AsyncView>

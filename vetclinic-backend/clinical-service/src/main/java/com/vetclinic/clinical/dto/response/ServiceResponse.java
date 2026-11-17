@@ -11,6 +11,7 @@ public record ServiceResponse(
         BigDecimal price,
         BigDecimal vatRate,
         String description,
-        boolean active
+        boolean active,
+        boolean requiresPrepayment
 ) {
 }

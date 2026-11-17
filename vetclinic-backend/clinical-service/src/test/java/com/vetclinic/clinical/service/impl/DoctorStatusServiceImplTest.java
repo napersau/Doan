@@ -30,6 +30,8 @@ class DoctorStatusServiceImplTest {
     @Mock
     private PetVisitRepository visitRepository;
     @Mock
+    private com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
+    @Mock
     private AuthClient authClient;
     @InjectMocks
     private DoctorStatusServiceImpl service;
@@ -73,7 +75,8 @@ class DoctorStatusServiceImplTest {
         when(authClient.getActiveDoctors()).thenReturn(ApiResponse.success(List.of(
                 doctor(1L, "BS A", "P01"), doctor(2L, "BS B", "P02"), doctor(3L, "BS C", "P03"))));
         when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS))).thenReturn(Set.of(1L));
-        when(visitRepository.countWaitingByDoctor()).thenReturn(List.of(new Object[]{1L, 2L}, new Object[]{2L, 3L}));
+        when(ticketRepository.countWaitingByDoctor())   // số phiếu DOCTOR đang chờ
+               .thenReturn(List.of(new Object[]{1L, 2L}, new Object[]{2L, 3L}));
 
         List<DoctorStatusResponse> board = service.board();
 

@@ -43,39 +43,11 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success(paraclinicService.queue(ServiceCategory.IMAGING)));
     }
 
-    /** BR-34: gọi số tiếp theo của phòng Lab (chưa đổi trạng thái chỉ định). */
-    @PostMapping("/lab-queue/call-next")
-    @PreAuthorize("hasRole('LAB_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<QueueItemResponse>> labCallNext() {
-        return ResponseEntity.ok(ApiResponse.success("Đã gọi số tiếp theo", paraclinicService.callNext(ServiceCategory.LABORATORY)));
-    }
-
-    /** BR-34: gọi số tiếp theo của phòng CĐHA. */
-    @PostMapping("/imaging-queue/call-next")
-    @PreAuthorize("hasRole('IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<QueueItemResponse>> imagingCallNext() {
-        return ResponseEntity.ok(ApiResponse.success("Đã gọi số tiếp theo", paraclinicService.callNext(ServiceCategory.IMAGING)));
-    }
-
-    /** "Gọi" một ca bất kỳ trong hàng đợi phòng mình (khách vắng thì gọi ca khác, thứ tự giữ nguyên). Không đổi trạng thái hay thứ tự. */
-    @PostMapping("/service-details/{id}/call")
-    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<QueueItemResponse>> call(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã gọi bệnh nhân", paraclinicService.call(id)));
-    }
-
     /** Phòng Lab: đã lấy mẫu xong (huy hiệu liên phòng cho CĐHA). */
     @PostMapping("/service-details/{id}/sample-collected")
     @PreAuthorize("hasRole('LAB_TECHNICIAN')")
     public ResponseEntity<ApiResponse<ServiceDetailResponse>> sampleCollected(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success("Đã ghi nhận lấy mẫu", paraclinicService.sampleCollected(id)));
-    }
-
-    /** Thú cưng đã vào phòng, bắt đầu thực hiện. */
-    @PostMapping("/service-details/{id}/start")
-    @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<ServiceDetailResponse>> start(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã bắt đầu thực hiện", paraclinicService.start(id)));
     }
 
     /** FR-30: Bác sĩ ghi nhận dịch vụ tại phòng "Đã thực hiện" (tiêm phòng, tẩy giun, thủ thuật...). */
@@ -85,12 +57,16 @@ public class ParaclinicController {
         return ResponseEntity.ok(ApiResponse.success("Đã ghi nhận thực hiện dịch vụ", paraclinicService.perform(id)));
     }
 
-    /** EX-08: hủy chỉ định (khách xin hủy, thiết bị sự cố, hoặc Bác sĩ đổi hướng xử lý). */
+    /**
+     * EX-08: hủy chỉ định. reasonType CUSTOMER (khách tự hủy: hóa đơn đã thu giữ PAID) / CLINIC (phòng khám không làm được:
+     * hóa đơn đã thu -> REFUNDED). Phí khám không hoàn (CLIN_1310).
+     */
     @PostMapping("/service-details/{id}/cancel")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN','VETERINARIAN')")
     public ResponseEntity<ApiResponse<ServiceDetailResponse>> cancel(@PathVariable Long id,
-                                                                     @Valid @RequestBody ReasonRequest request) {
-        return ResponseEntity.ok(ApiResponse.success("Đã hủy chỉ định", paraclinicService.cancel(id, request.reason())));
+                                                                     @Valid @RequestBody com.vetclinic.clinical.dto.request.CancelServiceRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Đã hủy chỉ định",
+                paraclinicService.cancel(id, request.reason(), request.reasonType())));
     }
 
     /** Form nhập kết quả: chỉ các chỉ số của dịch vụ, kèm khoảng tham chiếu của loài thú cưng. */

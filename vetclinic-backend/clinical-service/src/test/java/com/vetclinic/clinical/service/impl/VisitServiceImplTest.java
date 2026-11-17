@@ -29,7 +29,7 @@ import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.service.VisitAssembler;
-import com.vetclinic.clinical.service.QueueOrders;
+import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.VisitCheckedInEvent;
@@ -81,6 +81,7 @@ import static org.mockito.Mockito.when;
 class VisitServiceImplTest {
 
     private static final long ADMIN_ID = 1L;
+    private static final ClinicService EXAM_SVC = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
 
     @Mock
     private PetVisitRepository visitRepository;
@@ -104,16 +105,19 @@ class VisitServiceImplTest {
     private NamedLockService lockService;
     @Mock
     private ApplicationEventPublisher publisher;
+    @Mock
+    private TicketIssuer ticketIssuer;
 
     private VisitServiceImpl service;
 
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, invoiceRepository, publisher, CLOCK);
+                detailHistoryRepository, invoiceRepository, ticketIssuer, publisher, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, mock(LabTestResultRepository.class),
                 mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), invoiceRepository,
-                new com.vetclinic.clinical.service.VisitTimeline(historyRepository));
+                new com.vetclinic.clinical.service.VisitTimeline(historyRepository),
+                mock(com.vetclinic.clinical.repository.QueueTicketRepository.class));
         // Mỗi dòng chỉ định được lập hóa đơn riêng ngay khi tạo (BR-19): giả lập INSERT hóa đơn có id
         lenient().when(invoiceRepository.saveAndFlush(any(com.vetclinic.clinical.entity.ServiceInvoice.class))).thenAnswer(inv -> {
             com.vetclinic.clinical.entity.ServiceInvoice saved = inv.getArgument(0);
@@ -122,11 +126,20 @@ class VisitServiceImplTest {
         });
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        // T01 (17/11/2026): tiếp đón lập luôn dịch vụ khám + hóa đơn phí khám
+        lenient().when(serviceRepository.findByCode("EXAM_GEN")).thenReturn(Optional.of(EXAM_SVC));
+        lenient().when(detailRepository.saveAndFlush(any(VisitServiceDetail.class))).thenAnswer(inv -> {
+            VisitServiceDetail saved = inv.getArgument(0);
+            if (saved.getId() == null) {
+                saved.setId(500L);
+            }
+            return saved;
+        });
         // Khóa tên giả: chạy thẳng action, giống khi lấy được khóa
         lenient().when(lockService.runLocked(anyCollection(), any())).thenAnswer(inv ->
                 ((Supplier<?>) inv.getArgument(1)).get());
         service = new VisitServiceImpl(visitRepository, petRepository, historyRepository, detailRepository,
-                serviceRepository, authClient, appointmentClient, support, assembler,
+                serviceRepository, authClient, appointmentClient, support, ticketIssuer, assembler,
                 lockService, publisher, CLOCK, tm);
     }
 
@@ -199,21 +212,48 @@ class VisitServiceImplTest {
     }
 
     @Test
-    void checkIn_queueOrderIsTheCheckInInstantInEpochMicros_andNoSkipYet() {
-        // v3.0: không còn tầng "có hẹn đúng giờ" và không còn cột scheduled_at; queue_order = thời điểm tiếp nhận (epoch micro giây)
+    void checkIn_createsTheExamFeeAndItsPendingInvoice_butNoTicketUntilTheFeeIsPaid() {
         PetVisit visit = checkInWithSlot(LocalTime.of(9, 0), LocalTime.of(9, 30));
 
-        assertThat(visit.getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
-        assertThat(visit.getQueueOrder()).isEqualTo(1_793_325_600_000_000L);   // 2026-10-30T02:00:00Z
+        ArgumentCaptor<VisitServiceDetail> fee = ArgumentCaptor.forClass(VisitServiceDetail.class);
+        verify(detailRepository).saveAndFlush(fee.capture());
+        assertThat(fee.getValue().getService().getCode()).isEqualTo("EXAM_GEN");
+        assertThat(fee.getValue().getStatus()).isEqualTo(ServiceDetailStatus.PENDING);   // IN_PROGRESS ở T02
+        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoice =
+                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
+        verify(invoiceRepository).saveAndFlush(invoice.capture());
+        assertThat(invoice.getValue().getUnitPrice()).isEqualByComparingTo("100000.00");
+        assertThat(invoice.getValue().getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.PENDING);
+        // BR-35: chưa nộp phí khám thì chưa có phiếu, chưa vào hàng đợi Bác sĩ
+        verify(ticketIssuer, never()).issueForPaidServices(any(), anyCollection(), any());
         assertThat(lastHistory().getNotes()).contains("lịch hẹn #7");
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);
     }
 
     @Test
-    void checkIn_lateForTheSlot_getsNoSpecialTreatment_theSameRuleAsEveryoneElse() {
-        // Khung 08:00-08:30 đã qua lúc 09:00: giờ hẹn không còn ảnh hưởng thứ tự (khách đến trễ thật sự thì lịch đã NO_SHOW, FR-18)
-        PetVisit visit = checkInWithSlot(LocalTime.of(8, 0), LocalTime.of(8, 30));
+    void checkIn_emergency_issuesTheDoctorTicketImmediately_andCollectsTheFeeLater() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        stubSaveVisit();
 
-        assertThat(visit.getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
+        service.checkIn(new CheckInRequest(11L, null, "Co giật", true, null));
+
+        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void checkIn_whenTheExamServiceNeedsNoPrepayment_issuesTheTicketAtOnce() {
+        // Chính sách thu trước đọc từ danh mục (services.requires_prepayment), không suy ra từ nhóm dịch vụ
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        ClinicService freeExam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
+        freeExam.setRequiresPrepayment(false);
+        when(serviceRepository.findByCode("EXAM_GEN")).thenReturn(Optional.of(freeExam));
+        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        stubSaveVisit();
+
+        service.checkIn(new CheckInRequest(11L, null, "Khám", false, null));
+
+        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), org.mockito.ArgumentMatchers.isNull());
     }
 
     @Test
@@ -299,29 +339,27 @@ class VisitServiceImplTest {
     }
 
     @Test
-    void assignDoctor_toAnotherDoctor_movesTheVisitButKeepsItsQueueOrder() {
+    void assignDoctor_toAnotherDoctor_movesTheVisitAndItsWaitingTicket() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubDoctor(OTHER_DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P02");
         PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
-        long before = visit.getQueueOrder();
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
 
         service.assignDoctor(100L, new AssignDoctorRequest(OTHER_DOCTOR));
 
         assertThat(visit.getDoctorId()).isEqualTo(OTHER_DOCTOR);
-        assertThat(visit.getQueueOrder()).isEqualTo(before);   // ca đến trước vẫn đứng trước trong hàng đợi mới
+        verify(ticketIssuer).reassignDoctorTicket(100L, OTHER_DOCTOR);   // phiếu giữ nguyên số và giờ phát
     }
 
     @Test
-    void unassignDoctor_sendsTheVisitBackToTheUnassignedList_keepingQueueOrder() {
+    void unassignDoctor_sendsTheVisitBackToTheUnassignedList_withItsTicket() {
         PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
-        long before = visit.getQueueOrder();
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
 
         service.unassignDoctor(100L);
 
         assertThat(visit.getDoctorId()).isNull();
-        assertThat(visit.getQueueOrder()).isEqualTo(before);
+        verify(ticketIssuer).reassignDoctorTicket(100L, null);
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);
         verify(historyRepository, never()).save(any());
     }
@@ -348,7 +386,7 @@ class VisitServiceImplTest {
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(publisher).publishEvent(event.capture());
         assertThat(((VisitCheckedInEvent) event.getValue()).doctorId()).isEqualTo(DOCTOR);
-        assertThat(lastHistory().getNotes()).contains("hàng đợi Bác sĩ #" + DOCTOR);
+        assertThat(lastHistory().getNotes()).contains("chọn Bác sĩ #" + DOCTOR);   // vào hàng đợi Bác sĩ này khi đã nộp phí khám
     }
 
     @Test
@@ -385,13 +423,12 @@ class VisitServiceImplTest {
     // ================================================================== khám giai đoạn 1 (UC-22, UC-23)
 
     @Test
-    void startExam_byAssignedDoctor_recordsVitalSignsAndAddsExamFeeOnce() {
+    void startExam_byAssignedDoctor_takesTheTicket_recordsVitalSigns_andStartsTheExamFeeCreatedAtCheckIn() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        ClinicService exam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
-        when(serviceRepository.findByCode("EXAM_GEN")).thenReturn(Optional.of(exam));
-        stubSaveDetail();
+        VisitServiceDetail fee = detail(500L, 100L, EXAM_SVC, ServiceDetailStatus.PENDING);
+        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(fee));
 
         VisitResponse response = service.startExam(100L, new StartExamRequest(new BigDecimal("12.5"), new BigDecimal("38.6"), "Ăn kém"));
 
@@ -399,35 +436,24 @@ class VisitServiceImplTest {
         assertThat(response.weightAtVisit()).isEqualByComparingTo("12.5");
         assertThat(response.temperature()).isEqualByComparingTo("38.6");
         assertThat(response.clinicalNotes()).isEqualTo("Ăn kém");
-
-        ArgumentCaptor<VisitServiceDetail> fee = ArgumentCaptor.forClass(VisitServiceDetail.class);
-        verify(detailRepository).saveAndFlush(fee.capture());
-        assertThat(fee.getValue().getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);   // T02: hoàn tất ở T04/T05/T09
-        assertThat(fee.getValue().getQueueOrder()).isEqualTo(QueueOrders.of(CLOCK.instant()));
-        // v3.0: dòng chỉ định không chứa giá; hóa đơn riêng PENDING được lập CÙNG giao dịch, snapshot đơn giá và thuế suất
-        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoice =
-                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
-        verify(invoiceRepository).saveAndFlush(invoice.capture());
-        assertThat(invoice.getValue().getUnitPrice()).isEqualByComparingTo("100000.00");
-        assertThat(invoice.getValue().getVatRate()).isEqualByComparingTo("0.00");
-        assertThat(invoice.getValue().getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.PENDING);
-        assertThat(invoice.getValue().getVisitServiceDetailId()).isEqualTo(500L);
-        assertThat(invoice.getValue().getInvoiceCode()).isEqualTo(String.format("SINV-2026-%04d", invoice.getValue().getId()));   // sinh từ id, không count + 1
+        verify(ticketIssuer).startDoctorTicket(100L, DOCTOR);   // phiếu DOCTOR WAITING -> IN_SERVICE
+        assertThat(fee.getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);   // T02: hoàn tất ở T04/T05/T09
+        verify(detailRepository, never()).saveAndFlush(any());                    // không lập dịch vụ / hóa đơn mới
+        verify(invoiceRepository, never()).saveAndFlush(any());
         assertThat(lastHistory().getFromStatus()).isEqualTo(VisitStatus.WAITING);
         assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
     }
 
     @Test
-    void startExam_doesNotAddExamFeeAgainWhenAlreadyPresent() {
+    void startExam_withoutATicket_isRefused_CLIN_1314() {
+        // Chưa nộp phí khám (không phải ca cấp cứu) thì chưa có phiếu: Bác sĩ không bắt đầu khám được
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING, DOCTOR)));
-        ClinicService exam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
-        when(serviceRepository.findByCode("EXAM_GEN")).thenReturn(Optional.of(exam));
-        when(detailRepository.existsByVisitAndServiceCode(100L, "EXAM_GEN")).thenReturn(true);
+        PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        when(ticketIssuer.startDoctorTicket(100L, DOCTOR)).thenThrow(new com.vetclinic.common.exception.AppException(ErrorCode.NO_QUEUE_TICKET));
 
-        service.startExam(100L, new StartExamRequest(new BigDecimal("12.5"), new BigDecimal("38.6"), null));
-
-        verify(detailRepository, never()).saveAndFlush(any());
+        assertError(ErrorCode.NO_QUEUE_TICKET, () -> service.startExam(100L, new StartExamRequest(null, null, null)));
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);
     }
 
     @Test
@@ -452,21 +478,16 @@ class VisitServiceImplTest {
     }
 
     @Test
-    void startExam_vitalSignsAreOptional_butTheExamFeeIsStillCreatedInProgress() {
+    void startExam_vitalSignsAreOptional() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(serviceRepository.findByCode("EXAM_GEN")).thenReturn(Optional.of(service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00")));
-        stubSaveDetail();
 
         service.startExam(100L, new StartExamRequest(null, null, null));
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.IN_PROGRESS);
         assertThat(visit.getWeightAtVisit()).isNull();   // cân nặng / thân nhiệt có thể nhập sau bằng PUT /clinical-info
-        verify(detailRepository).saveAndFlush(any(VisitServiceDetail.class));
     }
-
-    // ================================================================== sinh hiệu (PUT /clinical-info)
 
     @Test
     void updateClinicalInfo_changesOnlyTheGivenFields_whileExamining() {

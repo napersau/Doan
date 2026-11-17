@@ -107,6 +107,10 @@ public class CatalogServiceImpl implements CatalogService {
                 .vatRate(request.vatRate() == null ? java.math.BigDecimal.ZERO.setScale(2) : request.vatRate())
                 .description(blankToNull(request.description()))
                 .active(true)
+                // Chính sách thu trước: mặc định khám / XN / CĐHA thu tiền xong mới phát phiếu, dịch vụ tại phòng thu khi chốt ca
+                .requiresPrepayment(request.requiresPrepayment() != null ? request.requiresPrepayment()
+                        : request.category() == com.vetclinic.clinical.constant.ServiceCategory.EXAMINATION
+                        || request.category().isParaclinical())
                 .build();
         return mapper.toResponse(serviceRepository.saveAndFlush(service));
     }
@@ -130,6 +134,9 @@ public class CatalogServiceImpl implements CatalogService {
         }
         if (request.active() != null) {
             service.setActive(request.active());
+        }
+        if (request.requiresPrepayment() != null) {
+            service.setRequiresPrepayment(request.requiresPrepayment());   // áp dụng cho lần thu / phát phiếu tiếp theo
         }
         return mapper.toResponse(serviceRepository.saveAndFlush(service));
     }

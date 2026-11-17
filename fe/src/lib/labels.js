@@ -45,7 +45,11 @@ export const PAYMENT_STATUS = {
   PENDING: { label: 'Chờ thanh toán', tone: 'amber' },
   PAID: { label: 'Đã thanh toán', tone: 'green' },
   CANCELLED: { label: 'Đã hủy', tone: 'gray' },
+  REFUNDED: { label: 'Đã hoàn tiền', tone: 'blue' },
 };
+/** Phiếu xếp hàng (SM-07): 2 = cấp cứu, 1 = quay lại với kết quả CLS, 0 = thường. */
+export const TICKET_PRIORITY = { 2: { label: 'Cấp cứu', tone: 'red' }, 1: { label: 'Có kết quả', tone: 'green' }, 0: { label: 'Thường', tone: 'gray' } };
+export const QUEUE_TYPE = { DOCTOR: 'Phòng khám bác sĩ', LABORATORY: 'Phòng xét nghiệm', IMAGING: 'Phòng CĐHA' };
 export const LAB_EVALUATION = {
   LOW: { label: 'Thấp', tone: 'amber' },
   NORMAL: { label: 'Bình thường', tone: 'green' },
@@ -67,12 +71,15 @@ export const ERROR_HINTS = {
   CLIN_1307: 'Cần nhập chẩn đoán trước khi chốt ca.',
   CLIN_1308: 'Cần ghi cân nặng và thân nhiệt trước khi chỉ định cận lâm sàng.',
   CLIN_1309: 'Còn dịch vụ tại phòng chưa bấm “Đã thực hiện” hoặc chưa hủy.',
-  CLIN_1310: 'Dịch vụ đã thu tiền nên không hủy được.',
+  CLIN_1310: 'Phí khám và dịch vụ khách tự hủy không được hoàn tiền.',
   CLIN_1311: 'Ca này đã được phân công cho bác sĩ khác.',
+  CLIN_1312: 'Không tìm thấy phiếu xếp hàng.',
+  CLIN_1313: 'Phiếu này không còn ở trạng thái chờ (đã bắt đầu, xong hoặc đã hủy).',
+  CLIN_1314: 'Ca chưa có phiếu xếp hàng: khách cần nộp phí khám tại quầy thu ngân trước.',
   BILL_1402: 'Số tiền giảm giá vượt quá giá trị của hóa đơn này.',
   BILL_1403: 'Hóa đơn này đã được thanh toán.',
   BILL_1408: 'Hóa đơn này đã bị hủy.',
-  BILL_1409: 'Bác sĩ chưa chốt chuyên môn nên chưa thu tiền / bán thuốc được.',
+  BILL_1409: 'Dịch vụ làm tại phòng và tiền thuốc chỉ thu khi Bác sĩ đã chốt chuyên môn.',
   PHARM_1406: 'Kho không đủ thuốc để bán. Hãy sửa số lượng trong hóa đơn hoặc báo kho nhập thêm.',
   PHARM_1407: 'Đơn thuốc này đã lập hóa đơn thuốc rồi (mỗi đơn chỉ một hóa đơn).',
   PHARM_1411: 'Đơn thuốc đã khóa (ca đã chốt hoặc đã có hóa đơn thuốc) nên không sửa được.',

@@ -46,6 +46,7 @@ public class VisitSupport {
     private final VisitServiceDetailRepository detailRepository;
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
     private final ServiceInvoiceRepository invoiceRepository;
+    private final TicketIssuer ticketIssuer;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
@@ -119,25 +120,28 @@ public class VisitSupport {
     }
 
     /**
-     * BR-33 / EX-08: hủy dịch vụ thì hóa đơn của chính dịch vụ đó chuyển CANCELLED trong CÙNG giao dịch (bất biến "dịch vụ
-     * CANCELLED <=> hóa đơn CANCELLED"). Hóa đơn đã PAID thì không hủy được (CLIN_1310): hoàn tiền ngoài phạm vi.
+     * BR-33 / EX-08 (cập nhật 17/11/2026): hủy dịch vụ thì hóa đơn của chính dịch vụ đó đổi trong CÙNG giao dịch:
+     * chưa thu -> CANCELLED; đã thu và {@code refund} (phòng khám không thực hiện được dịch vụ XN / CĐHA) -> REFUNDED;
+     * đã thu và khách tự bỏ / tự hủy -> giữ PAID (không hoàn). Phí khám đã thu không bao giờ hoàn (CLIN_1310).
      */
-    public void assertInvoiceNotPaid(Long detailId) {
-        invoiceRepository.findByVisitServiceDetailId(detailId).ifPresent(invoice -> {
-            if (invoice.getPaymentStatus() == PaymentStatus.PAID) {
-                throw new AppException(ErrorCode.PAID_SERVICE_CANNOT_BE_CANCELLED);
-            }
-        });
-    }
-
-    public void cancelInvoiceOf(Long detailId) {
-        invoiceRepository.findByVisitServiceDetailId(detailId).ifPresent(invoice -> {
-            if (invoice.getPaymentStatus() == PaymentStatus.PAID) {
-                throw new AppException(ErrorCode.PAID_SERVICE_CANNOT_BE_CANCELLED);
-            }
-            if (invoice.getPaymentStatus() == PaymentStatus.PENDING) {
-                invoice.setPaymentStatus(PaymentStatus.CANCELLED);
-                invoiceRepository.save(invoice);
+    public void settleInvoiceOfCancelled(VisitServiceDetail detail, boolean refund) {
+        invoiceRepository.findByVisitServiceDetailId(detail.getId()).ifPresent(invoice -> {
+            switch (invoice.getPaymentStatus()) {
+                case PENDING -> {
+                    invoice.setPaymentStatus(PaymentStatus.CANCELLED);
+                    invoiceRepository.save(invoice);
+                }
+                case PAID -> {
+                    if (!refund) {
+                        return;   // khách tự bỏ / tự hủy: giữ PAID, không hoàn tiền
+                    }
+                    if (!detail.getService().getCategory().isParaclinical()) {
+                        throw new AppException(ErrorCode.REFUND_NOT_ALLOWED);   // chỉ hoàn dịch vụ XN / CĐHA, không hoàn phí khám
+                    }
+                    invoice.setPaymentStatus(PaymentStatus.REFUNDED);
+                    invoiceRepository.save(invoice);
+                }
+                default -> { }   // đã CANCELLED / REFUNDED: không đổi
             }
         });
     }
@@ -150,8 +154,8 @@ public class VisitSupport {
     }
 
     /**
-     * Dịch vụ khám (EXAMINATION) tạo ở T02 ở trạng thái IN_PROGRESS; hoàn tất (COMPLETED) khi Bác sĩ rời giai đoạn khám:
-     * chỉ định cận lâm sàng (T04) hoặc chốt ca (T05 / T09). Hóa đơn của nó giữ nguyên PENDING.
+     * Dịch vụ khám (EXAMINATION) tạo ở T01 (check-in, PENDING), IN_PROGRESS ở T02; hoàn tất (COMPLETED) khi Bác sĩ rời giai đoạn
+     * khám: chỉ định cận lâm sàng (T04) hoặc chốt ca (T05 / T09). Hóa đơn của nó không đổi (đã thu lúc tiếp đón, ca cấp cứu thu sau).
      */
     public void completeExamDetails(Long visitId, Long actorId) {
         for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
@@ -174,9 +178,9 @@ public class VisitSupport {
     }
 
     /**
-     * T06 / Q5 (FR-44): mỗi khi một dịch vụ cận lâm sàng COMPLETED / CANCELLED, nếu không còn dịch vụ Lab / CĐHA nào PENDING hoặc
-     * IN_PROGRESS thì HỆ THỐNG tự chuyển ca WAITING_RESULTS -> RESULTS_READY (lịch sử {@code changed_by_user_id = NULL}) và đưa ca
-     * lên ĐẦU hàng đợi của Bác sĩ khám chính (chỉ sau ca cấp cứu): {@code queue_order = MIN(hàng đợi) - 1}.
+     * T06 / Q6 (FR-44): mỗi khi một dịch vụ cận lâm sàng COMPLETED / CANCELLED, nếu không còn dịch vụ Lab / CĐHA nào PENDING hoặc
+     * IN_PROGRESS thì HỆ THỐNG tự chuyển ca WAITING_RESULTS -> RESULTS_READY (lịch sử {@code changed_by_user_id = NULL}) và phát
+     * PHIẾU DOCTOR ưu tiên (priority 1, không thu tiền) cho Bác sĩ khám chính: đứng trước ca thường, sau ca cấp cứu.
      * Phải gọi SAU KHI đã khóa dòng đợt khám (khóa TRƯỚC rồi mới đếm) và trong transaction READ_COMMITTED, để thấy kết quả mới nhất
      * của kỹ thuật viên phòng còn lại vừa commit; nếu đếm trước khi khóa thì hai kỹ thuật viên hoàn tất cùng lúc làm ca kẹt mãi.
      * {@code actorId} là người vừa hoàn tất dịch vụ cuối (chỉ dùng cho event, không ghi vào lịch sử trạng thái).
@@ -191,17 +195,13 @@ public class VisitSupport {
             return;
         }
         Long doctorId = visit.getDoctorId();
-        Long minOrder = doctorId == null ? null : visitRepository.findMinQueueOrder(
-                doctorId, List.of(VisitStatus.WAITING, VisitStatus.RESULTS_READY), visit.getId());
         transition(visit, VisitStatus.RESULTS_READY, null,
-                "Đã có đủ kết quả cận lâm sàng: hệ thống tự chuyển, ca lên đầu hàng đợi của Bác sĩ");
-        if (minOrder != null) {
-            visit.setQueueOrder(minOrder - 1);
-        }
-        visitRepository.save(visit);
+                "Đã có đủ kết quả cận lâm sàng: hệ thống tự chuyển và phát phiếu ưu tiên vào hàng đợi Bác sĩ");
+        // Phiếu phòng còn chờ (dịch vụ đã bị hủy hết) đóng lại; phiếu DOCTOR ưu tiên mới cho Bác sĩ khám chính
+        ticketIssuer.issueResultsReady(visit);
         Long petId = visit.getPet().getId();
         eventPublisher.publishEvent(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), clock.instant(), null,
                 visit.getId(), visit.getVisitCode(), doctorId, petId));
-        log.info("Đợt khám {} đã có đủ kết quả cận lâm sàng (RESULTS_READY), lên đầu hàng đợi bác sĩ", visit.getVisitCode());
+        log.info("Đợt khám {} đã có đủ kết quả cận lâm sàng (RESULTS_READY), đã phát phiếu ưu tiên cho bác sĩ", visit.getVisitCode());
     }
 }

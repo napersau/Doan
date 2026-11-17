@@ -294,10 +294,10 @@ export default function VisitPage() {
           </Panel>
           {!mine && v.doctorId && <div className="ui-alert warning"><span>Ca này thuộc bác sĩ khác — bạn chỉ xem được.</span></div>}
 
-          {mine && v.status === 'WAITING' && <>
-            <div className="ui-alert info"><span>Ca đang trong hàng đợi của bạn. Dùng “Gọi số tiếp theo” ở trang hàng đợi; thú cưng vào phòng thì bắt đầu khám tại đây.</span></div>
+          {mine && v.status === 'WAITING' && (v.ticket ? <>
+            <div className="ui-alert info"><span>Phiếu số {v.ticket.ticketNo} đang trong hàng đợi của bạn. Bấm “Gọi” ở trang hàng đợi; thú cưng vào phòng thì bắt đầu khám tại đây.</span></div>
             <StartExam visit={v} onDone={visit.refresh} />
-          </>}
+          </> : <div className="ui-alert warning"><span>Khách chưa nộp phí khám nên ca chưa có phiếu và chưa vào hàng đợi. Nộp phí tại quầy thu ngân xong mới bắt đầu khám được.</span></div>)}
 
           {mine && v.status === 'IN_PROGRESS' && <>
             <Tabs value={tab} onChange={setTab} tabs={[{ key: 'vitals', label: 'Sinh hiệu' }, { key: 'services', label: 'Dịch vụ & cận lâm sàng' }, { key: 'conclusion', label: 'Kết luận' }, { key: 'prescription', label: 'Đơn thuốc' }, { key: 'close', label: 'Chốt ca' }]} />
@@ -306,7 +306,7 @@ export default function VisitPage() {
             {tab === 'conclusion' && <ConclusionTab draft={conclusion} setDraft={setDraft} onNext={() => setTab('prescription')} />}
             {tab === 'prescription' && <PrescriptionTab visit={v} />}
             {tab === 'close' && <CloseTab visit={v} draft={conclusion} onClosed={backToQueue} goTo={setTab} />}
-            <div className="ui-actions" style={{ marginTop: 18 }}><Button variant="danger" onClick={() => setDialog('cancel-exam')}>Hủy ca / chuyển viện (không thu phí)</Button></div>
+            <div className="ui-actions" style={{ marginTop: 18 }}><Button variant="danger" onClick={() => setDialog('cancel-exam')}>Hủy ca / chuyển viện</Button></div>
           </>}
 
           {v.status === 'WAITING_RESULTS' && <div className="ui-alert info"><span>Đang chờ kỹ thuật viên hoàn tất xét nghiệm / chẩn đoán hình ảnh. Bạn được giải phóng để gọi ca khác và sẽ nhận thông báo khi đủ kết quả (ca tự lên đầu hàng đợi).</span></div>}

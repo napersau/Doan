@@ -33,24 +33,6 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     List<PetVisit> findWithPetByIdIn(Collection<Long> ids);
 
-    /**
-     * Thứ tự MỌI hàng đợi (v3.0): cấp cứu chưa bị đẩy lùi lên đầu, còn lại theo queue_order tăng dần (số nhỏ gọi trước), cùng
-     * giá trị thì theo id. Không còn tầng "có hẹn đúng giờ" và không còn cột scheduled_at. Chỉ mục idx_visits_queue
-     * (doctor_id, status, is_emergency, queue_order).
-     * <p>Danh sách chờ phân công: ca WAITING chưa có Bác sĩ (doctor_id IS NULL).
-     */
-    @EntityGraph(attributePaths = {"pet", "pet.species"})
-    @Query("select v from PetVisit v where v.status = com.vetclinic.clinical.constant.VisitStatus.WAITING and v.doctorId is null "
-            + "order by case when v.emergency = true then 0 else 1 end asc, v.queueOrder asc, v.id asc")
-    List<PetVisit> findUnassignedWaiting();
-
-    /** Hàng đợi riêng của nhiều Bác sĩ (ca WAITING và RESULTS_READY), theo thứ tự hàng đợi; nhóm theo doctorId ở tầng ứng dụng. */
-    @EntityGraph(attributePaths = {"pet", "pet.species"})
-    @Query("select v from PetVisit v where v.doctorId in :doctorIds "
-            + "and v.status in (com.vetclinic.clinical.constant.VisitStatus.WAITING, com.vetclinic.clinical.constant.VisitStatus.RESULTS_READY) "
-            + "order by case when v.emergency = true then 0 else 1 end asc, v.queueOrder asc, v.id asc")
-    List<PetVisit> findQueueOfDoctors(@Param("doctorIds") Collection<Long> doctorIds);
-
     /** Số ca đang chờ (WAITING, RESULTS_READY) của từng Bác sĩ: các dòng [doctorId, count]. */
     @Query("select v.doctorId, count(v) from PetVisit v where v.doctorId is not null "
             + "and v.status in (com.vetclinic.clinical.constant.VisitStatus.WAITING, com.vetclinic.clinical.constant.VisitStatus.RESULTS_READY) "
@@ -65,15 +47,10 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
             + "order by v.id desc")
     List<PetVisit> findCompletedWithDebt();
 
-    /** Q5: queue_order nhỏ nhất trong hàng đợi của Bác sĩ (không tính ca {@code excludeId}); null nếu hàng đợi trống. */
-    @Query("select min(v.queueOrder) from PetVisit v where v.doctorId = :doctorId and v.status in :statuses and v.id <> :excludeId")
-    Long findMinQueueOrder(@Param("doctorId") Long doctorId, @Param("statuses") Collection<VisitStatus> statuses,
-                           @Param("excludeId") Long excludeId);
-
-    /** Các ca của một Bác sĩ (hàng đợi riêng + ca đang khám), cùng thứ tự hàng đợi như findQueueByStatus. */
+    /** Các ca của một Bác sĩ theo trạng thái (thứ tự hàng đợi thật nằm ở queue_tickets), cấp cứu trước rồi theo giờ tiếp đón. */
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     @Query("select v from PetVisit v where v.doctorId = :doctorId and v.status in :statuses "
-            + "order by case when v.emergency = true then 0 else 1 end asc, v.queueOrder asc, v.id asc")
+            + "order by case when v.emergency = true then 0 else 1 end asc, v.checkedInAt asc, v.id asc")
     List<PetVisit> findDoctorVisits(@Param("doctorId") Long doctorId, @Param("statuses") Collection<VisitStatus> statuses);
 
     /**
@@ -114,4 +91,8 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
     // ---- Trạng thái Bác sĩ (tính động): chỉ cần biết bác sĩ nào đang ở tình trạng nào
     @Query("select distinct v.doctorId from PetVisit v where v.doctorId is not null and v.status in :statuses")
     Set<Long> findDoctorIdsWithStatusIn(@Param("statuses") Collection<VisitStatus> statuses);
+
+    /** Ca theo trạng thái, cũ nhất trước (màn hình Thu ngân). */
+    @EntityGraph(attributePaths = {"pet", "pet.species"})
+    List<PetVisit> findByStatusOrderByIdAsc(VisitStatus status);
 }

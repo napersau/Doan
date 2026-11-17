@@ -29,6 +29,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -44,6 +46,8 @@ import static com.vetclinic.clinical.testsupport.TestData.service;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -66,6 +70,10 @@ class ServiceInvoiceServiceImplTest {
     private ApplicationEventPublisher publisher;
     @Mock
     private VisitAssembler assembler;
+    @Mock
+    private com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
+    @Mock
+    private com.vetclinic.clinical.service.TicketIssuer ticketIssuer;
 
     private ServiceInvoiceServiceImpl service;
     private ServiceInvoice examInvoice;
@@ -75,8 +83,11 @@ class ServiceInvoiceServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository, detailHistoryRepository,
-                invoiceRepository, publisher, CLOCK);
-        service = new ServiceInvoiceServiceImpl(visitRepository, detailRepository, invoiceRepository, support, assembler, publisher, CLOCK);
+                invoiceRepository, ticketIssuer, publisher, CLOCK);
+        PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
+        lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        service = new ServiceInvoiceServiceImpl(visitRepository, detailRepository, invoiceRepository, ticketRepository, support,
+                ticketIssuer, assembler, publisher, CLOCK, tm);
         examInvoice = invoice(11L, 1L, "100000.00", "0.00");
         labInvoice = invoice(12L, 2L, "250000.00", "0.00");
         xrayInvoice = invoice(13L, 3L, "180000.00", "0.00");
@@ -102,7 +113,7 @@ class ServiceInvoiceServiceImplTest {
         org.mockito.Mockito.lenient().when(visitRepository.findById(100L)).thenReturn(Optional.of(visit));
         org.mockito.Mockito.lenient().when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
         org.mockito.Mockito.lenient().when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(exam, lab, xray));
-        org.mockito.Mockito.lenient().when(invoiceRepository.findByVisitServiceDetailIdIn(List.of(1L, 2L, 3L)))
+        org.mockito.Mockito.lenient().when(invoiceRepository.findByVisitServiceDetailIdIn(org.mockito.ArgumentMatchers.anyCollection()))
                 .thenReturn(List.of(examInvoice, labInvoice, xrayInvoice));
         return visit;
     }
@@ -158,7 +169,12 @@ class ServiceInvoiceServiceImplTest {
     // ================================================================== giảm giá (EX-14)
 
     private void stubInvoiceOf(ServiceInvoice invoice, long detailId, long visitId, int quantity, VisitStatus visitStatus) {
-        VisitServiceDetail d = detail(detailId, visitId, service(7L, "IMG_XRAY", ServiceCategory.IMAGING, "180000.00"), ServiceDetailStatus.COMPLETED);
+        stubInvoiceOf(invoice, detailId, visitId, quantity, visitStatus, service(7L, "IMG_XRAY", ServiceCategory.IMAGING, "180000.00"));
+    }
+
+    private void stubInvoiceOf(ServiceInvoice invoice, long detailId, long visitId, int quantity, VisitStatus visitStatus,
+                               com.vetclinic.clinical.entity.ClinicService svc) {
+        VisitServiceDetail d = detail(detailId, visitId, svc, ServiceDetailStatus.COMPLETED);
         d.setQuantity(quantity);
         org.mockito.Mockito.lenient().when(invoiceRepository.findById(invoice.getId())).thenReturn(Optional.of(invoice));
         org.mockito.Mockito.lenient().when(detailRepository.findById(detailId)).thenReturn(Optional.of(d));
@@ -214,8 +230,9 @@ class ServiceInvoiceServiceImplTest {
         when(invoiceRepository.findById(404L)).thenReturn(Optional.empty());
         assertError(ErrorCode.INVOICE_NOT_FOUND, () -> service.discount(404L, new BigDecimal("1000")));
 
-        ServiceInvoice early = invoice(15L, 5L, "100000.00", "0.00");
-        stubInvoiceOf(early, 5L, 101L, 1, VisitStatus.IN_PROGRESS);   // bác sĩ chưa chốt
+        // Dịch vụ làm tại phòng: chỉ giảm (và thu) khi Bác sĩ đã chốt ca
+        ServiceInvoice early = invoice(15L, 5L, "200000.00", "0.00");
+        stubInvoiceOf(early, 5L, 101L, 1, VisitStatus.IN_PROGRESS, service(8L, "VAC_5IN1", ServiceCategory.VACCINATION, "200000.00"));
         assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.discount(15L, new BigDecimal("1000")));
         verify(invoiceRepository, never()).saveAndFlush(any());
     }
@@ -304,14 +321,83 @@ class ServiceInvoiceServiceImplTest {
     }
 
     @Test
-    void confirmPayment_refusedUntilTheDoctorClosesTheVisit_BILL_1409() {
+    void confirmPayment_ofAnInRoomService_isRefusedUntilTheDoctorClosesTheVisit_BILL_1409_andOnACancelledVisit() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.IN_PROGRESS, DOCTOR)));
-        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.CANCELLED, DOCTOR)));
+        PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
+        VisitServiceDetail vaccine = detail(4L, 100L, service(8L, "VAC_5IN1", ServiceCategory.VACCINATION, "200000.00"), ServiceDetailStatus.COMPLETED);
+        ServiceInvoice vaccineInvoice = invoice(14L, 4L, "200000.00", "0.00");
+        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
+        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(vaccine));
+        when(invoiceRepository.findByVisitServiceDetailIdIn(org.mockito.ArgumentMatchers.anyCollection())).thenReturn(List.of(vaccineInvoice));
+        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.confirmPayment(100L, List.of(14L)));
 
-        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.confirmPayment(100L, List.of(11L)));
+        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.CANCELLED, DOCTOR)));
         assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.confirmPayment(101L, List.of(11L)));
         verify(invoiceRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void confirmPayment_ofTheExamFee_rightAfterCheckIn_issuesTheDoctorTicketInTheSameTransaction() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        PetVisit visit = stubVisit(VisitStatus.WAITING);
+
+        service.confirmPayment(100L, List.of(11L));
+
+        assertThat(examInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);   // thu tiền không đổi trạng thái ca, chỉ phát phiếu
+        ArgumentCaptor<java.util.Collection<VisitServiceDetail>> paid = ArgumentCaptor.forClass(java.util.Collection.class);
+        verify(ticketIssuer).issueForPaidServices(org.mockito.ArgumentMatchers.eq(visit), paid.capture(),
+                org.mockito.ArgumentMatchers.eq(RECEPTIONIST));
+        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(1L);
+        verify(historyRepository, never()).save(any());
+    }
+
+    @Test
+    void confirmPayment_ofParaclinicalServices_whileWaitingForResults_issuesTheRoomTickets() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        PetVisit visit = stubVisit(VisitStatus.WAITING_RESULTS);
+        examInvoice.setPaymentStatus(PaymentStatus.PAID);
+
+        service.confirmPayment(100L, List.of(12L, 13L));
+
+        ArgumentCaptor<java.util.Collection<VisitServiceDetail>> paid = ArgumentCaptor.forClass(java.util.Collection.class);
+        verify(ticketIssuer).issueForPaidServices(org.mockito.ArgumentMatchers.eq(visit), paid.capture(),
+                org.mockito.ArgumentMatchers.eq(RECEPTIONIST));
+        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(2L, 3L);
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING_RESULTS);
+    }
+
+    @Test
+    void confirmPayment_refundedInvoicesDoNotBlockCompletion_andARefundedInvoiceCannotBePaidAgain() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
+        xrayInvoice.setPaymentStatus(PaymentStatus.REFUNDED);   // máy X-quang hỏng: đã hoàn tiền
+
+        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(100L, List.of(13L)));
+        service.confirmPayment(100L, List.of(11L, 12L));
+
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
+    }
+
+    @Test
+    void confirmPayment_withNothingLeftToPay_completesTheVisit_AD03_butAnEmptyListIsRefusedWhileSomethingIsPending() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.confirmPayment(100L, List.of()));   // còn 3 hóa đơn PENDING
+
+        List.of(examInvoice, labInvoice, xrayInvoice).forEach(i -> i.setPaymentStatus(PaymentStatus.PAID));   // đã thu trước hết
+        service.confirmPayment(100L, List.of());
+
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
+        verify(invoiceRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void ticketNumberClash_isRecognisedByTheUniqueConstraintName() {
+        assertThat(ServiceInvoiceServiceImpl.isTicketNumberClash(new org.springframework.dao.DataIntegrityViolationException(
+                "x", new RuntimeException("Duplicate entry '1-2026-10-30-5' for key 'queue_tickets.uq_qt_number'")))).isTrue();
+        assertThat(ServiceInvoiceServiceImpl.isTicketNumberClash(new org.springframework.dao.DataIntegrityViolationException(
+                "x", new RuntimeException("Duplicate entry for key 'service_invoices.uq_x'")))).isFalse();
     }
 
     @Test

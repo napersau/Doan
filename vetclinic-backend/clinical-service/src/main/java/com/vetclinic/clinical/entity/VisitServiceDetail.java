@@ -45,12 +45,6 @@ public class VisitServiceDetail {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    /**
-     * Thứ tự trong hàng đợi phòng Xét nghiệm / CĐHA, số NHỎ gọi trước (v3.0). Gán = thời điểm chỉ định, epoch micro giây
-     * (QueueOrders). Gọi / gọi lại không đổi giá trị này (như pet_visits).
-     */
-    @Column(name = "queue_order", nullable = false)
-    private long queueOrder;
-
+    // Dịch vụ XN / CĐHA vào hàng đợi qua queue_ticket_items sau khi khách nộp tiền (17/11/2026); bảng này không có cột hàng đợi.
     // Giá/VAT KHÔNG nằm ở đây mà ở service_invoices (1-1 với dòng chỉ định này).
 }

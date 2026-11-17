@@ -7,6 +7,7 @@ import com.vetclinic.common.event.MedicineInvoicePaidEvent;
 import com.vetclinic.common.event.MedicineLowStockEvent;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.event.PatientCalledEvent;
+import com.vetclinic.common.event.QueueTicketIssuedEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.security.RoleCode;
@@ -34,7 +35,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Biến 9 sự kiện nghiệp vụ v3.0 trên RabbitMQ thành thông báo realtime (WebSocket) và email.
+ * Biến 10 sự kiện nghiệp vụ trên RabbitMQ thành thông báo realtime (WebSocket) và email.
  * Mỗi (sự kiện, kênh) chỉ chạy thành công một lần (ProcessedEvents), nên giao lại sự kiện hoặc thử lại sau khi một bước
  * lỗi không làm người dùng nhận trùng. Lỗi thật (SMTP, auth-service sập khi cần email) thì ném để RabbitMQ thử lại 3 lần
  * rồi đưa vào DLQ. Phần làm giàu nội dung (tên thú cưng, số phòng) lỗi thì bỏ qua, thông báo vẫn đi với nội dung rút gọn.
@@ -223,21 +224,64 @@ public class NotificationEventListener {
             String room = isBlank(event.roomNumber()) ? place : place + " (phòng " + event.roomNumber() + ")";
             Map<String, Object> data = data("visitId", event.visitId(), "visitCode", event.visitCode(), "petId", event.petId(),
                     "petName", pet, "action", event.action(), "station", event.station(), "doctorId", event.doctorId(),
-                    "serviceDetailId", event.serviceDetailId(), "roomNumber", event.roomNumber());
+                    "ticketId", event.ticketId(), "ticketNo", event.ticketNo(), "roomNumber", event.roomNumber());
+            String number = event.ticketNo() == null ? event.visitCode() : String.valueOf(event.ticketNo());
 
             NotificationMessage forOwner = message(NotificationType.PATIENT_CALLED, Severity.CRITICAL, "Mời vào " + room,
-                    "Số " + event.visitCode() + ": mời " + pet + " vào " + room + ".", data);
+                    "Mời số " + number + " (" + pet + ") vào " + room + ".", data);
             visit.map(VisitSummary::ownerId).ifPresent(owner -> dispatcher.toUser(owner, forOwner));
 
             // Làm mới màn hình hàng đợi của người phụ trách: bác sĩ của hàng đợi, hoặc KTV của phòng Lab / CĐHA
             NotificationMessage forStaff = message(NotificationType.PATIENT_CALLED, Severity.INFO,
-                    "Đã gọi số", "Ca " + event.visitCode() + " (" + pet + ") - " + room, data);
+                    "Đã gọi số " + number, "Ca " + event.visitCode() + " (" + pet + ") - " + room, data);
             if ("LAB".equals(event.station())) {
                 dispatcher.toRole(RoleCode.LAB_TECHNICIAN, forStaff);
             } else if ("IMAGING".equals(event.station())) {
                 dispatcher.toRole(RoleCode.IMAGING_TECHNICIAN, forStaff);
             } else if (event.doctorId() != null) {
                 dispatcher.toUser(event.doctorId(), forStaff);
+            }
+        });
+    }
+
+    // ================================================================== queue.ticket_issued
+
+    /**
+     * Thu tiền xong (hoặc ca cấp cứu / ca có kết quả CLS) hệ thống phát phiếu: chủ nuôi nhận số phiếu và nơi chờ; màn hình hàng đợi
+     * của người phụ trách tự làm mới (Bác sĩ được chọn / Lễ tân điều phối, hoặc KTV phòng Lab / CĐHA).
+     */
+    @RabbitListener(queues = NotificationRabbitConfig.TICKET_ISSUED_QUEUE)
+    public void onTicketIssued(QueueTicketIssuedEvent event) {
+        log.info("Nhận QueueTicketIssuedEvent: phiếu {} số {} của {}", event.queueType(), event.ticketNo(), event.visitCode());
+        processed.runOnce("push:" + event.eventId(), () -> {
+            Optional<VisitSummary> visit = people.findVisit(event.visitId());
+            String pet = petName(visit);
+            String place = switch (event.queueType()) {
+                case "LABORATORY" -> "phòng Xét nghiệm";
+                case "IMAGING" -> "phòng Chẩn đoán hình ảnh";
+                default -> "phòng khám bác sĩ";
+            };
+            String priority = event.priority() >= 2 ? " (CẤP CỨU)" : event.priority() == 1 ? " (có kết quả cận lâm sàng)" : "";
+            Map<String, Object> data = data("ticketId", event.ticketId(), "queueType", event.queueType(), "ticketNo", event.ticketNo(),
+                    "priority", event.priority(), "visitId", event.visitId(), "visitCode", event.visitCode(), "petId", event.petId(),
+                    "petName", pet, "doctorId", event.doctorId());
+
+            NotificationMessage forOwner = message(NotificationType.TICKET_ISSUED, Severity.INFO, "Phiếu số " + event.ticketNo(),
+                    pet + " đã có phiếu số " + event.ticketNo() + priority + ", vui lòng chờ gọi số tại " + place + ".", data);
+            visit.map(VisitSummary::ownerId).ifPresent(owner -> dispatcher.toUser(owner, forOwner));
+
+            NotificationMessage forStaff = message(NotificationType.TICKET_ISSUED,
+                    event.priority() >= 2 ? Severity.CRITICAL : Severity.INFO,
+                    "Phiếu mới số " + event.ticketNo(), "Ca " + event.visitCode() + " (" + pet + ") vào hàng đợi " + place + priority, data);
+            switch (event.queueType()) {
+                case "LABORATORY" -> dispatcher.toRole(RoleCode.LAB_TECHNICIAN, forStaff);
+                case "IMAGING" -> dispatcher.toRole(RoleCode.IMAGING_TECHNICIAN, forStaff);
+                default -> {
+                    if (event.doctorId() != null) {
+                        dispatcher.toUser(event.doctorId(), forStaff);
+                    }
+                    dispatcher.toRole(RoleCode.RECEPTIONIST, forStaff);   // bảng điều phối: ca rời mục "chờ thu phí", vào hàng đợi
+                }
             }
         });
     }

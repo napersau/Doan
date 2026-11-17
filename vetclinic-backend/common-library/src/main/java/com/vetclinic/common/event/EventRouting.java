@@ -19,6 +19,7 @@ public final class EventRouting {
     public static final String APPOINTMENT_NO_SHOW = "appointment.no_show";
     public static final String VISIT_CHECKED_IN = "visit.checked_in";
     public static final String VISIT_PATIENT_CALLED = "visit.patient_called";
+    public static final String QUEUE_TICKET_ISSUED = "queue.ticket_issued";   // thêm 17/11/2026: thu tiền xong -> phát phiếu xếp hàng
     public static final String VISIT_RESULTS_READY = "visit.results_ready";
     public static final String VISIT_COMPLETED = "visit.completed";
     public static final String PHARMACY_MEDICINE_INVOICE_PAID = "pharmacy.medicine_invoice_paid";

@@ -60,11 +60,13 @@ public enum ErrorCode {
     DIAGNOSIS_REQUIRED("CLIN_1307", "Vui lòng nhập chẩn đoán trước khi chốt đợt khám", HttpStatus.BAD_REQUEST),
     VITAL_SIGNS_REQUIRED("CLIN_1308", "Vui lòng nhập cân nặng và thân nhiệt của thú cưng", HttpStatus.BAD_REQUEST),
     IN_ROOM_SERVICE_PENDING("CLIN_1309", "Còn dịch vụ tại phòng chưa thực hiện hoặc chưa hủy", HttpStatus.BAD_REQUEST),
-    PAID_SERVICE_CANNOT_BE_CANCELLED("CLIN_1310", "Không thể hủy dịch vụ đã được thanh toán", HttpStatus.CONFLICT),
+    // CLIN_1310 đổi nghĩa 17/11/2026: dịch vụ đã thu vẫn hủy được, nhưng phí khám và dịch vụ khách tự hủy KHÔNG hoàn tiền
+    REFUND_NOT_ALLOWED("CLIN_1310", "Phí khám và dịch vụ khách tự hủy không được hoàn tiền", HttpStatus.CONFLICT),
     NOT_ASSIGNED_DOCTOR("CLIN_1311", "Bạn không phải Bác sĩ được phân công cho ca khám này", HttpStatus.FORBIDDEN),
-    // CLIN_1312 bỏ trống có chủ ý (từng là DIAGNOSIS_REQUIRED ở v2; chuyển sang CLIN_1307) – không tái sử dụng để tránh nhầm mã cũ
-    LAB_REFERENCE_NOT_FOUND("CLIN_1313", "Chưa cấu hình khoảng tham chiếu của chỉ số này cho loài của thú cưng", HttpStatus.BAD_REQUEST),
-    INVALID_IMAGING_FILE("CLIN_1314", "Tệp ảnh không hợp lệ (chỉ nhận JPEG, PNG hoặc DICOM, tối đa 20MB)", HttpStatus.BAD_REQUEST),
+    // Phiếu xếp hàng (Quy chuẩn §5.1, thêm 17/11/2026)
+    TICKET_NOT_FOUND("CLIN_1312", "Không tìm thấy phiếu xếp hàng", HttpStatus.NOT_FOUND),
+    TICKET_NOT_WAITING("CLIN_1313", "Phiếu không còn ở trạng thái chờ gọi", HttpStatus.CONFLICT),
+    NO_QUEUE_TICKET("CLIN_1314", "Ca chưa có phiếu xếp hàng (khách chưa nộp phí khám / tiền dịch vụ)", HttpStatus.BAD_REQUEST),
     SPECIES_NOT_FOUND("CLIN_1315", "Không tìm thấy loài thú cưng", HttpStatus.NOT_FOUND),
     INVALID_DOCTOR("CLIN_1316", "Người được chọn không phải bác sĩ đang hoạt động", HttpStatus.BAD_REQUEST),
     LAB_ITEM_NOT_FOUND("CLIN_1317", "Không tìm thấy chỉ số xét nghiệm", HttpStatus.NOT_FOUND),
@@ -74,6 +76,9 @@ public enum ErrorCode {
     SERVICE_NOT_FOUND("CLIN_1320", "Không tìm thấy dịch vụ kỹ thuật hoặc dịch vụ đã ngừng sử dụng", HttpStatus.NOT_FOUND),
     SERVICE_DETAIL_NOT_FOUND("CLIN_1321", "Không tìm thấy chỉ định dịch vụ", HttpStatus.NOT_FOUND),
     INVALID_SERVICE_DETAIL_STATUS("CLIN_1322", "Trạng thái chỉ định dịch vụ không hợp lệ để thực hiện thao tác này", HttpStatus.BAD_REQUEST),
+    // Dời số ngày 17/11/2026 để nhường CLIN_1313 / CLIN_1314 cho phiếu xếp hàng (mã chỉ có trong code)
+    LAB_REFERENCE_NOT_FOUND("CLIN_1323", "Chưa cấu hình khoảng tham chiếu của chỉ số này cho loài của thú cưng", HttpStatus.BAD_REQUEST),
+    INVALID_IMAGING_FILE("CLIN_1324", "Tệp ảnh không hợp lệ (chỉ nhận JPEG, PNG hoặc DICOM, tối đa 20MB)", HttpStatus.BAD_REQUEST),
 
     // 5. Hóa đơn & Kho dược (BILL/PHARM: 1400 - 1499) – dùng cho cả service_invoices (clinical) và medicine_invoices (billing-pharmacy)
     INVOICE_NOT_FOUND("BILL_1401", "Không tìm thấy hóa đơn", HttpStatus.NOT_FOUND),
@@ -84,7 +89,7 @@ public enum ErrorCode {
     INSUFFICIENT_STOCK("PHARM_1406", "Số lượng tồn kho không đủ để bán", HttpStatus.CONFLICT),
     PRESCRIPTION_ALREADY_INVOICED("PHARM_1407", "Đơn thuốc này đã được lập hóa đơn thuốc trước đó", HttpStatus.CONFLICT),
     INVOICE_ALREADY_CANCELLED("BILL_1408", "Hóa đơn này đã bị hủy", HttpStatus.CONFLICT),
-    VISIT_NOT_READY_FOR_PAYMENT("BILL_1409", "Đợt khám chưa được Bác sĩ chốt chuyên môn", HttpStatus.BAD_REQUEST),
+    VISIT_NOT_READY_FOR_PAYMENT("BILL_1409", "Dịch vụ làm tại phòng chỉ thu khi Bác sĩ đã chốt chuyên môn", HttpStatus.BAD_REQUEST),
     PRESCRIPTION_LOCKED("PHARM_1411", "Đơn thuốc đã khóa (đợt khám đã chốt hoặc đơn đã được bán), không thể chỉnh sửa", HttpStatus.CONFLICT),
     // Mã chỉ có trong code (không có trong Quy chuẩn §5.1), giữ nguyên số đã dùng
     INVALID_STOCK_ADJUSTMENT("PHARM_1412", "Điều chỉnh làm tồn kho âm, không thể thực hiện", HttpStatus.BAD_REQUEST),

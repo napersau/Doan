@@ -28,7 +28,7 @@ import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
-import com.vetclinic.clinical.service.QueueOrders;
+import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.clinical.service.VisitSupport;
@@ -62,7 +62,7 @@ import java.util.stream.Collectors;
 @Service
 public class VisitServiceImpl implements VisitService {
 
-    /** Phí khám lâm sàng tổng quát, tự thêm vào đợt khám khi Bác sĩ bắt đầu khám (CLAUDE.md §5.8). */
+    /** Phí khám lâm sàng tổng quát: tạo cùng hóa đơn lúc tiếp đón (T01), thu xong mới phát phiếu vào hàng đợi Bác sĩ (BR-35). */
     static final String EXAM_SERVICE_CODE = "EXAM_GEN";
 
     private final PetVisitRepository visitRepository;
@@ -73,6 +73,7 @@ public class VisitServiceImpl implements VisitService {
     private final AuthClient authClient;
     private final AppointmentClient appointmentClient;
     private final VisitSupport support;
+    private final TicketIssuer ticketIssuer;
     private final VisitAssembler assembler;
     private final NamedLockService lockService;
     private final ApplicationEventPublisher eventPublisher;
@@ -83,7 +84,7 @@ public class VisitServiceImpl implements VisitService {
                             PetVisitStatusHistoryRepository historyRepository,
                             VisitServiceDetailRepository detailRepository, ClinicServiceRepository serviceRepository,
                             AuthClient authClient, AppointmentClient appointmentClient,
-                            VisitSupport support, VisitAssembler assembler,
+                            VisitSupport support, TicketIssuer ticketIssuer, VisitAssembler assembler,
                             NamedLockService lockService, ApplicationEventPublisher eventPublisher, Clock clock,
                             PlatformTransactionManager transactionManager) {
         this.visitRepository = visitRepository;
@@ -94,6 +95,7 @@ public class VisitServiceImpl implements VisitService {
         this.authClient = authClient;
         this.appointmentClient = appointmentClient;
         this.support = support;
+        this.ticketIssuer = ticketIssuer;
         this.assembler = assembler;
         this.lockService = lockService;
         this.eventPublisher = eventPublisher;
@@ -146,9 +148,21 @@ public class VisitServiceImpl implements VisitService {
 
         Long finalPetId = petId;
         String finalSymptoms = symptoms;
-        return lockService.runLocked(List.of("vetclinic:visit-pet:" + petId), () -> transactionTemplate.execute(
-                tx -> createVisit(actor.id(), finalPetId, appointmentId, finalSymptoms,
-                        Boolean.TRUE.equals(request.emergency()), doctorId)));
+        boolean emergency = Boolean.TRUE.equals(request.emergency());
+        return lockService.runLocked(List.of("vetclinic:visit-pet:" + petId), () -> {
+            for (int attempt = 1; ; attempt++) {
+                try {
+                    return transactionTemplate.execute(
+                            tx -> createVisit(actor.id(), finalPetId, appointmentId, finalSymptoms, emergency, doctorId));
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    // ca cấp cứu được phát phiếu ngay: hai quầy cùng phát có thể trùng số phiếu -> thử lại trong giao dịch mới
+                    if (attempt >= ServiceInvoiceServiceImpl.MAX_TICKET_ATTEMPTS || !ServiceInvoiceServiceImpl.isTicketNumberClash(e)) {
+                        throw e;
+                    }
+                    ServiceInvoiceServiceImpl.backOff(attempt);
+                }
+            }
+        });
     }
 
     private VisitResponse createVisit(Long receptionistId, Long petId, Long appointmentId, String symptoms,
@@ -174,8 +188,6 @@ public class VisitServiceImpl implements VisitService {
                 .initialSymptoms(symptoms)
                 .status(VisitStatus.WAITING)
                 .checkedInAt(now)
-                // Thứ tự hàng đợi = thời điểm tiếp nhận (epoch micro giây); mọi hàng đợi: cấp cứu chưa bị lùi rồi queue_order
-                .queueOrder(QueueOrders.of(now))
                 .build();
         visit = visitRepository.saveAndFlush(visit);
         visit.setVisitCode(String.format("VIS-%d-%05d", LocalDate.now(clock).getYear(), visit.getId()));
@@ -183,11 +195,20 @@ public class VisitServiceImpl implements VisitService {
         support.record(visit.getId(), null, VisitStatus.WAITING, receptionistId,
                 (appointmentId == null ? "Tiếp nhận khách vãng lai" : "Tiếp nhận khách có lịch hẹn #" + appointmentId)
                         + (emergency ? " (CẤP CỨU)" : "")
-                        + (doctorId == null ? "" : ", xếp vào hàng đợi Bác sĩ #" + doctorId));
+                        + (doctorId == null ? "" : ", chọn Bác sĩ #" + doctorId));
+        // T01: lập dịch vụ khám + hóa đơn phí khám PENDING. Thu phí xong mới phát phiếu vào hàng đợi Bác sĩ (BR-35);
+        // ca cấp cứu: phát phiếu ngay (priority 2), thu sau.
+        ClinicService exam = serviceRepository.findByCode(EXAM_SERVICE_CODE).filter(ClinicService::isActive)
+                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_NOT_FOUND, "Chưa cấu hình dịch vụ khám " + EXAM_SERVICE_CODE));
+        VisitServiceDetail examDetail = createDetail(visit.getId(), exam, 1, "Phí khám lâm sàng (lập lúc tiếp đón)", receptionistId,
+                ServiceDetailStatus.PENDING);
+        if (emergency || !exam.isRequiresPrepayment()) {   // chính sách thu trước đọc từ danh mục, không suy ra từ nhóm dịch vụ
+            ticketIssuer.issueForPaidServices(visit, List.of(examDetail), null);
+        }
         // Chỉ được gửi sang RabbitMQ SAU KHI commit (DomainEventRabbitPublisher): appointment-service sẽ chuyển lịch hẹn sang CHECKED_IN
         eventPublisher.publishEvent(new VisitCheckedInEvent(UUID.randomUUID(), now, receptionistId, visit.getId(),
                 visit.getVisitCode(), pet.getId(), appointmentId, emergency, doctorId));
-        return assembler.summary(visit);
+        return assembler.detail(visit);   // kèm phí khám vừa lập và phiếu (ca cấp cứu) để màn hình tiếp đón hiển thị
     }
 
     @Override
@@ -262,10 +283,11 @@ public class VisitServiceImpl implements VisitService {
         if (doctor.id().equals(visit.getDoctorId())) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Ca này đã được xếp vào hàng đợi của bác sĩ này");
         }
-        // KHÔNG kiểm tra Bác sĩ rảnh/bận (v3.0). Giữ nguyên queue_order: ca đến trước vẫn đứng trước trong hàng đợi mới.
+        // KHÔNG kiểm tra Bác sĩ rảnh/bận (v3.0). Phiếu DOCTOR đang chờ (nếu đã nộp phí) đi theo, GIỮ số phiếu và giờ phát (Q3).
         // Trạng thái không đổi nên không ghi pet_visit_status_histories.
         visit.setDoctorId(doctor.id());
         visitRepository.save(visit);
+        ticketIssuer.reassignDoctorTicket(visit.getId(), doctor.id());
         return assembler.summary(visit).withAssignedRoom(doctor.roomNumber());
     }
 
@@ -279,6 +301,7 @@ public class VisitServiceImpl implements VisitService {
         }
         visit.setDoctorId(null);
         visitRepository.save(visit);
+        ticketIssuer.reassignDoctorTicket(visit.getId(), null);   // phiếu về danh sách chờ phân công, giữ số
         return assembler.summary(visit);
     }
 
@@ -297,18 +320,23 @@ public class VisitServiceImpl implements VisitService {
             throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE);
         }
 
+        // BR-35: ca phải có phiếu DOCTOR đang chờ (đã nộp phí khám, hoặc ca cấp cứu) -> phiếu IN_SERVICE (CLIN_1314 nếu chưa có)
+        ticketIssuer.startDoctorTicket(visit.getId(), doctorId);
         if (request != null) {
             applyClinicalInfo(visit, request.weightAtVisit(), request.temperature(), request.clinicalNotes());
         }
         // Thời điểm bắt đầu khám = created_at của dòng lịch sử này (không còn cột started_at)
         support.transition(visit, VisitStatus.IN_PROGRESS, doctorId, "Bác sĩ bắt đầu khám lâm sàng Giai đoạn 1");
 
-        // T02: tự tạo MỘT dịch vụ khám (EXAM_GEN) ở trạng thái IN_PROGRESS kèm hóa đơn PENDING (phí khám là một dịch vụ)
-        serviceRepository.findByCode(EXAM_SERVICE_CODE)
-                .filter(ClinicService::isActive)
-                .filter(s -> !detailRepository.existsByVisitAndServiceCode(visit.getId(), s.getCode()))
-                .ifPresent(s -> createDetail(visit.getId(), s, 1, "Phí khám lâm sàng tổng quát (tự động)", doctorId,
-                        ServiceDetailStatus.IN_PROGRESS));
+        // Dịch vụ khám (lập lúc tiếp đón - T01) PENDING -> IN_PROGRESS. KHÔNG lập hóa đơn mới.
+        for (VisitServiceDetail d : detailRepository.findByVisitIdOrderByIdAsc(visit.getId())) {
+            if (d.getService().getCategory() == ServiceCategory.EXAMINATION && d.getStatus() == ServiceDetailStatus.PENDING) {
+                d.setStatus(ServiceDetailStatus.IN_PROGRESS);
+                detailRepository.save(d);
+                support.recordDetail(d.getId(), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING",
+                        doctorId, null);
+            }
+        }
         return assembler.detail(visit);
     }
 
@@ -363,14 +391,22 @@ public class VisitServiceImpl implements VisitService {
         }
 
         String notes = blankToNull(request.notes());
+        List<VisitServiceDetail> ordered = new java.util.ArrayList<>();
         for (ClinicService service : services) {
-            // Mỗi dịch vụ: dòng chỉ định PENDING (tự vào hàng đợi phòng, queue_order = lúc chỉ định) + hóa đơn PENDING, cùng giao dịch
-            createDetail(visit.getId(), service, 1, notes, doctorId, ServiceDetailStatus.PENDING);
+            // Mỗi dịch vụ: dòng chỉ định PENDING + hóa đơn PENDING, cùng giao dịch. CHƯA vào hàng đợi phòng: khách nộp tiền xong mới có phiếu
+            ordered.add(createDetail(visit.getId(), service, 1, notes, doctorId, ServiceDetailStatus.PENDING));
         }
         support.completeExamDetails(visit.getId(), doctorId);   // dịch vụ khám của GĐ 1 hoàn tất
+        ticketIssuer.finishDoctorTicket(visit.getId());         // phiếu DOCTOR -> DONE
         // FR-33: ca rời IN_PROGRESS nên trạng thái Bác sĩ tính ra AVAILABLE: Bác sĩ gọi số tiếp theo mà không chờ kết quả
         support.transition(visit, VisitStatus.WAITING_RESULTS, doctorId,
                 "Bác sĩ chỉ định cận lâm sàng, ca chuyển sang chờ kết quả và Bác sĩ được giải phóng");
+        // Ca cấp cứu: phát phiếu phòng ngay (priority 2), thu sau. Dịch vụ CLS không cần thu trước (danh mục): phát phiếu ngay
+        List<VisitServiceDetail> ticketNow = visit.isEmergency() ? ordered
+                : ordered.stream().filter(d -> !d.getService().isRequiresPrepayment()).toList();
+        if (!ticketNow.isEmpty()) {
+            ticketIssuer.issueForPaidServices(visit, ticketNow, null);
+        }
         return assembler.detail(visit);
     }
 
@@ -408,7 +444,7 @@ public class VisitServiceImpl implements VisitService {
 
     /**
      * Tạo dòng chỉ định + HÓA ĐƠN RIÊNG của nó trong cùng giao dịch (BR-19, FR-32). Đơn giá / VAT được snapshot vào hóa đơn
-     * (BR-25), visit_service_details không chứa giá. {@code queue_order} = lúc chỉ định (hàng đợi Lab / CĐHA).
+     * (BR-25), visit_service_details không chứa giá. Dịch vụ XN / CĐHA vào hàng đợi phòng khi thu tiền xong (queue_ticket_items).
      */
     private VisitServiceDetail createDetail(Long visitId, ClinicService service, int quantity, String notes, Long actorId,
                                             ServiceDetailStatus status) {
@@ -418,7 +454,6 @@ public class VisitServiceImpl implements VisitService {
                 .quantity(quantity)
                 .status(status)
                 .notes(notes)
-                .queueOrder(QueueOrders.now(clock))
                 .build());
         support.createInvoice(detail, service);
         support.recordDetail(detail.getId(), null, status, "ORDERED", actorId, notes);
@@ -439,6 +474,7 @@ public class VisitServiceImpl implements VisitService {
         if (visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)) {
             throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE);
         }
+        ticketIssuer.startDoctorTicket(visit.getId(), doctorId);   // phiếu ưu tiên (priority 1) -> IN_SERVICE
         // Hai giai đoạn của IN_PROGRESS phân biệt bằng lịch sử: đã qua WAITING_RESULTS thì là Giai đoạn 2
         support.transition(visit, VisitStatus.IN_PROGRESS, doctorId, "Bác sĩ bắt đầu khám Giai đoạn 2 (đọc kết quả cận lâm sàng)");
         return assembler.detail(visit);
@@ -475,6 +511,7 @@ public class VisitServiceImpl implements VisitService {
             visit.setClinicalNotes(blankToNull(request.clinicalNotes()));
         }
         support.completeExamDetails(visit.getId(), doctorId);   // dịch vụ khám hoàn tất khi Bác sĩ rời giai đoạn khám
+        ticketIssuer.finishDoctorTicket(visit.getId());         // phiếu DOCTOR -> DONE (mở lại hồ sơ thì không có phiếu)
         // Khóa hồ sơ chuyên môn một chiều (BR-27); thời điểm chốt = created_at của dòng lịch sử (không còn cột closed_at)
         support.transition(visit, VisitStatus.WAITING_PAYMENT, doctorId,
                 "Bác sĩ chốt chuyên môn, khóa hồ sơ bệnh án và chuyển sang thanh toán");
@@ -499,14 +536,16 @@ public class VisitServiceImpl implements VisitService {
         }
         String reason = request.reason().trim();
         cancelOpenDetails(visit.getId(), doctorId, "Hủy ca / chuyển viện: " + reason, true);
+        ticketIssuer.cancelActiveTickets(visit.getId());   // phiếu DOCTOR đang phục vụ -> CANCELLED
         // Lý do hủy ghi nguyên văn vào notes của dòng lịch sử (không còn cột cancel_reason)
         support.transition(visit, VisitStatus.CANCELLED, doctorId, reason);
         return assembler.detail(visit);
     }
 
     /**
-     * Hủy các dòng chỉ định còn dở (PENDING / IN_PROGRESS) kèm hóa đơn của chính chúng, cùng giao dịch (BR-33). {@code includeExam = false}
-     * thì chỉ hủy dịch vụ cận lâm sàng (khách bỏ về: dịch vụ khám và dịch vụ tại phòng đã làm giữ nguyên làm công nợ).
+     * Hủy các dòng chỉ định còn dở (PENDING / IN_PROGRESS) kèm hóa đơn của chính chúng, cùng giao dịch (BR-33): hóa đơn chưa thu
+     * -> CANCELLED, đã thu -> giữ PAID (khách tự bỏ, không hoàn). {@code includeExam = false} thì chỉ hủy dịch vụ cận lâm sàng
+     * (khách bỏ về: dịch vụ khám và dịch vụ tại phòng đã làm giữ nguyên, hóa đơn chưa thu làm công nợ).
      */
     private void cancelOpenDetails(Long visitId, Long actorId, String reason, boolean includeExam) {
         for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
@@ -520,7 +559,7 @@ public class VisitServiceImpl implements VisitService {
             detail.setStatus(ServiceDetailStatus.CANCELLED);
             detailRepository.save(detail);
             support.recordDetail(detail.getId(), from, ServiceDetailStatus.CANCELLED, "CANCELLED", actorId, reason);
-            support.cancelInvoiceOf(detail.getId());   // dịch vụ CANCELLED <=> hóa đơn CANCELLED (hóa đơn PAID thì CLIN_1310)
+            support.settleInvoiceOfCancelled(detail, false);   // chưa thu -> CANCELLED; đã thu -> giữ PAID (không hoàn)
         }
     }
 
@@ -567,6 +606,7 @@ public class VisitServiceImpl implements VisitService {
         }
         // Chỉ định cận lâm sàng chưa thực hiện bị hủy kèm hóa đơn; dịch vụ đã làm giữ hóa đơn PENDING làm công nợ
         cancelOpenDetails(visit.getId(), actor.id(), "Khách bỏ về: hủy chỉ định chưa thực hiện", false);
+        ticketIssuer.cancelActiveTickets(visit.getId());   // phiếu phòng / phiếu ưu tiên đang chờ -> CANCELLED
         support.transition(visit, VisitStatus.COMPLETED, actor.id(),
                 "Khách bỏ về: đóng ca, lưu kết quả vào bệnh án và ghi nợ viện phí (EX-11)");
         eventPublisher.publishEvent(new VisitCompletedEvent(UUID.randomUUID(), clock.instant(), actor.id(), visit.getId(),
@@ -583,8 +623,12 @@ public class VisitServiceImpl implements VisitService {
         }
         PetVisit visit = support.lock(id);
         support.assertStatus(visit, VisitStatus.WAITING, "Chỉ hủy tiếp nhận được ca đang chờ khám (WAITING)");
+        String reason = request.reason().trim();
+        // Dịch vụ khám -> CANCELLED; phí khám chưa thu -> CANCELLED, đã thu -> giữ PAID (không hoàn); phiếu đang chờ -> CANCELLED
+        cancelOpenDetails(visit.getId(), actor.id(), "Hủy tiếp nhận: " + reason, true);
+        ticketIssuer.cancelActiveTickets(visit.getId());
         // Lý do hủy ghi nguyên văn vào notes của dòng lịch sử (không còn cột cancel_reason)
-        support.transition(visit, VisitStatus.CANCELLED, actor.id(), request.reason().trim());
+        support.transition(visit, VisitStatus.CANCELLED, actor.id(), reason);
         return assembler.detail(visit);
     }
 

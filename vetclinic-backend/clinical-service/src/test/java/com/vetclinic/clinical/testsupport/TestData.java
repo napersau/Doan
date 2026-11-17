@@ -9,7 +9,6 @@ import com.vetclinic.clinical.entity.Pet;
 import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.entity.Species;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
-import com.vetclinic.clinical.service.QueueOrders;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -58,20 +57,30 @@ public final class TestData {
         return PetVisit.builder().id(id).visitCode("VIS-2026-" + id).pet(pet(11L, dog())).doctorId(doctorId)
                 .receptionistId(RECEPTIONIST).status(status)
                 .checkedInAt(Instant.parse("2026-10-30T01:00:00Z"))
-                // queue_order = thời điểm tiếp nhận (epoch micro giây); cộng id để mỗi ca có thứ tự riêng
-                .queueOrder(QueueOrders.of(Instant.parse("2026-10-30T01:00:00Z")) + id).build();
+                .build();
     }
 
     public static ClinicService service(long id, String code, ServiceCategory category, String price) {
         return ClinicService.builder().id(id).code(code).name("Dịch vụ " + code).category(category)
-                .price(new BigDecimal(price)).active(true).build();
+                .price(new BigDecimal(price)).active(true)
+                // seed: khám, XN, CĐHA thu tiền xong mới phát phiếu; dịch vụ tại phòng thu khi chốt ca
+                .requiresPrepayment(category == ServiceCategory.EXAMINATION || category.isParaclinical()).build();
     }
 
     public static VisitServiceDetail detail(long id, long visitId, ClinicService service, ServiceDetailStatus status) {
         Instant createdAt = Instant.parse("2026-10-30T01:30:00Z").plusSeconds(id);
-        // Giá / VAT không còn ở dòng chỉ định (v3.0) mà ở hóa đơn dịch vụ; queue_order = lúc chỉ định
+        // Giá / VAT không còn ở dòng chỉ định (v3.0) mà ở hóa đơn dịch vụ
         return VisitServiceDetail.builder().id(id).visitId(visitId).service(service)
-                .quantity(1).status(status).createdAt(createdAt).queueOrder(QueueOrders.of(createdAt)).build();
+                .quantity(1).status(status).createdAt(createdAt).build();
+    }
+
+    /** Phiếu xếp hàng phát lúc 09:00 + id giây (thứ tự phát = thứ tự id). */
+    public static com.vetclinic.clinical.entity.QueueTicket ticket(long id, com.vetclinic.clinical.constant.QueueType type,
+                                                                   long visitId, Long doctorId, int ticketNo, int priority,
+                                                                   com.vetclinic.clinical.constant.TicketStatus status) {
+        return com.vetclinic.clinical.entity.QueueTicket.builder().id(id).queueType(type)
+                .serviceDate(java.time.LocalDate.of(2026, 10, 30)).ticketNo(ticketNo).visitId(visitId).doctorId(doctorId)
+                .priority(priority).status(status).issuedAt(Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
     }
 
     public static void loginAs(long userId, RoleCode role) {

@@ -44,6 +44,7 @@ public class VisitAssembler {
     private final ImagingAttachmentRepository attachmentRepository;
     private final ServiceInvoiceRepository invoiceRepository;
     private final VisitTimeline timeline;
+    private final com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
 
     /** Dùng cho API danh sách: không kèm dịch vụ và kết quả. */
     public VisitResponse summary(PetVisit visit) {
@@ -73,7 +74,11 @@ public class VisitAssembler {
         return build(visit, timeline.of(visit),
                 details.stream().map(d -> toServiceDetail(d, invoices.get(d.getId()))).toList(),
                 labs,
-                imagingResults.stream().map(r -> toImaging(r, attachments.getOrDefault(r.getId(), List.of()))).toList());
+                imagingResults.stream().map(r -> toImaging(r, attachments.getOrDefault(r.getId(), List.of()))).toList())
+                // Phiếu DOCTOR còn hiệu lực (nếu có): giao diện hồ sơ ca hiện số phiếu, Bác sĩ chỉ "Bắt đầu" được khi có phiếu
+                .withTicket(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatusIn(visit.getId(),
+                                com.vetclinic.clinical.constant.QueueType.DOCTOR, com.vetclinic.clinical.constant.TicketStatus.ACTIVE)
+                        .map(com.vetclinic.clinical.dto.response.TicketInfo::of).orElse(null));
     }
 
     /** Kết quả xét nghiệm của MỘT chỉ định (kèm nhãn LOW / NORMAL / HIGH tính khi hiển thị). */
@@ -130,7 +135,7 @@ public class VisitAssembler {
         // assignedRoom = null ở đây: số phòng là users.room_number của Bác sĩ, VisitEnricher gắn sau commit (không gọi Feign trong transaction)
         return new VisitResponse(v.getId(), v.getVisitCode(), pet.getId(), pet.getName(), pet.getPetCode(),
                 pet.getSpecies().getName(), pet.getOwnerId(), v.getAppointmentId(), v.getDoctorId(),
-                v.getReceptionistId(), null, v.isEmergency(), v.getStatus(), locked, v.getQueueOrder(),
+                v.getReceptionistId(), null, v.isEmergency(), v.getStatus(), locked, null,
                 v.getWeightAtVisit(), v.getTemperature(), v.getInitialSymptoms(), v.getClinicalNotes(), v.getDiagnosis(),
                 v.getTreatmentPlan(), v.getDoctorAdvice(), times.cancelReason(), v.getCheckedInAt(), times.startedAt(),
                 times.closedAt(), times.completedAt(), services, labs, imaging);

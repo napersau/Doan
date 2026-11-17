@@ -1,12 +1,13 @@
 package com.vetclinic.clinical.service.impl;
 
-import com.vetclinic.clinical.client.AuthClient;
-import com.vetclinic.clinical.dto.response.UserSummaryResponse;
+import com.vetclinic.clinical.constant.QueueType;
+import com.vetclinic.clinical.constant.TicketStatus;
+import com.vetclinic.clinical.entity.QueueTicket;
+import com.vetclinic.clinical.entity.QueueTicketItem;
+import com.vetclinic.clinical.repository.QueueTicketItemRepository;
+import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceLabTestItemRepository;
-import com.vetclinic.clinical.service.QueueOrders;
-import com.vetclinic.common.dto.ApiResponse;
-import com.vetclinic.common.event.PatientCalledEvent;
-import org.springframework.context.ApplicationEventPublisher;
+import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.dto.response.ReferenceRangeResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.LabEvaluation;
@@ -51,10 +52,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
-import java.time.Clock;
-import java.util.UUID;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -75,13 +73,14 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     private static final String ACTION_SAMPLE_COLLECTED = "SAMPLE_COLLECTED";
     private static final String ACTION_START = "START_PROCESSING";
-    private static final String CALLED = "CALLED";
+    private static final String REASON_CLINIC = "CLINIC";
+    private static final String REASON_CUSTOMER = "CUSTOMER";
 
     private final VisitServiceDetailRepository detailRepository;
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
-    private final AuthClient authClient;
-    private final ApplicationEventPublisher eventPublisher;
-    private final Clock clock;
+    private final QueueTicketRepository ticketRepository;
+    private final QueueTicketItemRepository ticketItemRepository;
+    private final TicketIssuer ticketIssuer;
     private final PetVisitRepository visitRepository;
     private final LabTestItemRepository labTestItemRepository;
     private final LabTestReferenceRangeRepository rangeRepository;
@@ -95,8 +94,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     private final TransactionTemplate readCommittedTemplate;
 
     public ParaclinicServiceImpl(VisitServiceDetailRepository detailRepository,
-                                 VisitServiceDetailHistoryRepository detailHistoryRepository, AuthClient authClient,
-                                 ApplicationEventPublisher eventPublisher, Clock clock,
+                                 VisitServiceDetailHistoryRepository detailHistoryRepository,
+                                 QueueTicketRepository ticketRepository, QueueTicketItemRepository ticketItemRepository,
+                                 TicketIssuer ticketIssuer,
                                  PetVisitRepository visitRepository, LabTestItemRepository labTestItemRepository,
                                  LabTestReferenceRangeRepository rangeRepository,
                                  ServiceLabTestItemRepository serviceLabItemRepository,
@@ -107,9 +107,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                                  PlatformTransactionManager transactionManager) {
         this.detailRepository = detailRepository;
         this.detailHistoryRepository = detailHistoryRepository;
-        this.authClient = authClient;
-        this.eventPublisher = eventPublisher;
-        this.clock = clock;
+        this.ticketRepository = ticketRepository;
+        this.ticketItemRepository = ticketItemRepository;
+        this.ticketIssuer = ticketIssuer;
         this.visitRepository = visitRepository;
         this.labTestItemRepository = labTestItemRepository;
         this.rangeRepository = rangeRepository;
@@ -129,11 +129,37 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     // ================================================================== hàng đợi
 
+    /**
+     * Hàng đợi phòng (cập nhật 17/11/2026) đọc từ PHIẾU XẾP HÀNG của phòng đang WAITING / IN_SERVICE, thứ tự
+     * {@code priority DESC, issued_at, id}; mỗi phiếu bung ra các dịch vụ còn mở của nó (đứng liền nhau). Dịch vụ chưa nộp tiền
+     * không có phiếu nên không xuất hiện. Gọi số / bắt đầu phiếu ở QueueTicketService.
+     */
     @Override
     @Transactional(readOnly = true)
     public List<QueueItemResponse> queue(ServiceCategory category) {
         requireParaclinical(category);
-        return toItems(category, detailRepository.findQueue(category, ServiceDetailStatus.OPEN));
+        List<QueueTicket> tickets = ticketRepository.findRoomQueue(QueueType.ofRoom(category), TicketStatus.ACTIVE);
+        if (tickets.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<Long>> detailIdsByTicket = ticketItemRepository
+                .findByTicketIdIn(tickets.stream().map(QueueTicket::getId).toList()).stream()
+                .collect(Collectors.groupingBy(QueueTicketItem::getTicketId,
+                        Collectors.mapping(QueueTicketItem::getVisitServiceDetailId, Collectors.toList())));
+        Map<Long, VisitServiceDetail> details = detailRepository.findAllById(detailIdsByTicket.values().stream()
+                        .flatMap(List::stream).toList()).stream()
+                .collect(Collectors.toMap(VisitServiceDetail::getId, d -> d));
+        List<Row> rows = new ArrayList<>();
+        for (QueueTicket t : tickets) {
+            detailIdsByTicket.getOrDefault(t.getId(), List.of()).stream().sorted()
+                    .map(details::get)
+                    .filter(d -> d != null && ServiceDetailStatus.OPEN.contains(d.getStatus()))
+                    .forEach(d -> rows.add(new Row(d, t)));
+        }
+        return toItems(category, rows);
+    }
+
+    private record Row(VisitServiceDetail detail, QueueTicket ticket) {
     }
 
     private static void requireParaclinical(ServiceCategory category) {
@@ -142,12 +168,12 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         }
     }
 
-    /** Giữ nguyên thứ tự của {@code details} (truy vấn đã xếp theo hàng đợi). */
-    private List<QueueItemResponse> toItems(ServiceCategory category, List<VisitServiceDetail> details) {
-        if (details.isEmpty()) {
+    /** Giữ nguyên thứ tự của {@code rows} (đã xếp theo phiếu). */
+    private List<QueueItemResponse> toItems(ServiceCategory category, List<Row> rows) {
+        if (rows.isEmpty()) {
             return List.of();
         }
-        List<Long> visitIds = details.stream().map(VisitServiceDetail::getVisitId).distinct().toList();
+        List<Long> visitIds = rows.stream().map(r -> r.detail().getVisitId()).distinct().toList();
         Map<Long, PetVisit> visits = visitRepository.findWithPetByIdIn(visitIds).stream()
                 .collect(Collectors.toMap(PetVisit::getId, v -> v));
         Map<Long, List<VisitServiceDetail>> siblings = detailRepository.findByVisitIdInOrderByIdAsc(visitIds).stream()
@@ -155,9 +181,11 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         Map<Long, String> latestAction = latestActions(siblings.values().stream().flatMap(List::stream)
                 .map(VisitServiceDetail::getId).toList());
 
-        return details.stream()
-                .filter(d -> visits.containsKey(d.getVisitId()))
-                .map(d -> {
+        return rows.stream()
+                .filter(r -> visits.containsKey(r.detail().getVisitId()))
+                .map(r -> {
+                    VisitServiceDetail d = r.detail();
+                    QueueTicket t = r.ticket();
                     PetVisit v = visits.get(d.getVisitId());
                     return new QueueItemResponse(d.getId(), v.getId(), v.getVisitCode(), v.getPet().getId(),
                             v.getPet().getName(), v.getPet().getSpecies().getName(), d.getService().getId(),
@@ -165,7 +193,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                             category == ServiceCategory.LABORATORY ? labStage(d, latestAction.get(d.getId())) : null,
                             category == ServiceCategory.IMAGING
                                     ? labBadge(siblings.getOrDefault(d.getVisitId(), List.of()), latestAction) : null,
-                            d.getNotes(), d.getCreatedAt());
+                            d.getNotes(), d.getCreatedAt(), t.getId(), t.getTicketNo(), t.getPriority(), t.getStatus(),
+                            t.getIssuedAt(), t.getLastCalledAt());
                 })
                 .toList();
     }
@@ -207,85 +236,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         return anyLab ? "SAMPLE_COLLECTED" : null;
     }
 
-    // ================================================================== Gọi số (BR-34)
-
-    @Override
-    public QueueItemResponse callNext(ServiceCategory category) {
-        requireParaclinical(category);
-        Long actor = SecurityUtils.getCurrentUserId();
-        assertTechnicianOf(category);
-        String room = roomOf(actor);   // Feign NGOÀI transaction
-        return readCommittedTemplate.execute(tx -> {
-            List<VisitServiceDetail> pending = detailRepository.findQueue(category, List.of(ServiceDetailStatus.PENDING));
-            if (pending.isEmpty()) {
-                throw new AppException(ErrorCode.QUEUE_EMPTY);
-            }
-            VisitServiceDetail head = pending.get(0);   // gọi CẢ CA của đợt khám này một lần (các chỉ định cùng phòng đứng chung một lượt)
-            publishCalled(head, visitWithPet(head.getVisitId()), CALLED, actor, room, category);   // chưa đổi trạng thái (Q3)
-            return toItems(category, List.of(head)).get(0);
-        });
-    }
-
-    @Override
-    public QueueItemResponse call(Long detailId) {
-        Long actor = SecurityUtils.getCurrentUserId();
-        ServiceCategory category = readCommittedTemplate.execute(tx -> detailRepository.findById(detailId)
-                .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND)).getService().getCategory());
-        requireParaclinical(category);
-        assertTechnicianOf(category);
-        String room = roomOf(actor);   // Feign NGOÀI transaction
-        return readCommittedTemplate.execute(tx -> {
-            VisitServiceDetail detail = detailRepository.findById(detailId)
-                    .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
-            requireDetailStatus(detail, ServiceDetailStatus.PENDING, "Chỉ gọi được chỉ định đang chờ trong hàng đợi (PENDING)");
-            publishCalled(detail, visitWithPet(detail.getVisitId()), CALLED, actor, room, category);   // không đổi trạng thái, không đổi thứ tự
-            return toItems(category, List.of(detail)).get(0);
-        });
-    }
-
-    private PetVisit visitWithPet(Long visitId) {
-        return visitRepository.findWithPetById(visitId).orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
-    }
-
-    private void publishCalled(VisitServiceDetail d, PetVisit v, String action, Long actor, String room, ServiceCategory category) {
-        eventPublisher.publishEvent(new PatientCalledEvent(UUID.randomUUID(), clock.instant(), actor, action,
-                category == ServiceCategory.LABORATORY ? "LAB" : "IMAGING", v.getId(), v.getVisitCode(), v.getPet().getId(),
-                v.getDoctorId(), d.getId(), room));
-    }
-
-    /** Số phòng của kỹ thuật viên để hiển thị khi gọi số; không tra được thì bỏ trống, không làm hỏng việc gọi số. */
-    private String roomOf(Long userId) {
-        try {
-            ApiResponse<UserSummaryResponse> response = authClient.getUser(userId);
-            return response == null || response.getData() == null ? null : response.getData().roomNumber();
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
-    /** Chỉ kỹ thuật viên của đúng phòng mới gọi số / đẩy lùi trong hàng đợi phòng đó. */
-    private static void assertTechnicianOf(ServiceCategory category) {
-        RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
-        boolean ok = (category == ServiceCategory.LABORATORY && role == RoleCode.LAB_TECHNICIAN)
-                || (category == ServiceCategory.IMAGING && role == RoleCode.IMAGING_TECHNICIAN);
-        if (!ok) {
-            throw new AppException(ErrorCode.ACCESS_DENIED);
-        }
-    }
-
     // ================================================================== thao tác trên một chỉ định
-
-    @Override
-    @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse start(Long detailId) {
-        Long actor = SecurityUtils.getCurrentUserId();
-        Ctx c = lockForAction(detailId);
-        assertOperator(c.detail(), false);
-        requireDetailStatus(c.detail(), ServiceDetailStatus.PENDING, "Chỉ bắt đầu thực hiện được chỉ định đang chờ (PENDING)");
-        requireVisitWaitingResults(c.visit());
-        setStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", actor, null);
-        return assembler.toServiceDetail(c.detail());
-    }
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -326,7 +277,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse cancel(Long detailId, String reason) {
+    public ServiceDetailResponse cancel(Long detailId, String reason, String reasonType) {
         Long actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), true);
@@ -336,21 +287,33 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     "Không hủy riêng phí khám: dùng \"Hủy ca / Chuyển viện\" khi khách không tiếp tục khám");
         }
         if (!category.isParaclinical()) {
-            // Dịch vụ tại phòng: chỉ Bác sĩ được gán, khi ca đang khám và chưa bị khóa
+            // Dịch vụ tại phòng: chỉ Bác sĩ được gán, khi ca đang khám và chưa bị khóa (chưa thu tiền nên không có hoàn tiền)
             support.assertAssignedTo(c.visit(), actor);
             support.assertStatus(c.visit(), VisitStatus.IN_PROGRESS, "Chỉ hủy được dịch vụ tại phòng khi ca đang khám (IN_PROGRESS)");
         }
-        // Hóa đơn đã thu tiền thì nói rõ lý do này trước (CLIN_1310, hoàn tiền ngoài phạm vi), thay vì báo "sai trạng thái" chung chung
-        support.assertInvoiceNotPaid(c.detail().getId());
         if (!ServiceDetailStatus.OPEN.contains(c.detail().getStatus())) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS,
                     "Chỉ hủy được chỉ định đang chờ hoặc đang thực hiện");
         }
+        boolean refund = category.isParaclinical() && REASON_CLINIC.equals(resolveReasonType(reasonType));
         setStatus(c.detail(), ServiceDetailStatus.CANCELLED, "CANCELLED", actor, reason.trim());
-        support.cancelInvoiceOf(c.detail().getId());   // BR-33 / EX-08: dịch vụ CANCELLED <=> hóa đơn CANCELLED, cùng giao dịch
+        // BR-33 / EX-08: chưa thu -> CANCELLED; đã thu + lỗi phòng khám -> REFUNDED; đã thu + khách tự hủy -> giữ PAID
+        support.settleInvoiceOfCancelled(c.detail(), refund);
+        ticketIssuer.refreshRoomTicketOf(detailId);   // phiếu phòng không còn dịch vụ chờ -> đóng
         // EX-08: dịch vụ này là dịch vụ cuối còn dở dang thì ca chuyển sang RESULTS_READY với kết quả đã có
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
+    }
+
+    /**
+     * Ai chịu lỗi khi hủy dịch vụ XN / CĐHA đã thu tiền: CLINIC (thiết bị hỏng, không thực hiện được) thì hoàn tiền, CUSTOMER (khách
+     * tự hủy / bỏ về) thì không. Không gửi thì mặc định theo vai trò: Bác sĩ đổi hướng xử lý = CLINIC, kỹ thuật viên = CUSTOMER.
+     */
+    private static String resolveReasonType(String reasonType) {
+        if (reasonType != null && !reasonType.isBlank()) {
+            return reasonType.trim().toUpperCase();
+        }
+        return SecurityUtils.getCurrentRole().orElse(null) == RoleCode.VETERINARIAN ? REASON_CLINIC : REASON_CUSTOMER;
     }
 
     // ================================================================== nhập kết quả
@@ -451,6 +414,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         labResultRepository.saveAll(results);
 
         setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
+        ticketIssuer.refreshRoomTicketOf(detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
     }
@@ -510,6 +474,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                 .fileSize(f.size()).contentType(f.contentType()).build()).toList());
 
         setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
+        ticketIssuer.refreshRoomTicketOf(detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
     }

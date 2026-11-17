@@ -46,4 +46,11 @@ public class ClinicService {
 
     @Column(name = "is_active", nullable = false)
     private boolean active;
+
+    /**
+     * Chính sách thu trước (BR-35, 17/11/2026): TRUE = thu tiền xong mới phát phiếu xếp hàng (khám, Xét nghiệm, CĐHA);
+     * FALSE = dịch vụ làm tại phòng, thu khi chốt ca.
+     */
+    @Column(name = "requires_prepayment", nullable = false)
+    private boolean requiresPrepayment;
 }

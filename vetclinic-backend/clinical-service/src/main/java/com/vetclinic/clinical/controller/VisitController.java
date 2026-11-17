@@ -40,7 +40,7 @@ public class VisitController {
 
     /**
      * UC-20, FR-21: bảng điều phối: danh sách chờ phân công + hàng đợi riêng từng Bác sĩ (kèm số người chờ, trạng thái, phòng) và
-     * Bác sĩ được gợi ý (ít người chờ nhất). Thứ tự: (cấp cứu chưa bị lùi) trước, rồi queue_order.
+     * Bác sĩ được gợi ý (ít phiếu chờ nhất), kèm mục "chờ thu phí khám". Hàng đợi là phiếu xếp hàng: priority DESC, issued_at.
      */
     @GetMapping("/queue")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','ADMIN')")
@@ -48,27 +48,7 @@ public class VisitController {
         return ResponseEntity.ok(ApiResponse.success(doctorQueueService.board()));
     }
 
-    /**
-     * Q3 "Gọi số tiếp theo" (BR-34): Bác sĩ không có ca đang khám gọi ca đầu hàng đợi của mình; ca chưa đổi trạng thái.
-     * CLIN_1302 nếu đang khám dở, CLIN_1303 nếu hàng đợi trống.
-     */
-    @PostMapping("/call-next")
-    @PreAuthorize("hasRole('VETERINARIAN')")
-    public ResponseEntity<ApiResponse<VisitResponse>> callNext() {
-        return ResponseEntity.ok(ApiResponse.success("Đã gọi số tiếp theo", doctorQueueService.callNext()));
-    }
-
-    /**
-     * "Gọi" một ca bất kỳ trong hàng đợi của mình (khách vắng thì gọi ca khác, thứ tự giữ nguyên; khách quay lại thì gọi lại).
-     * Chỉ phát thông báo gọi số, không đổi trạng thái hay thứ tự. CLIN_1302 nếu đang khám dở, CLIN_1311 nếu ca không thuộc mình.
-     */
-    @PostMapping("/{id}/call")
-    @PreAuthorize("hasRole('VETERINARIAN')")
-    public ResponseEntity<ApiResponse<VisitResponse>> call(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Đã gọi bệnh nhân", doctorQueueService.call(id)));
-    }
-
-    /** Hàng đợi của chính Bác sĩ đang đăng nhập (ca WAITING và RESULTS_READY, ca có kết quả đứng đầu). */
+    /** Hàng đợi của chính Bác sĩ đang đăng nhập: các ca có phiếu DOCTOR đang chờ (đã nộp phí khám / cấp cứu / có kết quả CLS). */
     @GetMapping("/my-queue")
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<List<VisitResponse>>> myQueue() {

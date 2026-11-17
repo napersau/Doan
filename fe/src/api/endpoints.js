@@ -77,8 +77,6 @@ export const visitsApi = {
   history: (id) => api.get(`${VISITS}/${id}/history`),
   assignDoctor: (id, doctorId) => api.post(`${VISITS}/${id}/assign-doctor`, { doctorId }),
   unassignDoctor: (id) => api.post(`${VISITS}/${id}/unassign-doctor`),
-  callNext: () => api.post(`${VISITS}/call-next`),
-  call: (id) => api.post(`${VISITS}/${id}/call`),
   startExam: (id, body) => api.post(`${VISITS}/${id}/start-exam`, body),
   clinicalInfo: (id, body) => api.put(`${VISITS}/${id}/clinical-info`, body),
   paraclinicalOrders: (id, serviceIds, notes) => api.post(`${VISITS}/${id}/paraclinical-orders`, { serviceIds, notes: notes || null }),
@@ -95,18 +93,24 @@ export const visitsApi = {
   serviceInvoices: (id) => api.get(`${VISITS}/${id}/service-invoices`),
   confirmServicePayment: (id, invoiceIds) => api.post(`${VISITS}/${id}/service-invoices/confirm-payment`, { invoiceIds }),
   discountServiceInvoice: (invoiceId, discountAmount) => api.post(`${CLIN}/service-invoices/${invoiceId}/discount`, { discountAmount }),
+  // Màn hình thu ngân 3 mục: EXAM_FEE (chờ nộp phí khám), PARACLINIC (chờ nộp tiền XN / CĐHA), FINAL (đã chốt ca)
+  cashierPending: (section) => api.get(`${CLIN}/cashier/pending`, { section }),
+};
+
+/** Phiếu xếp hàng (SM-07): hàng đợi Bác sĩ / Lab / CĐHA. "Gọi" chỉ báo khách, không đổi thứ tự hay trạng thái. */
+export const queueTicketsApi = {
+  callNext: (queueType) => api.post(`${CLIN}/queue-tickets/call-next?queueType=${queueType}`),
+  call: (ticketId) => api.post(`${CLIN}/queue-tickets/${ticketId}/call`),
+  start: (ticketId) => api.post(`${CLIN}/queue-tickets/${ticketId}/start`),
 };
 
 export const paraclinicApi = {
   labQueue: () => api.get(`${CLIN}/lab-queue`),
   imagingQueue: () => api.get(`${CLIN}/imaging-queue`),
-  callNextLab: () => api.post(`${CLIN}/lab-queue/call-next`),
-  callNextImaging: () => api.post(`${CLIN}/imaging-queue/call-next`),
-  call: (detailId) => api.post(`${CLIN}/service-details/${detailId}/call`),
-  start: (detailId) => api.post(`${CLIN}/service-details/${detailId}/start`),
   sampleCollected: (detailId) => api.post(`${CLIN}/service-details/${detailId}/sample-collected`),
   perform: (detailId) => api.post(`${CLIN}/service-details/${detailId}/perform`),
-  cancel: (detailId, reason) => api.post(`${CLIN}/service-details/${detailId}/cancel`, { reason }),
+  // reasonType: CUSTOMER (khách tự hủy, không hoàn tiền) | CLINIC (phòng khám không làm được, hoàn tiền nếu đã thu)
+  cancel: (detailId, reason, reasonType) => api.post(`${CLIN}/service-details/${detailId}/cancel`, { reason, reasonType: reasonType || null }),
   labForm: (detailId) => api.get(`${CLIN}/service-details/${detailId}/lab-form`),
   saveLabResults: (detailId, results) => api.post(`${CLIN}/lab-results/${detailId}`, { results }),
   saveImagingResult: (detailId, { description, conclusion, files }) => {

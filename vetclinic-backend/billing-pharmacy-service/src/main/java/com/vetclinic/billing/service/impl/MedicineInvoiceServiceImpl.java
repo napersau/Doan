@@ -95,7 +95,7 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
                 .orElseThrow(() -> new AppException(ErrorCode.PRESCRIPTION_NOT_FOUND)).getVisitId());
         VisitSummaryResponse visit = visitLookup.require(visitId);   // Feign ngoài transaction
         if (visit.status() != VisitStatus.WAITING_PAYMENT && visit.status() != VisitStatus.COMPLETED) {
-            throw new AppException(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT);
+            throw new AppException(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, "Đợt khám chưa được Bác sĩ chốt chuyên môn");
         }
         MedicineInvoiceResponse created = tx.execute(s -> persistNew(prescriptionId, request));
         return assembler.withVisit(created, visit);

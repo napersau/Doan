@@ -222,7 +222,7 @@ async function main() {
     await b.click('Gửi yêu cầu đặt lịch', 'button[type=submit]');
     check('gửi yêu cầu đặt lịch', await b.hasText('Đã gửi yêu cầu đặt lịch'), (await b.text()).slice(0, 300));
 
-    step('2. Lễ tân: duyệt lịch, tiếp nhận kèm chọn bác sĩ');
+    step('2. Lễ tân: duyệt lịch, tiếp nhận kèm chọn bác sĩ, thu phí khám → phát phiếu');
     check('lễ tân đăng nhập', await b.login(STAFF.reception.phoneNumber, PASSWORD));
     await b.goto('/reception/appointments');
     check('thấy lịch chờ duyệt của chủ nuôi', await b.hasText(owner.name));
@@ -236,9 +236,15 @@ async function main() {
     await b.fill('Triệu chứng ban đầu', 'Bỏ ăn, nôn');
     await b.fill('Bác sĩ phụ trách', STAFF.vet.fullName);
     await b.click('Tiếp nhận', 'button[type=submit]');
-    check('tiếp nhận thành công, vào hàng đợi của bác sĩ', await b.hasText('Đã vào hàng đợi của bác sĩ'), (await b.text()).slice(0, 400));
+    check('tiếp nhận thành công, chờ nộp phí khám (chưa có phiếu)', await b.hasText('Chờ nộp phí khám') && await b.hasText('Nộp phí khám xong sẽ được phát phiếu'), (await b.text()).slice(0, 400));
     await b.goto('/reception/queue');
-    check('bảng điều phối có hàng đợi riêng của bác sĩ', await b.hasText(STAFF.vet.fullName) && await b.hasText(owner.pet), (await b.text()).slice(0, 400));
+    check('bảng điều phối: ca ở mục "Chờ nộp phí khám"', await b.hasText('Chờ nộp phí khám') && await b.hasText(owner.pet), (await b.text()).slice(0, 400));
+    await b.clickRow(owner.pet, 'Thu phí khám');
+    check('màn hình thu ngân: phí khám thu trước', await b.hasText('Khám lâm sàng') && await b.hasText('thu trước'), (await b.text()).slice(0, 400));
+    await b.click('hóa đơn đã chọn', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
+    check('thu phí khám → phát phiếu vào hàng đợi bác sĩ', await b.hasText('phát phiếu') && await b.hasText('Phiếu xếp hàng của ca'), (await b.text()).slice(0, 400));
+    await b.goto('/reception/queue');
+    check('bảng điều phối: ca có số phiếu trong hàng đợi riêng của bác sĩ', await b.hasText(STAFF.vet.fullName) && await b.hasText(owner.pet) && await b.hasText('Số '), (await b.text()).slice(0, 400));
 
     step('3. Bác sĩ: gọi số, gọi lại, khám, dịch vụ tại phòng, chỉ định cận lâm sàng');
     check('bác sĩ đăng nhập', await b.login(STAFF.vet.phoneNumber, PASSWORD));
@@ -261,6 +267,15 @@ async function main() {
     await b.click('Chỉ định và chuyển sang chờ kết quả');
     check('chỉ định CLS, bác sĩ được giải phóng', await b.waitFor('location.pathname === "/vet/today"', 10000), (await b.text()).slice(0, 300));
     check('ca chờ kết quả không còn trong hàng đợi của bác sĩ', await b.waitFor(`![...document.querySelectorAll('main .ui-list li')].some((li) => li.innerText.includes(${JSON.stringify(owner.pet)}))`, 8000), (await b.text()).slice(0, 600));
+
+    step('3b. Thu ngân: thu tiền xét nghiệm + CĐHA → phát phiếu phòng');
+    await b.login(STAFF.reception.phoneNumber, PASSWORD);
+    await b.goto('/reception/invoices'); await b.click('Xét nghiệm / CĐHA', '[role=tab]');
+    check('ca nằm ở mục thu tiền XN / CĐHA', await b.hasText(owner.pet, 15000), (await b.text()).slice(0, 300));
+    await b.clickRow(owner.pet, 'Thu tiền XN / CĐHA');
+    check('dịch vụ tại phòng (tẩy giun) chưa thu được trước khi chốt ca', await b.hasText('thu khi bác sĩ chốt ca'), (await b.text()).slice(0, 400));
+    await b.click('hóa đơn đã chọn', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
+    check('thu XN + CĐHA → phát phiếu phòng xét nghiệm và CĐHA', await b.hasText('Phòng xét nghiệm số') && await b.hasText('Phòng CĐHA số'), (await b.text()).slice(0, 400));
 
     step('4. KTV xét nghiệm và KTV CĐHA: gọi số, bắt đầu, lấy mẫu, nhập kết quả');
     check('KTV xét nghiệm đăng nhập', await b.login(STAFF.lab.phoneNumber, PASSWORD));
@@ -303,26 +318,22 @@ async function main() {
     await b.click('Chốt ca và chuyển thanh toán'); await b.click('Chốt ca', 'button[type=submit]');
     check('chốt ca, về hàng đợi', await b.waitFor('location.pathname === "/vet/today"', 12000), (await b.text()).slice(0, 300));
 
-    step('6. Lễ tân: thu tiền dịch vụ từng phần + giảm giá, bán thuốc');
+    step('6. Lễ tân: thu dịch vụ tại phòng (giảm giá), bán thuốc; khám/XN/CĐHA đã thu trước');
     await b.login(STAFF.reception.phoneNumber, PASSWORD);
-    await b.goto('/reception/invoices');
+    await b.goto('/reception/invoices'); await b.click('Chốt ca', '[role=tab]');
     check('ca chờ thanh toán có trong danh sách thu ngân', await b.hasText(owner.pet, 15000), (await b.text()).slice(0, 300));
     await b.clickRow(owner.pet, 'Thu tiền');
-    check('bảng kê có hóa đơn riêng từng dịch vụ', await b.hasText('Hóa đơn dịch vụ') && await b.hasText('tổng phân tích tế bào máu') && await b.hasText('Siêu âm') && await b.hasText('tẩy giun'), (await b.text()).slice(0, 500));
+    check('bảng kê có hóa đơn riêng từng dịch vụ; khám, XN, CĐHA đã thu trước', await b.hasText('Hóa đơn dịch vụ') && await b.hasText('tổng phân tích tế bào máu') && await b.hasText('Siêu âm') && await b.hasText('tẩy giun') && await b.hasText('Đã thanh toán'), (await b.text()).slice(0, 500));
     check('phần bán thuốc thấy đơn Clavamox', await b.hasText('Clavamox'));
     await b.click('Lập hóa đơn thuốc');
     check('lập hóa đơn thuốc', await b.hasText('Đã lập hóa đơn thuốc'), (await b.text()).slice(0, 300));
     check('hóa đơn thuốc: 10 x giá + VAT', await b.hasText('MINV-'));
     await b.click('Thu tiền thuốc', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
     check('thu tiền thuốc + trừ kho', await b.hasText('Đã thu tiền thuốc và trừ kho'), (await b.text()).slice(0, 300));
-    await b.clickRow('Siêu âm', 'Giảm giá'); await b.fill('Số tiền giảm giá', '10000'); await b.click('Lưu', 'button[type=submit]');
-    check('giảm giá một hóa đơn dịch vụ', await b.hasText('Đã cập nhật giảm giá'), (await b.text()).slice(0, 300));
-    await b.eval(`document.querySelector('input[aria-label^="Chọn Xét nghiệm"]').click()`);
+    await b.clickRow('tẩy giun', 'Giảm giá'); await b.fill('Số tiền giảm giá', '10000'); await b.click('Lưu', 'button[type=submit]');
+    check('giảm giá hóa đơn dịch vụ tại phòng', await b.hasText('Đã cập nhật giảm giá'), (await b.text()).slice(0, 300));
     await b.click('hóa đơn đã chọn', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
-    check('thu một phần: ca vẫn chờ thanh toán', await b.hasText('Đã ghi nhận thanh toán') && await b.hasText('Chờ thanh toán'), (await b.text()).slice(0, 300));
-    await b.eval(`document.querySelector('input[aria-label^="Chọn Xét nghiệm"]').click()`);
-    await b.click('hóa đơn đã chọn', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
-    check('thu nốt hóa đơn cuối: ca hoàn tất cùng giao dịch', await b.hasText('ca khám hoàn tất'), (await b.text()).slice(0, 300));
+    check('thu hóa đơn cuối (dịch vụ tại phòng): ca hoàn tất cùng giao dịch', await b.hasText('ca khám hoàn tất'), (await b.text()).slice(0, 300));
     await b.goto('/reception/dispense');
     check('đơn thuốc nằm trong danh sách bán thuốc', await b.hasText(owner.pet));
 

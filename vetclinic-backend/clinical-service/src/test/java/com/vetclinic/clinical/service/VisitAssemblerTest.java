@@ -61,7 +61,8 @@ class VisitAssemblerTest {
     @BeforeEach
     void setUp() {
         assembler = new VisitAssembler(detailRepository, labResultRepository, imagingResultRepository, attachmentRepository,
-                invoiceRepository, new VisitTimeline(historyRepository));
+                invoiceRepository, new VisitTimeline(historyRepository),
+                org.mockito.Mockito.mock(com.vetclinic.clinical.repository.QueueTicketRepository.class));
     }
 
     private static PetVisitStatusHistory h(VisitStatus from, VisitStatus to, String at, String notes) {
@@ -80,7 +81,7 @@ class VisitAssemblerTest {
 
         assertThat(response.cancelReason()).isEqualTo("Khách bận");
         assertThat(response.closedAt()).isEqualTo(Instant.parse("2026-10-30T01:05:00Z"));
-        assertThat(response.queueOrder()).isEqualTo(cancelled.getQueueOrder());
+        assertThat(response.ticket()).isNull();   // danh sách không kèm phiếu (chỉ hàng đợi và hồ sơ chi tiết mới gắn)
         assertThat(response.assignedRoom()).isNull();   // do VisitEnricher gắn ở controller
         assertThat(response.locked()).isTrue();
     }

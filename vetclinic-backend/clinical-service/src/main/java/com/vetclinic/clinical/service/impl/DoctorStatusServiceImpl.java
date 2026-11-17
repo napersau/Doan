@@ -24,6 +24,7 @@ import java.util.Set;
 public class DoctorStatusServiceImpl implements DoctorStatusService {
 
     private final PetVisitRepository visitRepository;
+    private final com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
     private final AuthClient authClient;
 
     @Override
@@ -40,7 +41,7 @@ public class DoctorStatusServiceImpl implements DoctorStatusService {
         }
         Set<Long> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS));
         Map<Long, Integer> waiting = new HashMap<>();
-        for (Object[] row : visitRepository.countWaitingByDoctor()) {
+        for (Object[] row : ticketRepository.countWaitingByDoctor()) {   // số phiếu DOCTOR đang chờ (ca chưa nộp phí khám không tính)
             waiting.put((Long) row[0], ((Long) row[1]).intValue());
         }
 

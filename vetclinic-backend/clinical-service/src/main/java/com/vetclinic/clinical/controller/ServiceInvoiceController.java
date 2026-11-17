@@ -50,6 +50,17 @@ public class ServiceInvoiceController {
         return ResponseEntity.ok(ApiResponse.success("Đã xác nhận thanh toán", invoiceService.confirmPayment(id, request.invoiceIds())));
     }
 
+    /**
+     * Màn hình Thu ngân (BR-35): EXAM_FEE = ca vừa tiếp đón chờ nộp phí khám (chưa có phiếu); PARACLINIC = ca chờ nộp tiền
+     * Xét nghiệm / CĐHA; FINAL = ca đã chốt chờ thu các dịch vụ còn lại (WAITING_PAYMENT).
+     */
+    @GetMapping("/cashier/pending")
+    @PreAuthorize("hasAnyRole('RECEPTIONIST','ADMIN')")
+    public ResponseEntity<ApiResponse<List<VisitResponse>>> cashierPending(
+            @org.springframework.web.bind.annotation.RequestParam com.vetclinic.clinical.service.ServiceInvoiceService.CashierSection section) {
+        return ResponseEntity.ok(ApiResponse.success(enricher.enrichAll(invoiceService.cashierPending(section))));
+    }
+
     /** Ca COMPLETED còn hóa đơn PENDING (khách bỏ về, công nợ). */
     @GetMapping("/pet-visits/with-debt")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','ADMIN')")

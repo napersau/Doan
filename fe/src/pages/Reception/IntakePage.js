@@ -21,10 +21,21 @@ function DoctorPick({ value, onChange }) {
   </Field>;
 }
 
+/**
+ * Kết quả tiếp đón (17/11/2026): hệ thống đã lập phí khám. Khách nộp phí khám xong mới được phát phiếu số thứ tự và vào hàng đợi
+ * bác sĩ (BR-35); ca cấp cứu có phiếu ngay, thu phí sau.
+ */
 function CheckedIn({ visit, onAnother }) {
-  return <Panel title="Đã tiếp nhận" actions={<Badge tone={visit.emergency ? 'red' : 'green'}>{visit.emergency ? 'Cấp cứu' : 'Chờ khám'}</Badge>}>
-    <Facts items={[['Mã đợt khám', visit.visitCode], ['Thú cưng', `${visit.petName} (${visit.speciesName})`], ['Hàng đợi', visit.doctorId ? `Đã vào hàng đợi của bác sĩ (phòng ${visit.assignedRoom || '?'})` : 'Danh sách chờ phân công — cần phân công bác sĩ'], ['Thứ tự', visit.emergency ? 'Cấp cứu: đứng đầu hàng đợi' : 'Theo thời điểm tiếp nhận'], ['Triệu chứng', visit.initialSymptoms]]} />
-    <div className="ui-actions" style={{ marginTop: 18 }}><Link className="ui-button primary" to="/reception/queue">{visit.doctorId ? 'Về bảng điều phối' : 'Về bảng điều phối để phân công bác sĩ'}</Link><Button onClick={onAnother}>Tiếp nhận khách khác</Button></div>
+  const ticketed = Boolean(visit.ticket);
+  const doctor = visit.doctorId ? `bác sĩ đã chọn (phòng ${visit.assignedRoom || '?'})` : 'danh sách chờ phân công';
+  return <Panel title="Đã tiếp nhận" actions={<Badge tone={visit.emergency ? 'red' : 'amber'}>{visit.emergency ? 'Cấp cứu' : 'Chờ nộp phí khám'}</Badge>}>
+    <Facts items={[['Mã đợt khám', visit.visitCode], ['Thú cưng', `${visit.petName} (${visit.speciesName})`],
+      ['Hàng đợi', ticketed ? `Phiếu số ${visit.ticket.ticketNo} — đã vào ${doctor}` : `Nộp phí khám xong sẽ được phát phiếu và vào ${doctor}`],
+      ['Thứ tự', visit.emergency ? 'Cấp cứu: đứng đầu hàng đợi, thu phí sau' : 'Theo giờ phát phiếu (sau khi nộp phí)'], ['Triệu chứng', visit.initialSymptoms]]} />
+    <div className="ui-actions" style={{ marginTop: 18 }}>
+      {!ticketed && <Link className="ui-button primary" to={`/reception/invoices/${visit.id}`}>Thu phí khám</Link>}
+      <Link className={`ui-button${ticketed ? ' primary' : ''}`} to="/reception/queue">Về bảng điều phối</Link>
+      <Button onClick={onAnother}>Tiếp nhận khách khác</Button></div>
   </Panel>;
 }
 

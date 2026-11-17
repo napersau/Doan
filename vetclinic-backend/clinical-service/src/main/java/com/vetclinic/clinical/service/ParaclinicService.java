@@ -17,20 +17,11 @@ public interface ParaclinicService {
     }
 
     /**
-     * Hàng đợi của một phòng (v3.0): ORDER BY cấp cứu DESC, queue_order ASC. Không còn tab "ca tạm hoãn" và
-     * "ưu tiên kế tiếp": khách vắng thì gọi ca khác (ca vắng giữ nguyên vị trí).
+     * Hàng đợi của một phòng (17/11/2026): các PHIẾU XẾP HÀNG của phòng đang chờ / đang làm, thứ tự priority DESC, issued_at, id;
+     * mỗi phiếu bung ra các dịch vụ của nó. Dịch vụ chưa nộp tiền không có phiếu nên không xuất hiện. Gọi số và "Bắt đầu" thao tác
+     * trên phiếu ({@link QueueTicketService}).
      */
     List<QueueItemResponse> queue(ServiceCategory category);
-
-    /**
-     * BR-34 (Q3): kỹ thuật viên của phòng bấm "Gọi số tiếp theo": chọn chỉ định {@code PENDING} đầu hàng đợi của phòng
-     * (QUEUE_EMPTY nếu trống) và phát PatientCalledEvent (station LAB/IMAGING). Chỉ định CHƯA đổi trạng thái: khách vào phòng,
-     * kỹ thuật viên bấm "Bắt đầu" mới chuyển PENDING -> IN_PROGRESS.
-     */
-    QueueItemResponse callNext(ServiceCategory category);
-
-    /** "Gọi" một ca cụ thể trong hàng đợi phòng mình (không nhất thiết đứng đầu): chỉ phát thông báo, không đổi trạng thái hay thứ tự. */
-    QueueItemResponse call(Long detailId);
 
     /** Phòng Lab: ghi nhận đã lấy mẫu (action SAMPLE_COLLECTED, trạng thái vẫn IN_PROGRESS) để bên CĐHA thấy huy hiệu liên phòng. */
     ServiceDetailResponse sampleCollected(Long detailId);
@@ -41,17 +32,18 @@ public interface ParaclinicService {
      */
     List<LabTestItemResponse> labForm(Long detailId);
 
-    /** UC-25/26: thú cưng đã vào phòng, bắt đầu thực hiện. PENDING -> IN_PROGRESS. */
-    ServiceDetailResponse start(Long detailId);
-
     /**
      * FR-30: Bác sĩ bấm "Đã thực hiện" cho dịch vụ tại phòng (PENDING -> COMPLETED; ghi lịch sử START_PROCESSING rồi COMPLETED).
      * Chỉ Bác sĩ được gán, khi ca đang khám (IN_PROGRESS) và chưa khóa.
      */
     ServiceDetailResponse perform(Long detailId);
 
-    /** EX-08: khách xin hủy giữa chừng, hoặc thiết bị gặp sự cố. Dịch vụ hủy không bao giờ tính tiền. */
-    ServiceDetailResponse cancel(Long detailId, String reason);
+    /**
+     * EX-08 (17/11/2026): hủy một dịch vụ. Hóa đơn chưa thu -> CANCELLED; đã thu và {@code reasonType = CLINIC} (phòng khám không
+     * thực hiện được XN / CĐHA) -> REFUNDED; đã thu và CUSTOMER (khách tự hủy) -> giữ PAID. {@code reasonType} null: Bác sĩ = CLINIC,
+     * kỹ thuật viên = CUSTOMER.
+     */
+    ServiceDetailResponse cancel(Long detailId, String reason, String reasonType);
 
     /** GET /lab-results/{detailId}: kết quả đã nhập của một chỉ định xét nghiệm, kèm nhãn đánh giá theo khoảng đã snapshot. */
     List<com.vetclinic.clinical.dto.response.LabResultResponse> labResults(Long detailId);

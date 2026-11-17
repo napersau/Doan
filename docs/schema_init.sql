@@ -6,9 +6,9 @@
 -- 4 Cơ sở dữ liệu logic:
 -- 1. pet_clinic_auth_db             : auth-service (:8081)             - 3 bảng
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
--- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 14 bảng
+-- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 16 bảng
 -- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 6 bảng
--- TỔNG CỘNG: 25 BẢNG
+-- TỔNG CỘNG: 27 BẢNG
 --
 -- CÁC THAY ĐỔI CHÍNH SO VỚI PHIÊN BẢN 2.0:
 -- (1) Hóa đơn tách theo từng dịch vụ: mỗi dòng chỉ định dịch vụ (visit_service_details)
@@ -23,11 +23,18 @@
 --     Thời điểm/người/lý do chuyển trạng thái được lấy từ bảng *_status_histories.
 -- (5) Bổ sung bảng nối service_lab_test_items: gói xét nghiệm gồm những chỉ số nào.
 -- (6) Bổ sung cột version (khóa lạc quan @Version) cho các bảng có cập nhật đồng thời.
--- (7) [Rà soát 11/11] Hàng đợi riêng cho từng Bác sĩ và cho phòng Xét nghiệm / CĐHA:
+-- (7) [Rà soát 11/11 – đã thay bằng mục (8)] Hàng đợi riêng cho từng Bác sĩ và cho phòng Xét nghiệm / CĐHA:
 --     cột queue_order ở pet_visits và visit_service_details.
 --     Thứ tự: ORDER BY is_emergency DESC, queue_order.
 --     [Cập nhật 13/11/2026] Gọi theo từng dòng: bác sĩ / KTV bấm "Gọi" ở dòng bất kỳ, không đổi thứ tự (queue_order giữ nguyên).
 --     Đã BỎ cơ chế "Đẩy lùi 1 bậc" cùng cột skip_count và hành động SKIPPED (làm hai ca đầu hàng đổi chỗ mãi mãi).
+-- (8) [Cập nhật 16-17/11/2026 - góp ý GVHD lần 2] Tách hàng đợi khỏi hồ sơ khám:
+--     bỏ queue_order ở pet_visits / visit_service_details; thêm queue_tickets + queue_ticket_items.
+--     Tách quy trình thanh toán khỏi quy trình khám: thu tiền xong mới phát phiếu xếp hàng.
+--     services.requires_prepayment: TRUE = khám, Xét nghiệm, CĐHA (thu trước);
+--     FALSE = dịch vụ làm tại phòng (tiêm, tẩy giun, thủ thuật...), thu khi chốt ca.
+--     service_invoices.payment_status thêm REFUNDED: chỉ khi phòng khám không thực hiện được
+--     dịch vụ XN / CĐHA đã thu. Phí khám đã thu không hoàn; khách tự bỏ về không hoàn.
 --
 -- NGUYÊN TẮC TOÀN VẸN DỮ LIỆU LIÊN DỊCH VỤ:
 -- - Bảng cùng Service: ràng buộc FOREIGN KEY vật lý.
@@ -182,6 +189,7 @@ CREATE TABLE IF NOT EXISTS services (
     vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.00, -- Thuế suất VAT hiện hành của dịch vụ
     description TEXT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    requires_prepayment BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE: thu tiền xong mới phát phiếu xếp hàng
     CONSTRAINT chk_services_price CHECK (price >= 0),
     CONSTRAINT chk_services_vat CHECK (vat_rate >= 0 AND vat_rate <= 1)
 );
@@ -220,7 +228,7 @@ CREATE TABLE IF NOT EXISTS lab_test_reference_ranges (
 -- 12. PET_VISITS (ĐỢT KHÁM NGOẠI TRÚ 2 PHA)
 -- Đã bỏ: assigned_room (= users.room_number của bác sĩ), cancel_reason, started_at,
 --        closed_at, completed_at (lấy từ pet_visit_status_histories).
--- Giữ checked_in_at: là thời điểm tạo bản ghi, dùng để xếp hàng đợi FIFO.
+-- Giữ checked_in_at: thời điểm tiếp đón. Thông tin xếp hàng nằm ở queue_tickets (không lưu trên hồ sơ khám).
 CREATE TABLE IF NOT EXISTS pet_visits (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     visit_code VARCHAR(50) NOT NULL UNIQUE,
@@ -238,13 +246,11 @@ CREATE TABLE IF NOT EXISTS pet_visits (
     doctor_advice TEXT NULL,
     status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
     checked_in_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi (nhỏ gọi trước). Gán = thời điểm tiếp nhận (epoch micro giây), không đổi khi gọi; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1
     version BIGINT NOT NULL DEFAULT 0, -- Khóa lạc quan
     CONSTRAINT fk_visits_pet FOREIGN KEY (pet_id) REFERENCES pets(id)
 );
 CREATE INDEX idx_visits_pet ON pet_visits(pet_id);
 CREATE INDEX idx_visits_doctor_status ON pet_visits(doctor_id, status);
-CREATE INDEX idx_visits_queue ON pet_visits(doctor_id, status, is_emergency, queue_order); -- Hàng đợi từng Bác sĩ; doctor_id IS NULL = danh sách chờ phân công
 CREATE INDEX idx_visits_receptionist ON pet_visits(receptionist_id);
 
 -- 13. PET_VISIT_STATUS_HISTORIES (AUDIT TRAIL ĐỢT KHÁM)
@@ -272,13 +278,11 @@ CREATE TABLE IF NOT EXISTS visit_service_details (
     status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    queue_order BIGINT NOT NULL, -- Thứ tự trong hàng đợi phòng XN / CĐHA (nhỏ gọi trước). Gán = thời điểm chỉ định (epoch micro giây), không đổi khi gọi
     CONSTRAINT fk_vsd_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
     CONSTRAINT fk_vsd_service FOREIGN KEY (service_id) REFERENCES services(id),
     CONSTRAINT chk_vsd_quantity CHECK (quantity > 0)
 );
 CREATE INDEX idx_vsd_visit ON visit_service_details(visit_id);
-CREATE INDEX idx_vsd_queue ON visit_service_details(status, queue_order); -- Hàng đợi phòng XN / CĐHA
 
 -- 15. VISIT_SERVICE_DETAIL_HISTORIES (AUDIT TRAIL TIẾN ĐỘ DỊCH VỤ)
 -- "Gọi" / "Gọi lại" không ghi lịch sử vì không đổi trạng thái hay thứ tự.
@@ -341,8 +345,10 @@ CREATE INDEX idx_ia_result ON imaging_attachments(imaging_result_id);
 
 -- 19. SERVICE_INVOICES (HÓA ĐƠN RIÊNG CHO TỪNG DỊCH VỤ) - MỚI
 -- Mỗi dòng chỉ định dịch vụ có đúng 1 hóa đơn (quan hệ 1-1).
--- Hóa đơn được tạo cùng lúc bác sĩ chỉ định (snapshot đơn giá & thuế suất tại thời điểm đó).
--- Dịch vụ bị hủy (EX-08) -> hóa đơn chuyển CANCELLED trong cùng giao dịch.
+-- Hóa đơn được tạo cùng lúc chỉ định (phí khám: lúc check-in), snapshot đơn giá & thuế suất.
+-- Dịch vụ chưa thu bị hủy (EX-08) -> hóa đơn CANCELLED trong cùng giao dịch.
+-- Thu tiền dịch vụ thu trước (khám, XN, CĐHA) -> phát phiếu queue_tickets trong cùng giao dịch.
+-- REFUNDED: dịch vụ XN / CĐHA đã thu nhưng phòng khám không thực hiện được.
 -- Số tiền phải trả = quantity * unit_price * (1 + vat_rate) - discount_amount (xem VIEW bên dưới).
 CREATE TABLE IF NOT EXISTS service_invoices (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -351,7 +357,7 @@ CREATE TABLE IF NOT EXISTS service_invoices (
     unit_price DECIMAL(12, 2) NOT NULL, -- Snapshot đơn giá lúc chỉ định
     vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.00, -- Snapshot thuế suất lúc chỉ định
     discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-    payment_status ENUM('PENDING', 'PAID', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+    payment_status ENUM('PENDING', 'PAID', 'CANCELLED', 'REFUNDED') NOT NULL DEFAULT 'PENDING',
     cashier_id BIGINT NULL, -- LFK: auth.users (gán khi thu tiền)
     paid_at TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -363,6 +369,40 @@ CREATE TABLE IF NOT EXISTS service_invoices (
 );
 CREATE INDEX idx_si_status_paid ON service_invoices(payment_status, paid_at);
 CREATE INDEX idx_si_cashier ON service_invoices(cashier_id);
+
+-- 20. QUEUE_TICKETS (PHIẾU XẾP HÀNG - DỮ LIỆU VẬN HÀNH, TÁCH KHỎI HỒ SƠ KHÁM) - MỚI 16/11
+-- Mỗi phiếu = một lượt chờ của một đợt khám tại hàng đợi Bác sĩ / phòng XN / phòng CĐHA.
+-- Phát khi đã thu tiền dịch vụ cần thu trước (services.requires_prepayment = TRUE);
+-- ca cấp cứu (priority = 2) và ca quay lại với kết quả CLS (priority = 1) phát ngay.
+-- Thứ tự hàng đợi: ORDER BY priority DESC, issued_at, id. "Gọi" chỉ cập nhật last_called_at.
+CREATE TABLE IF NOT EXISTS queue_tickets (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    queue_type ENUM('DOCTOR', 'LABORATORY', 'IMAGING') NOT NULL,
+    service_date DATE NOT NULL,
+    ticket_no INT NOT NULL,
+    visit_id BIGINT NOT NULL,
+    doctor_id BIGINT NULL, -- LFK: auth.users (chỉ phiếu DOCTOR; NULL = danh sách chờ phân công)
+    priority TINYINT NOT NULL DEFAULT 0, -- 2 = cấp cứu, 1 = quay lại với kết quả CLS, 0 = thường
+    status ENUM('WAITING', 'IN_SERVICE', 'DONE', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
+    issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    issued_by BIGINT NULL, -- LFK: auth.users (thu ngân phát phiếu; NULL = hệ thống tự phát)
+    last_called_at TIMESTAMP NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT fk_qt_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
+    CONSTRAINT uq_qt_number UNIQUE (queue_type, service_date, ticket_no),
+    CONSTRAINT chk_qt_priority CHECK (priority BETWEEN 0 AND 2)
+);
+CREATE INDEX idx_qt_queue ON queue_tickets(queue_type, status, doctor_id, priority, issued_at);
+CREATE INDEX idx_qt_visit ON queue_tickets(visit_id);
+
+-- 21. QUEUE_TICKET_ITEMS (CÁC DỊCH VỤ XN / CĐHA THUỘC MỘT PHIẾU - "MỘT CA") - MỚI 16/11
+CREATE TABLE IF NOT EXISTS queue_ticket_items (
+    ticket_id BIGINT NOT NULL,
+    visit_service_detail_id BIGINT NOT NULL UNIQUE,
+    PRIMARY KEY (ticket_id, visit_service_detail_id),
+    CONSTRAINT fk_qti_ticket FOREIGN KEY (ticket_id) REFERENCES queue_tickets(id) ON DELETE CASCADE,
+    CONSTRAINT fk_qti_vsd FOREIGN KEY (visit_service_detail_id) REFERENCES visit_service_details(id)
+);
 
 -- VIEW tính tiền hóa đơn dịch vụ (không lưu giá trị dẫn xuất)
 CREATE OR REPLACE VIEW v_service_invoice_amounts AS
@@ -390,14 +430,15 @@ INSERT INTO species (code, name, description) VALUES
 ('DOG', 'Chó', 'Loài chó (Canis lupus familiaris)'),
 ('CAT', 'Mèo', 'Loài mèo (Felis catus)');
 
-INSERT INTO services (code, name, category, price, vat_rate, description, is_active) VALUES
-('EXAM_GEN', 'Khám lâm sàng tổng quát', 'EXAMINATION', 100000.00, 0.00, 'Khám tổng thể, kiểm tra thân nhiệt, cân nặng và triệu chứng', TRUE),
-('VAC_7B', 'Tiêm phòng Vaccine 7 bệnh (Chó)', 'VACCINATION', 150000.00, 0.00, 'Công tiêm phòng vaccine phòng 7 bệnh truyền nhiễm', TRUE),
-('VAC_4B', 'Tiêm phòng Vaccine 4 bệnh (Mèo)', 'VACCINATION', 150000.00, 0.00, 'Công tiêm phòng vaccine cho mèo', TRUE),
-('DEWORM', 'Dịch vụ tẩy giun đường ruột', 'DEWORMING', 50000.00, 0.00, 'Công kiểm tra và hỗ trợ cho uống thuốc tẩy giun', TRUE),
-('LAB_CBC', 'Xét nghiệm tổng phân tích tế bào máu (CBC)', 'LABORATORY', 250000.00, 0.00, 'Xét nghiệm chỉ số tế bào máu tự động', TRUE),
-('IMG_US_AB', 'Siêu âm ổ bụng tổng quát', 'IMAGING', 200000.00, 0.00, 'Siêu âm màu kiểm tra các cơ quan nội tạng ổ bụng', TRUE),
-('IMG_XRAY', 'Chụp X-quang kỹ thuật số (1 tư thế)', 'IMAGING', 180000.00, 0.00, 'Chụp X-quang tim phổi / xương khớp', TRUE);
+-- requires_prepayment: TRUE = thu tiền xong mới phát phiếu xếp hàng (khám, XN, CĐHA); FALSE = làm tại phòng, thu khi chốt ca
+INSERT INTO services (code, name, category, price, vat_rate, description, is_active, requires_prepayment) VALUES
+('EXAM_GEN', 'Khám lâm sàng tổng quát', 'EXAMINATION', 100000.00, 0.00, 'Khám tổng thể, kiểm tra thân nhiệt, cân nặng và triệu chứng', TRUE, TRUE),
+('VAC_7B', 'Tiêm phòng Vaccine 7 bệnh (Chó)', 'VACCINATION', 150000.00, 0.00, 'Công tiêm phòng vaccine phòng 7 bệnh truyền nhiễm', TRUE, FALSE),
+('VAC_4B', 'Tiêm phòng Vaccine 4 bệnh (Mèo)', 'VACCINATION', 150000.00, 0.00, 'Công tiêm phòng vaccine cho mèo', TRUE, FALSE),
+('DEWORM', 'Dịch vụ tẩy giun đường ruột', 'DEWORMING', 50000.00, 0.00, 'Công kiểm tra và hỗ trợ cho uống thuốc tẩy giun', TRUE, FALSE),
+('LAB_CBC', 'Xét nghiệm tổng phân tích tế bào máu (CBC)', 'LABORATORY', 250000.00, 0.00, 'Xét nghiệm chỉ số tế bào máu tự động', TRUE, TRUE),
+('IMG_US_AB', 'Siêu âm ổ bụng tổng quát', 'IMAGING', 200000.00, 0.00, 'Siêu âm màu kiểm tra các cơ quan nội tạng ổ bụng', TRUE, TRUE),
+('IMG_XRAY', 'Chụp X-quang kỹ thuật số (1 tư thế)', 'IMAGING', 180000.00, 0.00, 'Chụp X-quang tim phổi / xương khớp', TRUE, TRUE);
 
 INSERT INTO lab_test_items (code, name, unit, description) VALUES
 ('WBC', 'Bạch cầu (White Blood Cells)', '10^9/L', 'Số lượng bạch cầu tổng số'),
@@ -432,7 +473,7 @@ INSERT INTO lab_test_reference_ranges (lab_test_item_id, species_id, min_value, 
 CREATE DATABASE IF NOT EXISTS pet_clinic_billing_pharmacy_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE pet_clinic_billing_pharmacy_db;
 
--- 20. MEDICINES (DANH MỤC THUỐC & TỒN KHO)
+-- 22. MEDICINES (DANH MỤC THUỐC & TỒN KHO)
 -- stock_quantity là phi chuẩn hóa CÓ CHỦ ĐÍCH: về lý thuyết = SUM(inventory_transactions.quantity),
 -- nhưng cần lưu để trừ kho nguyên tử (UPDATE ... WHERE stock_quantity >= :qty) và chống bán âm kho.
 CREATE TABLE IF NOT EXISTS medicines (
@@ -453,7 +494,7 @@ CREATE TABLE IF NOT EXISTS medicines (
     CONSTRAINT chk_med_stock CHECK (stock_quantity >= 0)
 );
 
--- 21. PRESCRIPTIONS (ĐƠN THUỐC - CHỈ ĐỊNH CHUYÊN MÔN)
+-- 23. PRESCRIPTIONS (ĐƠN THUỐC - CHỈ ĐỊNH CHUYÊN MÔN)
 -- Đã bỏ: status, dispensed_by, dispensed_at (việc mua/xuất thuốc thể hiện qua medicine_invoices).
 CREATE TABLE IF NOT EXISTS prescriptions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -462,7 +503,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 22. PRESCRIPTION_ITEMS (CHI TIẾT THUỐC ĐƯỢC KÊ)
+-- 24. PRESCRIPTION_ITEMS (CHI TIẾT THUỐC ĐƯỢC KÊ)
 -- Đã bỏ: unit_price, subtotal (đơn thuốc không phải chứng từ tiền; giá chốt tại hóa đơn thuốc).
 CREATE TABLE IF NOT EXISTS prescription_items (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -480,7 +521,7 @@ CREATE TABLE IF NOT EXISTS prescription_items (
     CONSTRAINT chk_pi_duration CHECK (duration_days > 0)
 );
 
--- 23. MEDICINE_INVOICES (HÓA ĐƠN THUỐC - TÙY CHỌN, TỐI ĐA 1 / ĐƠN THUỐC) - MỚI
+-- 25. MEDICINE_INVOICES (HÓA ĐƠN THUỐC - TÙY CHỌN, TỐI ĐA 1 / ĐƠN THUỐC) - MỚI
 CREATE TABLE IF NOT EXISTS medicine_invoices (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     invoice_code VARCHAR(50) NOT NULL UNIQUE,
@@ -497,7 +538,7 @@ CREATE TABLE IF NOT EXISTS medicine_invoices (
 CREATE INDEX idx_mi_status_paid ON medicine_invoices(payment_status, paid_at);
 CREATE INDEX idx_mi_cashier ON medicine_invoices(cashier_id);
 
--- 24. MEDICINE_INVOICE_ITEMS (CÁC THUỐC KHÁCH MUA TẠI PHÒNG KHÁM) - MỚI
+-- 26. MEDICINE_INVOICE_ITEMS (CÁC THUỐC KHÁCH MUA TẠI PHÒNG KHÁM) - MỚI
 -- Khách có thể mua một phần đơn: quantity <= prescription_items.quantity (kiểm tra ở tầng ứng dụng).
 CREATE TABLE IF NOT EXISTS medicine_invoice_items (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -514,7 +555,7 @@ CREATE TABLE IF NOT EXISTS medicine_invoice_items (
     CONSTRAINT chk_mii_vat CHECK (vat_rate >= 0 AND vat_rate <= 1)
 );
 
--- 25. INVENTORY_TRANSACTIONS (NHẬT KÝ BIẾN ĐỘNG KHO)
+-- 27. INVENTORY_TRANSACTIONS (NHẬT KÝ BIẾN ĐỘNG KHO)
 -- Đã bỏ: balance_after (tồn sau giao dịch = tổng lũy kế quantity, tính bằng window function).
 -- Thay reference_id chung chung bằng FK rõ ràng tới hóa đơn thuốc.
 CREATE TABLE IF NOT EXISTS inventory_transactions (

@@ -74,13 +74,7 @@ public class PetVisit {
     @Column(name = "checked_in_at", nullable = false)
     private Instant checkedInAt;
 
-    /**
-     * Thứ tự trong hàng đợi, số NHỎ được gọi trước (v3.0). Gán = thời điểm tiếp nhận tính bằng epoch micro giây
-     * (QueueOrders). Gọi / gọi lại KHÔNG đổi giá trị này; ca vừa có kết quả CLS = nhỏ nhất hàng đợi - 1.
-     * Thứ tự mọi hàng đợi: ORDER BY is_emergency DESC, queue_order ASC.
-     */
-    @Column(name = "queue_order", nullable = false)
-    private long queueOrder;
+    // Thông tin xếp hàng (số phiếu, thứ tự, giờ gọi) nằm ở queue_tickets (SM-07), không lưu trên hồ sơ khám (17/11/2026).
 
     @Version
     @Column(name = "version", nullable = false)

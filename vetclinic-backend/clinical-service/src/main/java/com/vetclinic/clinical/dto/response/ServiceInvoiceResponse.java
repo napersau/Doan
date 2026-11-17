@@ -23,6 +23,7 @@ public record ServiceInvoiceResponse(
         BigDecimal payableAmount,
         PaymentStatus paymentStatus,
         Long cashierId,
-        Instant paidAt
+        Instant paidAt,
+        boolean requiresPrepayment   // TRUE: thu được ngay (khám, XN, CĐHA) và thu xong thì phát phiếu; FALSE: thu khi chốt ca
 ) {
 }

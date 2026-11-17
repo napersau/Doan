@@ -4,7 +4,9 @@
 > **Phiên bản:** 3.0 – Chuẩn hóa lại theo góp ý của Giảng viên hướng dẫn (10/11/2026)
 > **Mô hình kiến trúc:** Microservices Architecture (Database-per-Service Pattern)
 > **Cơ sở dữ liệu:** MySQL 8.0 Server phân vùng thành 4 Cơ sở dữ liệu logic (Logical Databases / Schemas)
-> **Tổng số bảng:** 25 bảng (Auth: 3 bảng, Appointment: 2 bảng, Clinical: 14 bảng, Billing-Pharmacy: 6 bảng)
+> **Tổng số bảng:** 27 bảng (Auth: 3 bảng, Appointment: 2 bảng, Clinical: 16 bảng, Billing-Pharmacy: 6 bảng)  
+> **Cập nhật 16/11/2026:** tách hàng đợi khỏi hồ sơ khám thành bảng phiếu xếp hàng `queue_tickets` (+ `queue_ticket_items`); phiếu chỉ phát khi đã thu tiền dịch vụ cần thu trước (`services.requires_prepayment`).  
+> **Cập nhật 17/11/2026:** phí khám (dịch vụ `EXAMINATION`) lập hóa đơn ngay lúc check-in và **thu xong mới phát phiếu vào hàng đợi Bác sĩ**; XN / CĐHA thu xong mới phát phiếu phòng; dịch vụ làm tại phòng thu khi chốt ca. `REFUNDED` chỉ khi phòng khám không làm được dịch vụ đã thu.
 > **Tài liệu tham chiếu:** [THIET_KE_KIEN_TRUC_MICROSERVICES.md](THIET_KE_KIEN_TRUC_MICROSERVICES.md), [schema_init.sql](schema_init.sql) (v3.0), [DANH_SACH_KIEU_ENUM_HE_THONG.md](DANH_SACH_KIEU_ENUM_HE_THONG.md)
 
 ---
@@ -16,7 +18,7 @@
    - Cơ sở dữ liệu được phân chia thành **4 Database logic** tương ứng với 4 Bounded Contexts nghiệp vụ:
      - `pet_clinic_auth_db` phụ trách bởi `auth-service` (:8081) - Quản trị, phân quyền, người dùng (3 bảng).
      - `pet_clinic_appointment_db` phụ trách bởi `appointment-service` (:8082) - Cổng đặt lịch trực tuyến & Audit Trail lịch hẹn (2 bảng).
-     - `pet_clinic_clinical_db` phụ trách bởi `clinical-service` (:8083) - Bệnh nhân (Loài, Hồ sơ thú cưng), Khám lâm sàng 2 pha, Cận lâm sàng, Hóa đơn dịch vụ & Audit Trail (14 bảng).
+     - `pet_clinic_clinical_db` phụ trách bởi `clinical-service` (:8083) - Bệnh nhân (Loài, Hồ sơ thú cưng), Khám lâm sàng 2 pha, Cận lâm sàng, Hóa đơn dịch vụ, Phiếu xếp hàng & Audit Trail (16 bảng).
      - `pet_clinic_billing_pharmacy_db` phụ trách bởi `billing-pharmacy-service` (:8084) - Đơn thuốc, Hóa đơn thuốc (tùy chọn), Danh mục thuốc & Nhật ký kho dược (6 bảng).
    - Mỗi Microservice chỉ được phép kết nối và thao tác trực tiếp trên Database của chính mình. Tuyệt đối không truy vấn trực tiếp (Cross-database JOIN) sang database của dịch vụ khác.
 
@@ -121,7 +123,7 @@ erDiagram
 ---
 
 ### 2.3. CSDL Phân hệ Bệnh nhân, Khám Lâm sàng 2 Pha, Hóa đơn dịch vụ & Audit Trail (`pet_clinic_clinical_db`)
-> **Phụ trách:** `clinical-service` (:8083) | **Bao gồm 14 bảng:** `species`, `pets`, `services`, `lab_test_items`, `service_lab_test_items`, `lab_test_reference_ranges`, `pet_visits`, `pet_visit_status_histories`, `visit_service_details`, `visit_service_detail_histories`, `lab_test_results`, `imaging_results`, `imaging_attachments`, `service_invoices`.  
+> **Phụ trách:** `clinical-service` (:8083) | **Bao gồm 16 bảng:** `species`, `pets`, `services`, `lab_test_items`, `service_lab_test_items`, `lab_test_reference_ranges`, `pet_visits`, `pet_visit_status_histories`, `visit_service_details`, `visit_service_detail_histories`, `lab_test_results`, `imaging_results`, `imaging_attachments`, `service_invoices`, `queue_tickets`, `queue_ticket_items`.  
 > *Đặc điểm:* Mỗi dòng chỉ định dịch vụ có đúng 1 hóa đơn riêng (`service_invoices`, quan hệ 1–1), đặt cùng DB với dịch vụ để dùng khóa ngoại vật lý và truy xuất doanh thu theo dịch vụ bằng JOIN nội bộ.
 
 ```mermaid
@@ -141,6 +143,9 @@ erDiagram
     VISIT_SERVICE_DETAILS ||--o| IMAGING_RESULTS : "visit_service_detail_id"
     IMAGING_RESULTS ||--o{ IMAGING_ATTACHMENTS : "imaging_result_id"
     VISIT_SERVICE_DETAILS ||--o| SERVICE_INVOICES : "visit_service_detail_id"
+    PET_VISITS ||--o{ QUEUE_TICKETS : "visit_id"
+    QUEUE_TICKETS ||--o{ QUEUE_TICKET_ITEMS : "ticket_id"
+    VISIT_SERVICE_DETAILS ||--o| QUEUE_TICKET_ITEMS : "visit_service_detail_id"
 
     SPECIES {
         bigint id PK "Khóa chính, tự tăng"
@@ -175,6 +180,7 @@ erDiagram
         decimal(4,2) vat_rate "Thuế suất VAT hiện hành"
         text description "Mô tả dịch vụ"
         boolean is_active "Còn cung cấp hay đã ngừng"
+        boolean requires_prepayment "Phải thu tiền xong mới phát phiếu xếp hàng"
     }
 
     LAB_TEST_ITEMS {
@@ -205,7 +211,7 @@ erDiagram
         bigint appointment_id UK "Lịch hẹn gốc (NULL = khách vãng lai) (Logical FK → pet_clinic_appointment_db.appointments(id))"
         bigint doctor_id "Bác sĩ được phân công (Logical FK → pet_clinic_auth_db.users(id))"
         bigint receptionist_id "Lễ tân tiếp đón (Logical FK → pet_clinic_auth_db.users(id))"
-        boolean is_emergency "Ca cấp cứu, ưu tiên đầu hàng đợi"
+        boolean is_emergency "Ca cấp cứu: phiếu ưu tiên 2, khám trước thu sau"
         decimal(5,2) weight_at_visit "Cân nặng đo lúc khám (kg)"
         decimal(4,1) temperature "Thân nhiệt đo lúc khám (°C)"
         text initial_symptoms "Triệu chứng ban đầu khi tiếp đón"
@@ -215,7 +221,6 @@ erDiagram
         text doctor_advice "Lời dặn của bác sĩ"
         enum status "Trạng thái hiện tại của đợt khám: WAITING, IN_PROGRESS, WAITING_RESULTS, RESULTS_READY, WAITING_PAYMENT, COMPLETED, CANCELLED"
         timestamp checked_in_at "Thời điểm tiếp đón"
-        bigint queue_order "Thứ tự trong hàng đợi Bác sĩ (nhỏ gọi trước)"
         bigint version "Khóa lạc quan, chống ghi đè đồng thời"
     }
 
@@ -237,7 +242,6 @@ erDiagram
         enum status "Chờ / đang làm / xong / hủy: PENDING, IN_PROGRESS, COMPLETED, CANCELLED"
         text notes "Ghi chú chỉ định của bác sĩ"
         timestamp created_at "Thời điểm chỉ định"
-        bigint queue_order "Thứ tự trong hàng đợi phòng XN / CĐHA"
     }
 
     VISIT_SERVICE_DETAIL_HISTORIES {
@@ -288,11 +292,31 @@ erDiagram
         decimal(12,2) unit_price "Đơn giá chốt lúc chỉ định"
         decimal(4,2) vat_rate "Thuế suất chốt lúc chỉ định"
         decimal(12,2) discount_amount "Số tiền giảm giá"
-        enum payment_status "Chờ thanh toán / đã trả / hủy: PENDING, PAID, CANCELLED"
+        enum payment_status "Chờ thanh toán / đã trả / hủy / đã hoàn tiền: PENDING, PAID, CANCELLED, REFUNDED"
         bigint cashier_id "Thu ngân thu tiền (Logical FK → pet_clinic_auth_db.users(id))"
         timestamp paid_at "Thời điểm thanh toán"
         timestamp created_at "Thời điểm lập hóa đơn"
         bigint version "Khóa lạc quan, chống ghi đè đồng thời"
+    }
+
+    QUEUE_TICKETS {
+        bigint id PK "Khóa chính, tự tăng"
+        enum queue_type "Loại hàng đợi: DOCTOR, LABORATORY, IMAGING"
+        date service_date "Ngày phát phiếu (đánh số lại mỗi ngày)"
+        int ticket_no "Số thứ tự in trên phiếu"
+        bigint visit_id FK "Đợt khám của phiếu"
+        bigint doctor_id "Bác sĩ (chỉ phiếu DOCTOR; NULL = chờ phân công) (Logical FK → pet_clinic_auth_db.users(id))"
+        tinyint priority "Ưu tiên: 2 cấp cứu, 1 quay lại có kết quả, 0 thường"
+        enum status "Trạng thái phiếu: WAITING, IN_SERVICE, DONE, CANCELLED"
+        timestamp issued_at "Giờ phát phiếu (= giờ thu tiền / giờ hệ thống phát)"
+        bigint issued_by "Thu ngân phát phiếu (NULL = hệ thống) (Logical FK → pet_clinic_auth_db.users(id))"
+        timestamp last_called_at "Lần gọi gần nhất (NULL = chưa gọi)"
+        bigint version "Khóa lạc quan, chống ghi đè đồng thời"
+    }
+
+    QUEUE_TICKET_ITEMS {
+        bigint ticket_id PK, FK "Phiếu phòng Xét nghiệm / CĐHA"
+        bigint visit_service_detail_id PK, FK, UK "Dịch vụ thuộc phiếu (mỗi dịch vụ 1 phiếu)"
     }
 ```
 
@@ -494,6 +518,7 @@ erDiagram
 | `vat_rate` | DECIMAL(4, 2) | NOT NULL, DEFAULT 0.00 | Thuế suất VAT hiện hành |
 | `description` | TEXT | NULL | Mô tả dịch vụ |
 | `is_active` | BOOLEAN | NOT NULL, DEFAULT TRUE | Còn cung cấp hay đã ngừng |
+| `requires_prepayment` | BOOLEAN | NOT NULL, DEFAULT FALSE | `TRUE`: phải thu tiền hóa đơn xong mới phát phiếu xếp hàng (khám, Xét nghiệm, CĐHA). `FALSE`: dịch vụ làm ngay tại phòng, thu khi chốt ca. Là chính sách thu tiền đặt trong danh mục, đổi chính sách không phải sửa luồng khám |
 
 *Ràng buộc mức bảng:* `CHECK (price >= 0)`; `CHECK (vat_rate >= 0 AND vat_rate <= 1)`
 
@@ -538,7 +563,7 @@ erDiagram
 | `appointment_id` | BIGINT | UNIQUE, NULL | **Logical FK** → `pet_clinic_appointment_db.appointments(id)`. Lịch hẹn gốc (NULL = khách vãng lai) |
 | `doctor_id` | BIGINT | NULL | **Logical FK** → `pet_clinic_auth_db.users(id)`. Bác sĩ được phân công |
 | `receptionist_id` | BIGINT | NOT NULL | **Logical FK** → `pet_clinic_auth_db.users(id)`. Lễ tân tiếp đón |
-| `is_emergency` | BOOLEAN | NOT NULL, DEFAULT FALSE | Ca cấp cứu, ưu tiên đầu hàng đợi |
+| `is_emergency` | BOOLEAN | NOT NULL, DEFAULT FALSE | Ca cấp cứu: phiếu xếp hàng phát ngay với `priority = 2`, hóa đơn thu sau |
 | `weight_at_visit` | DECIMAL(5, 2) | NULL | Cân nặng đo lúc khám (kg) |
 | `temperature` | DECIMAL(4, 1) | NULL | Thân nhiệt đo lúc khám (°C) |
 | `initial_symptoms` | TEXT | NULL | Triệu chứng ban đầu khi tiếp đón |
@@ -548,7 +573,6 @@ erDiagram
 | `doctor_advice` | TEXT | NULL | Lời dặn của bác sĩ |
 | `status` | ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') | NOT NULL, DEFAULT 'WAITING' | Trạng thái hiện tại của đợt khám |
 | `checked_in_at` | TIMESTAMP | NOT NULL, DEFAULT NOW() | Thời điểm tiếp đón |
-| `queue_order` | BIGINT | NOT NULL | Thứ tự trong hàng đợi của Bác sĩ (nhỏ được gọi trước). Gán bằng thời điểm tiếp nhận (epoch micro giây) nên ca đến trước đứng trước; giữ nguyên khi đổi Bác sĩ. Gọi / Gọi lại không đổi giá trị này (từ 13/11/2026 đã bỏ cơ chế "Đẩy lùi 1 bậc" cùng cột `skip_count`). Ca vừa có kết quả CLS: gán bằng `queue_order` nhỏ nhất trong hàng đợi của Bác sĩ đó − 1 (lên đầu, sau ca cấp cứu) |
 | `version` | BIGINT | NOT NULL, DEFAULT 0 | Khóa lạc quan, chống ghi đè đồng thời |
 
 #### Bảng `pet_visit_status_histories` (Lịch sử chuyển trạng thái đợt khám)
@@ -574,7 +598,6 @@ erDiagram
 | `status` | ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') | NOT NULL, DEFAULT 'PENDING' | Chờ / đang làm / xong / hủy |
 | `notes` | TEXT | NULL | Ghi chú chỉ định của bác sĩ |
 | `created_at` | TIMESTAMP | NOT NULL, DEFAULT NOW() | Thời điểm chỉ định |
-| `queue_order` | BIGINT | NOT NULL | Thứ tự trong hàng đợi phòng Xét nghiệm / CĐHA (nhỏ được gọi trước). Gán bằng thời điểm chỉ định (epoch micro giây); gọi theo từng dòng không đổi giá trị này |
 
 *Ràng buộc mức bảng:* `CHECK (quantity > 0)`
 
@@ -639,13 +662,43 @@ erDiagram
 | `unit_price` | DECIMAL(12, 2) | NOT NULL | Đơn giá chốt lúc chỉ định |
 | `vat_rate` | DECIMAL(4, 2) | NOT NULL, DEFAULT 0.00 | Thuế suất chốt lúc chỉ định |
 | `discount_amount` | DECIMAL(12, 2) | NOT NULL, DEFAULT 0.00 | Số tiền giảm giá |
-| `payment_status` | ENUM('PENDING', 'PAID', 'CANCELLED') | NOT NULL, DEFAULT 'PENDING' | Chờ thanh toán / đã trả / hủy |
+| `payment_status` | ENUM('PENDING', 'PAID', 'CANCELLED', 'REFUNDED') | NOT NULL, DEFAULT 'PENDING' | Chờ thanh toán / đã trả / hủy (dịch vụ bị hủy khi chưa thu) / đã hoàn tiền. `REFUNDED` chỉ dùng khi **phòng khám không thực hiện được** dịch vụ XN / CĐHA đã thu (thiết bị hỏng, không lấy được mẫu, Bác sĩ hủy chỉ định trước khi làm). Phí khám đã thu không hoàn; khách tự bỏ về / tự hủy thì giữ `PAID` |
 | `cashier_id` | BIGINT | NULL | **Logical FK** → `pet_clinic_auth_db.users(id)`. Thu ngân thu tiền |
 | `paid_at` | TIMESTAMP | NULL | Thời điểm thanh toán |
 | `created_at` | TIMESTAMP | NOT NULL, DEFAULT NOW() | Thời điểm lập hóa đơn |
 | `version` | BIGINT | NOT NULL, DEFAULT 0 | Khóa lạc quan, chống ghi đè đồng thời |
 
 *Ràng buộc mức bảng:* `CHECK (unit_price >= 0)`; `CHECK (vat_rate >= 0 AND vat_rate <= 1)`; `CHECK (discount_amount >= 0)`
+
+#### Bảng `queue_tickets` (Phiếu xếp hàng – dữ liệu vận hành, đổi liên tục trong ngày)
+
+Mỗi phiếu là một lượt chờ của một đợt khám tại hàng đợi Bác sĩ hoặc phòng Xét nghiệm / CĐHA, tương ứng tờ phiếu số thứ tự ở bệnh viện. Phiếu được phát khi đã thu tiền các dịch vụ cần thu trước (`services.requires_prepayment = TRUE`); ca cấp cứu, dịch vụ không cần thu trước và ca quay lại với kết quả CLS được phát phiếu ngay. Bác sĩ, KTV chỉ làm việc trên danh sách phiếu, không xét tiền. Một ca có cận lâm sàng thường có 3 phiếu nối tiếp: Bác sĩ lần 1 → phòng XN / CĐHA → Bác sĩ lần 2 (`priority = 1`).
+
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `id` | BIGINT | PK, AUTO_INCREMENT | Khóa chính, tự tăng |
+| `queue_type` | ENUM('DOCTOR', 'LABORATORY', 'IMAGING') | NOT NULL | Loại hàng đợi: phòng Bác sĩ, phòng Xét nghiệm, phòng CĐHA |
+| `service_date` | DATE | NOT NULL | Ngày phát phiếu; số thứ tự đánh lại từ 1 mỗi ngày |
+| `ticket_no` | INT | NOT NULL | Số thứ tự in trên phiếu, tăng dần theo `(queue_type, service_date)`; đổi Bác sĩ không đổi số |
+| `visit_id` | BIGINT | FK → pet_visits(id), NOT NULL | Đợt khám của phiếu |
+| `doctor_id` | BIGINT | NULL | **Logical FK** → `pet_clinic_auth_db.users(id)`. Chỉ dùng cho phiếu `DOCTOR`; `NULL` = đang ở danh sách chờ phân công |
+| `priority` | TINYINT | NOT NULL, DEFAULT 0 | 2 = cấp cứu, 1 = quay lại với kết quả CLS, 0 = thường. Hàng đợi sắp `priority DESC, issued_at, id` |
+| `status` | ENUM('WAITING', 'IN_SERVICE', 'DONE', 'CANCELLED') | NOT NULL, DEFAULT 'WAITING' | Chờ gọi / đang phục vụ / xong / hủy |
+| `issued_at` | TIMESTAMP | NOT NULL, DEFAULT NOW() | Giờ phát phiếu (= giờ thu tiền, hoặc giờ hệ thống tự phát) |
+| `issued_by` | BIGINT | NULL | **Logical FK** → `pet_clinic_auth_db.users(id)`. Thu ngân phát phiếu; `NULL` = hệ thống tự phát |
+| `last_called_at` | TIMESTAMP | NULL | Lần bấm "Gọi" / "Gọi lại" gần nhất; `NULL` = chưa gọi. Chỉ để hiển thị "Đã gọi HH:mm", không đổi thứ tự |
+| `version` | BIGINT | NOT NULL, DEFAULT 0 | Khóa lạc quan (hai người cùng bấm Gọi / Bắt đầu) |
+
+*Ràng buộc mức bảng:* `UNIQUE (queue_type, service_date, ticket_no)`; `CHECK (priority BETWEEN 0 AND 2)`. *Ràng buộc nghiệp vụ (tầng ứng dụng):* mỗi đợt khám có tối đa 1 phiếu `DOCTOR` đang `WAITING` / `IN_SERVICE`; mỗi cặp (đợt khám, phòng XN / CĐHA) có tối đa 1 phiếu `WAITING`; mỗi Bác sĩ có tối đa 1 phiếu `IN_SERVICE`.
+
+#### Bảng `queue_ticket_items` (Các dịch vụ thuộc một phiếu phòng Xét nghiệm / CĐHA)
+
+Gom các dịch vụ cùng đợt khám, cùng phòng vào một phiếu ("một ca"), gọi một lần. Phiếu `DOCTOR` không có dòng ở bảng này.
+
+| Tên cột | Kiểu dữ liệu | Ràng buộc | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `ticket_id` | BIGINT | PK, FK → queue_tickets(id) ON DELETE CASCADE | Phiếu chứa dịch vụ |
+| `visit_service_detail_id` | BIGINT | PK, FK → visit_service_details(id), UNIQUE | Dịch vụ thuộc phiếu; mỗi dịch vụ chỉ thuộc 1 phiếu |
 
 ### 3.4. Bounded Context 4: Đơn thuốc, Hóa đơn thuốc & Kho dược (`pet_clinic_billing_pharmacy_db`)
 > **Phụ trách:** `billing-pharmacy-service`
@@ -755,11 +808,11 @@ Các cột `PRIMARY KEY`, `UNIQUE` và khóa ngoại vật lý được MySQL t�
 
 3. **`pet_clinic_clinical_db`:**
    - Index `pets(owner_id)` để tải danh sách thú cưng của khách hàng.
-   - Compound Index `idx_visits_queue (doctor_id, status, is_emergency, queue_order)` phục vụ hàng đợi riêng của từng Bác sĩ (cấp cứu lên đầu, còn lại theo `queue_order`) và danh sách chờ phân công (`doctor_id IS NULL`).
+   - Compound Index `idx_qt_queue (queue_type, status, doctor_id, priority, issued_at)` trên `queue_tickets` phục vụ mọi hàng đợi (Bác sĩ, Xét nghiệm, CĐHA) và danh sách chờ phân công (`doctor_id IS NULL`); Index `idx_qt_visit (visit_id)` tra các phiếu của một đợt khám; `UNIQUE (queue_type, service_date, ticket_no)` chống phát trùng số.
    - Compound Index `pet_visits(doctor_id, status)` phục vụ tính toán động trạng thái `BUSY` / `AVAILABLE` của Bác sĩ.
    - Index `pet_visits(pet_id)` và `pet_visits(receptionist_id)` phục vụ tra cứu bệnh án và truy vết lễ tân tiếp đón.
    - Index `pet_visit_status_histories(visit_id)`, `(changed_by_user_id)` và `visit_service_detail_histories(visit_service_detail_id)`, `(changed_by_user_id)` phục vụ kiểm toán.
-   - Index `visit_service_details(visit_id)` và Compound Index `idx_vsd_queue (status, queue_order)` phục vụ 2 hàng đợi Cận lâm sàng (Lab & CĐHA).
+   - Index `visit_service_details(visit_id)`. Hàng đợi Cận lâm sàng không còn đọc từ bảng này mà từ `queue_tickets` + `queue_ticket_items`.
    - Index `lab_test_results(performed_by)`, `imaging_results(performed_by)`, `imaging_attachments(imaging_result_id)`.
    - Compound Index `service_invoices(payment_status, paid_at)` phục vụ danh sách chờ thanh toán và báo cáo doanh thu dịch vụ theo thời gian; Index `service_invoices(cashier_id)`.
 
@@ -782,9 +835,10 @@ Theo nguyên tắc không lưu thuộc tính dẫn xuất, các giá trị sau �
 | Đánh giá chỉ số xét nghiệm | `LOW` nếu `result_value < min_value_snapshot`; `HIGH` nếu `> max_value_snapshot`; ngược lại `NORMAL` | Tầng ứng dụng / truy vấn |
 | Tồn kho sau mỗi giao dịch | `SUM(quantity) OVER (PARTITION BY medicine_id ORDER BY created_at, id)` | Truy vấn window function |
 | Giờ kết thúc khung hẹn | `start_time + 30 phút` | Tầng ứng dụng |
-| Số thứ tự (STT) trong hàng đợi của Bác sĩ | `ROW_NUMBER() OVER (PARTITION BY doctor_id ORDER BY is_emergency DESC, queue_order)` trên các ca `WAITING` / `RESULTS_READY` | Truy vấn hàng đợi |
-| Số người đang chờ của từng Bác sĩ (gợi ý phân công) | `COUNT(*)` ca `WAITING` / `RESULTS_READY` theo `doctor_id` | Truy vấn hàng đợi |
-| Trạng thái Bác sĩ | `BUSY` nếu có ca `IN_PROGRESS`, ngược lại `AVAILABLE` | Truy vấn `idx_visits_doctor_status` |
+| Vị trí trong hàng đợi (người thứ mấy đang chờ) | `ROW_NUMBER() OVER (PARTITION BY queue_type, doctor_id ORDER BY priority DESC, issued_at, id)` trên phiếu `WAITING`. Số in trên phiếu là `ticket_no` (lưu) | Truy vấn hàng đợi |
+| Số người đang chờ của từng Bác sĩ (gợi ý phân công) | `COUNT(*)` phiếu `DOCTOR` đang `WAITING` theo `doctor_id` | Truy vấn `queue_tickets` |
+| Ca đang chờ thu tiền trước khi được xếp hàng | Đợt khám `WAITING` chưa có phiếu `DOCTOR`; dịch vụ `PENDING` có `requires_prepayment = TRUE` chưa thuộc phiếu nào | Màn hình thu ngân |
+| Trạng thái Bác sĩ | `BUSY` nếu có phiếu `DOCTOR` đang `IN_SERVICE` (tương đương có ca `IN_PROGRESS`), ngược lại `AVAILABLE` | Truy vấn `queue_tickets` / `idx_visits_doctor_status` |
 | Thời điểm bắt đầu khám / chốt ca / hoàn tất | `created_at` của dòng lịch sử chuyển sang `IN_PROGRESS` / `WAITING_PAYMENT` / `COMPLETED` | `pet_visit_status_histories` |
 
 **Ví dụ truy vấn doanh thu dịch vụ theo nhóm trong tháng 11/2026:**
@@ -821,5 +875,8 @@ Phiên bản 3.0 điều chỉnh theo góp ý của Giảng viên hướng dẫn
 | `prescription_items` | Bỏ `unit_price`, `subtotal`; thêm `UNIQUE` | Giá chỉ chốt khi bán (ở hóa đơn thuốc); `subtotal` dẫn xuất. |
 | `inventory_transactions` | Bỏ `balance_after`, `reference_id`; thêm `medicine_invoice_id`; `EXPORT_PRESCRIPTION` → `EXPORT_SALE` | `balance_after` tính bằng tổng lũy kế; thay tham chiếu chung chung bằng khóa ngoại thật; thuốc chỉ rời kho khi bán. |
 | `visit_service_detail_histories` (rà soát 10/11) | Mô tả cột `action` liệt kê đủ 7 giá trị, gồm `SAMPLE_COLLECTED` | Khớp `schema_init.sql` và EX-09 |
-| `pet_visits`, `visit_service_details` (rà soát 11/11) | Thêm `queue_order`, `skip_count` (cả hai bảng); đổi chỉ mục `idx_visits_queue` thành `(doctor_id, status, is_emergency, queue_order)`, `idx_vsd_status` thành `idx_vsd_queue (status, queue_order)` | Mỗi Bác sĩ có hàng đợi riêng; gọi không thấy khách thì gọi ca khác trong danh sách (thứ tự không đổi) ở cả phòng khám, Xét nghiệm, CĐHA; "Đẩy lùi 1 bậc" còn lại như cơ chế dự phòng (cập nhật 13/11/2026) |
+| `pet_visits`, `visit_service_details` (rà soát 11/11) | Thêm `queue_order`, `skip_count` (cả hai bảng); đổi chỉ mục `idx_visits_queue` thành `(doctor_id, status, is_emergency, queue_order)`, `idx_vsd_status` thành `idx_vsd_queue (status, queue_order)` | Mỗi Bác sĩ có hàng đợi riêng; gọi không thấy khách thì gọi ca khác trong danh sách (thứ tự không đổi) ở cả phòng khám, Xét nghiệm, CĐHA (cơ chế lúc đó là "Đẩy lùi 1 bậc", đã bỏ ngày 13/11) |
 | `visit_service_detail_histories` (rà soát 11/11) | `action` bỏ `POSTPONED`, `RECALL`; thêm `SKIPPED` (6 giá trị) | Không còn tab "Ca tạm hoãn" và ghim "Ưu tiên kế tiếp"; ca bị lùi vẫn ở trong hàng đợi |
+| `pet_visits`, `visit_service_details` (cập nhật 13/11) | Bỏ `skip_count`, hai ràng buộc `CHECK (skip_count >= 0)` và giá trị `action = 'SKIPPED'`; thứ tự hàng đợi còn `is_emergency DESC, queue_order` | Chuyển sang "Gọi" theo từng dòng, thứ tự không đổi khi gọi |
+| `queue_tickets`, `queue_ticket_items`, `services`, `service_invoices`, `pet_visits`, `visit_service_details` (cập nhật 16/11) | Thêm 2 bảng phiếu xếp hàng (clinical 14 → 16 bảng, tổng 25 → 27); thêm `services.requires_prepayment`; `service_invoices.payment_status` thêm `REFUNDED`; bỏ `queue_order` ở `pet_visits` và `visit_service_details`, bỏ chỉ mục `idx_visits_queue`, `idx_vsd_queue`; thứ tự hàng đợi `priority DESC, issued_at` | Góp ý GVHD: tách dữ liệu hay thay đổi (hàng đợi) khỏi dữ liệu ít thay đổi (hồ sơ khám); tách quy trình thanh toán khỏi quy trình khám, thu tiền xong mới vào hàng đợi như bệnh viện |
+| `service_invoices`, `services` (cập nhật 17/11) | Ghi rõ phạm vi `REFUNDED`: chỉ hoàn khi phòng khám không thực hiện được dịch vụ XN / CĐHA đã thu; phí khám không hoàn; khách tự bỏ giữ `PAID`. Hóa đơn phí khám lập lúc check-in (trước đây lúc "Bắt đầu khám") | Nghiệp vụ: khách nộp phí khám lâm sàng xong mới vào hàng đợi khám; khách bỏ về không được hoàn phí khám |

@@ -5,7 +5,7 @@
 
 > **Mục đích tài liệu:**  
 > - Bản lộ trình hành động (Actionable Implementation Roadmap) chia nhỏ toàn bộ quá trình lập trình thành các nhiệm vụ cụ thể (Tasks) đi kèm hộp kiểm `[ ]` để đánh dấu tiến độ thực tế.  
-> - Bao phủ **70 Yêu cầu chức năng (FR-01 → FR-70)**, **8 Yêu cầu phi chức năng (NFR-01 → NFR-08)**, **16 Tình huống ngoại lệ (EX-01 → EX-16)** và **25 bảng Cơ sở dữ liệu** (4 CSDL logic, 25 khóa ngoại nội bộ, 2 VIEW tính tiền). Mã FR trích dẫn theo đúng `YEU_CAU_CHUC_NANG_VA_PHI_CHUC_NANG.md` v3.0.  
+> - Bao phủ **70 Yêu cầu chức năng (FR-01 → FR-70)**, **8 Yêu cầu phi chức năng (NFR-01 → NFR-08)**, **16 Tình huống ngoại lệ (EX-01 → EX-16)** và **27 bảng Cơ sở dữ liệu** (4 CSDL logic, 28 khóa ngoại nội bộ, 2 VIEW tính tiền; cập nhật 16–17/11: phiếu xếp hàng `queue_tickets`, `queue_ticket_items`, thu tiền trước rồi mới xếp hàng). Mã FR trích dẫn theo đúng `YEU_CAU_CHUC_NANG_VA_PHI_CHUC_NANG.md` v3.0.  
 > - Cung cấp **hướng dẫn kiểm thử sau từng task** (câu lệnh `curl`, dữ liệu mẫu JSON, mã lỗi kỳ vọng, truy vấn SQL xác minh và kiểm tra sự kiện).
 >
 > **Quy ước dùng chung:**
@@ -50,13 +50,13 @@
 
 ### Task 1.2: Thiết lập Hạ tầng CSDL MySQL, RabbitMQ & Dữ liệu demo (Docker Compose)
 - **Người thực hiện:** Nguyễn Đức Khởi
-- **Mục tiêu:** Dựng môi trường CSDL và RabbitMQ bằng Docker, nạp toàn bộ cấu trúc CSDL 25 bảng và dữ liệu demo dùng cho mọi hướng dẫn kiểm thử.
+- **Mục tiêu:** Dựng môi trường CSDL và RabbitMQ bằng Docker, nạp toàn bộ cấu trúc CSDL 27 bảng và dữ liệu demo dùng cho mọi hướng dẫn kiểm thử.
 - [ ] **1.2.1** Viết tệp `docker-compose.yml` khởi chạy:
   - MySQL 8.0 Server (Port 3306), cấu hình `utf8mb4_unicode_ci`.
   - Khởi tạo tự động 4 CSDL logic: `pet_clinic_auth_db`, `pet_clinic_appointment_db`, `pet_clinic_clinical_db`, `pet_clinic_billing_pharmacy_db`.
   - RabbitMQ Server với Management Plugin (Port 5672 và 15672).
   - Volume `imaging-uploads` gắn vào `clinical-service` tại `/app/uploads/imaging/`.
-- [ ] **1.2.2** Thực thi `schema_init.sql`: **25 bảng**, **25 ràng buộc khóa ngoại nội bộ** (auth 2, appointment 1, clinical 15, billing-pharmacy 7), **2 VIEW** (`v_service_invoice_amounts`, `v_medicine_invoice_amounts`) và dữ liệu danh mục (6 vai trò, 1 admin, 2 loài, 7 dịch vụ, 4 chỉ số xét nghiệm, 4 thuốc, nhập kho đầu kỳ).
+- [ ] **1.2.2** Thực thi `schema_init.sql`: **27 bảng**, **28 ràng buộc khóa ngoại nội bộ** (auth 2, appointment 1, clinical 18, billing-pharmacy 7), **2 VIEW** (`v_service_invoice_amounts`, `v_medicine_invoice_amounts`) và dữ liệu danh mục (6 vai trò, 1 admin, 2 loài, 7 dịch vụ – `requires_prepayment = TRUE` cho khám, XN, CĐHA, 4 chỉ số xét nghiệm, 4 thuốc, nhập kho đầu kỳ).
 - [ ] **1.2.3** Viết `seed_demo_data.sql` (chỉ dùng cho môi trường dev/demo, chạy sau `schema_init.sql`) để có tài khoản và thú cưng mẫu. Bảng ID cố định dùng trong toàn bộ tài liệu:
 
   | ID | Tài khoản | Vai trò (`role_id`) | Phòng | Ghi chú |
@@ -99,8 +99,8 @@
 >    WHERE constraint_schema LIKE 'pet_clinic_%';
 >    ```
 > 3. **Kết quả kỳ vọng:**
->    - `pet_clinic_auth_db`: 3 bảng · `pet_clinic_appointment_db`: 2 bảng · `pet_clinic_clinical_db`: 14 bảng + 1 VIEW · `pet_clinic_billing_pharmacy_db`: 6 bảng + 1 VIEW → **25 bảng, 2 VIEW**.
->    - `fk_count = 25`.
+>    - `pet_clinic_auth_db`: 3 bảng · `pet_clinic_appointment_db`: 2 bảng · `pet_clinic_clinical_db`: 16 bảng + 1 VIEW · `pet_clinic_billing_pharmacy_db`: 6 bảng + 1 VIEW → **27 bảng, 2 VIEW**.
+>    - `fk_count = 28`.
 >    - Bất biến kho: `SELECT m.id, m.stock_quantity, SUM(t.quantity) FROM medicines m JOIN inventory_transactions t ON t.medicine_id = m.id GROUP BY m.id;` → hai cột bằng nhau (200, 50, 40, 100).
 
 ---
@@ -300,9 +300,9 @@
 ### Task 3.1: Cấu hình CSDL `clinical-service` (:8083) & Danh mục
 - **Người thực hiện:** Lưu Minh Hiển & Nguyễn Đức Khởi
 - **Mục tiêu:** Quản lý Loài, Thú cưng, Dịch vụ (gồm gói xét nghiệm), Chỉ số xét nghiệm, Khoảng tham chiếu theo loài.
-- [ ] **3.1.1** Kết nối `pet_clinic_clinical_db` gồm **14 bảng** và VIEW `v_service_invoice_amounts`.
+- [ ] **3.1.1** Kết nối `pet_clinic_clinical_db` gồm **16 bảng** (kể cả `queue_tickets`, `queue_ticket_items`) và VIEW `v_service_invoice_amounts`.
 - [ ] **3.1.2** CRUD Thú cưng (`/api/v1/pets`, `/api/v1/species`) (FR-10, FR-11). Tìm thú cưng theo chủ: `GET /api/v1/pets?ownerId=` (`pets.owner_id`); tra theo số điện thoại thì Frontend tìm chủ nuôi ở `auth-service` trước rồi lọc theo `ownerId`. API nội bộ `GET /internal/pets/{id}` cho `appointment-service`.
-- [ ] **3.1.3** CRUD Danh mục dịch vụ (`services`: `price`, `vat_rate`, `is_active`) và gói xét nghiệm (`service_lab_test_items`) (FR-03, FR-05); CRUD chỉ số xét nghiệm `lab_test_items`.
+- [ ] **3.1.3** CRUD Danh mục dịch vụ (`services`: `price`, `vat_rate`, `is_active`, `requires_prepayment`) và gói xét nghiệm (`service_lab_test_items`) (FR-03, FR-05); CRUD chỉ số xét nghiệm `lab_test_items`.
 - [ ] **3.1.4** CRUD khoảng tham chiếu `lab_test_reference_ranges` (`min_value`, `max_value` theo `species_id`) (FR-06).
 
 > **Hướng dẫn Kiểm thử Task 3.1:**
@@ -314,15 +314,16 @@
 
 ### Task 3.2: Tiếp đón tại Quầy (Check-in), Khách Vãng lai & Danh sách chờ phân công
 - **Người thực hiện:** Nguyễn Đức Khởi (Phụ trách FR-18, FR-19, FR-20, FR-21, FR-26, UC-18, UC-19, UC-20, EX-02, EX-03, EX-04)
-- **Mục tiêu:** Lễ tân tiếp nhận thú cưng (có hẹn hoặc vãng lai), tạo `pet_visits` (`WAITING`). **Lễ tân không cân, không đo thân nhiệt** – Bác sĩ làm trong phòng khám (Task 3.3).
+- **Mục tiêu:** Lễ tân tiếp nhận thú cưng (có hẹn hoặc vãng lai), tạo `pet_visits` (`WAITING`) kèm **hóa đơn phí khám**; khách nộp phí thì hệ thống **phát phiếu xếp hàng**. **Lễ tân không cân, không đo thân nhiệt** – Bác sĩ làm trong phòng khám (Task 3.3).
 - [ ] **3.2.1** API Check-in thống nhất (`POST /api/v1/clinical/pet-visits/check-in`), body `{petId, appointmentId (null nếu vãng lai), isEmergency, initialSymptoms}`:
   - Nếu có `appointmentId`: Feign **chỉ đọc** `GET /internal/appointments/{id}` – phải `CONFIRMED`, đúng ngày, đúng thú cưng (`APPT_1205`).
   - Chặn nếu thú cưng còn đợt khám chưa kết thúc (`CLIN_1306`).
-  - Trong giao dịch: tạo `pet_visits` (`WAITING`, `checked_in_at`, `receptionist_id`, `is_emergency`), ghi lịch sử `NULL → WAITING`.
+  - Trong giao dịch: tạo `pet_visits` (`WAITING`, `checked_in_at`, `receptionist_id`, `is_emergency`, `doctor_id` tùy chọn), ghi lịch sử `NULL → WAITING`; tạo dịch vụ khám `EXAM_GEN` (`PENDING`, history `ORDERED`) + `service_invoices` `PENDING` (snapshot `unit_price = 100000.00`). Ca cấp cứu: gọi `TicketIssuer` phát phiếu `DOCTOR` `priority = 2` ngay.
   - Sau commit: phát `VisitCheckedInEvent`. `appointment-service` (consumer, idempotent) chuyển lịch `CONFIRMED → CHECKED_IN` và ghi lịch sử. **Không** gọi Feign để ghi sang `appointment-service`.
 - [ ] **3.2.2** Khách vãng lai (EX-02) dùng cùng endpoint với `appointmentId = null`. Khách đến sau khi lịch đã `NO_SHOW` cũng tiếp nhận như vãng lai (FR-18).
-- [ ] **3.2.3** API Hàng đợi (FR-21, EX-04): `GET /api/v1/clinical/pet-visits/queue` (Lễ tân) trả **danh sách chờ phân công** và **hàng đợi của từng Bác sĩ** (kèm `waitingCount`, `suggestedDoctorId` = Bác sĩ ít người chờ nhất); `GET /api/v1/clinical/pet-visits/my-queue` (Bác sĩ) trả hàng đợi của chính mình. Thứ tự `ORDER BY is_emergency DESC, queue_order ASC`. Check-in gán `queue_order = QueueOrders.now()` và nhận `doctorId` tùy chọn để xếp ngay vào hàng đợi Bác sĩ.
-- [ ] **3.2.4** API Hủy tiếp nhận (`POST /api/v1/clinical/pet-visits/{id}/cancel`, body `{"reason": "..."}`, EX-03): `WAITING → CANCELLED`, **lý do ghi vào `pet_visit_status_histories.notes`** (không có cột `cancel_reason`).
+- [ ] **3.2.3** API Hàng đợi (FR-21, EX-04): `GET /api/v1/clinical/pet-visits/queue` (Lễ tân) trả **danh sách chờ phân công** (phiếu `DOCTOR` `WAITING`, `doctor_id IS NULL`) và **hàng đợi của từng Bác sĩ** (kèm `waitingCount`, `suggestedDoctorId` = Bác sĩ ít phiếu chờ nhất); `GET /api/v1/clinical/pet-visits/my-queue` (Bác sĩ) trả phiếu của chính mình. Thứ tự `ORDER BY priority DESC, issued_at, id` trên `queue_tickets` (Quy chuẩn 11.2, `QueueTicketRepository`).
+- [ ] **3.2.3b** API Thu ngân (FR-55, FR-59): `GET /api/v1/clinical/cashier/pending?section=EXAM_FEE` (ca `WAITING` chưa có phiếu) và `POST /api/v1/clinical/pet-visits/{id}/service-invoices/confirm-payment` (Quy chuẩn 8.3): thu hóa đơn phí khám → `PAID` và **phát phiếu `DOCTOR`** (`ticket_no` tiếp theo trong ngày, `issued_by` = Thu ngân) trong cùng giao dịch; phát `QueueTicketIssuedEvent` sau commit.
+- [ ] **3.2.4** API Hủy tiếp nhận (`POST /api/v1/clinical/pet-visits/{id}/cancel`, body `{"reason": "..."}`, EX-03): `WAITING → CANCELLED`, **lý do ghi vào `pet_visit_status_histories.notes`** (không có cột `cancel_reason`); phiếu `WAITING` → `CANCELLED`; dịch vụ khám → `CANCELLED`; hóa đơn phí khám chưa thu → `CANCELLED`, **đã thu → giữ `PAID`** (không hoàn).
 - [ ] **3.2.5** Consumer `VisitCheckedInEvent` trong `appointment-service`: idempotent, retry 3 lần rồi vào DLQ.
 
 > **Hướng dẫn Kiểm thử Task 3.2:**
@@ -334,21 +335,30 @@
 >    ```
 > 2. **Kết quả kỳ vọng:**
 >    - `201 Created`, mã dạng `VISIT-2026-0001`, `status: "WAITING"`; `weight_at_visit`, `temperature` đang `NULL`.
+>    - `service_invoices`: 1 dòng (id 1) phí khám `100000.00` `PENDING`; `SELECT COUNT(*) FROM queue_tickets;` → `0` (**chưa nộp phí thì chưa có phiếu**).
 >    - Sau ≤ 1 giây: `SELECT status FROM pet_clinic_appointment_db.appointments WHERE id = 1;` → `CHECKED_IN`, kèm 1 dòng lịch sử `CONFIRMED → CHECKED_IN` (user 5).
 > 3. Gọi check-in lần nữa cho thú cưng 1 → `409`, mã lỗi `CLIN_1306`.
-> 4. Check-in vãng lai cho chó Milo (dùng ở Task 3.3 và 3.7): body `{"petId": 2, "appointmentId": null, "isEmergency": false, "initialSymptoms": "Ngứa, rụng lông"}` → ca #2 `WAITING`; `GET /api/v1/clinical/pet-visits/queue` trả cả hai ca trong danh sách chờ phân công, ca #1 đứng trước ca #2.
+> 4. Check-in vãng lai cho chó Milo (dùng ở Task 3.3 và 3.7): body `{"petId": 2, "appointmentId": null, "isEmergency": false, "initialSymptoms": "Ngứa, rụng lông"}` → ca #2 `WAITING`, hóa đơn phí khám id 2 `PENDING`; `GET /api/v1/clinical/cashier/pending?section=EXAM_FEE` trả cả hai ca.
+> 5. Thu phí khám (Lễ tân kiêm Thu ngân):
+>    ```bash
+>    curl -X POST http://localhost:8080/api/v1/clinical/pet-visits/1/service-invoices/confirm-payment \
+>      -H "Authorization: Bearer $TOKEN_REC" -H "Content-Type: application/json" -d '{"invoiceIds": [1]}'
+>    curl -X POST http://localhost:8080/api/v1/clinical/pet-visits/2/service-invoices/confirm-payment \
+>      -H "Authorization: Bearer $TOKEN_REC" -H "Content-Type: application/json" -d '{"invoiceIds": [2]}'
+>    ```
+>    **Kỳ vọng:** `200 OK`; hóa đơn 1, 2 `PAID`; `queue_tickets` có phiếu 1 (ca #1, `DOCTOR`, `ticket_no = 1`) và phiếu 2 (ca #2, `ticket_no = 2`), cả hai `WAITING`, `doctor_id = NULL`; cả hai ca vẫn `WAITING`. `GET /api/v1/clinical/pet-visits/queue` trả 2 phiếu trong danh sách chờ phân công, phiếu 1 đứng trước phiếu 2.
 
 ---
 
-### Task 3.3: Xếp ca vào Hàng đợi Bác sĩ, Gọi số theo từng dòng & Bắt đầu Khám Giai đoạn 1
+### Task 3.3: Xếp phiếu vào Hàng đợi Bác sĩ, Gọi số theo từng dòng & Bắt đầu Khám Giai đoạn 1
 - **Người thực hiện:** Lưu Minh Hiển (Phụ trách FR-22, FR-24, FR-25, FR-27, FR-28, FR-29, FR-47, UC-21, UC-22, EX-05, EX-10)
-- **Mục tiêu:** Lễ tân xếp ca vào hàng đợi riêng của Bác sĩ bất kỳ (không cần Bác sĩ rảnh); Bác sĩ gọi số (ca bất kỳ; khách vắng thì gọi ca khác, thứ tự không đổi), bắt đầu khám (T02), hệ thống tự tạo dịch vụ khám + hóa đơn dịch vụ.
-- [ ] **3.3.1** Truy vấn trạng thái Bác sĩ (`GET /api/v1/clinical/doctors/status`) theo State Machine mục 3.3: `BUSY` nếu có ca `IN_PROGRESS`, ngược lại `AVAILABLE`; kèm `waitingCount` (số ca `WAITING` / `RESULTS_READY` trong hàng đợi). Danh sách Bác sĩ, tên, phòng lấy qua Feign `auth-service`.
-- [ ] **3.3.2** **API Xếp ca vào hàng đợi Bác sĩ** (`POST /api/v1/clinical/pet-visits/{id}/assign-doctor`, body `{"doctorId": 2}`, chỉ `RECEPTIONIST`): ca phải `WAITING` (`version` chống trùng); Bác sĩ phải là `VETERINARIAN` `ACTIVE` (Feign); **không kiểm tra Bác sĩ rảnh**; gán `doctor_id`, giữ nguyên `queue_order`. Gọi lại với Bác sĩ khác = chuyển hàng đợi. Màn hình Bác sĩ thấy ca mới ở lần làm mới hàng đợi kế tiếp.
-- [ ] **3.3.2b** **API Gỡ phân công** (`POST /api/v1/clinical/pet-visits/{id}/unassign-doctor`, chỉ `RECEPTIONIST`, UC-21 Luồng 5c): ca phải `WAITING` và đã có `doctor_id`; đặt `doctor_id = NULL`, ca về danh sách chờ phân công, giữ `queue_order`. Trạng thái không đổi nên không ghi `pet_visit_status_histories`.
-- [ ] **3.3.2c** **API Gọi số** (chỉ `VETERINARIAN`, Quy chuẩn 11.2 mục 6b): `POST /api/v1/clinical/pet-visits/{id}/call` gọi một ca **bất kỳ** trong hàng đợi của mình (`CLIN_1311` nếu ca không thuộc Bác sĩ này; chỉ ca `WAITING` / `RESULTS_READY`); `POST /api/v1/clinical/pet-visits/call-next` là phím tắt gọi ca đầu `my-queue` (`CLIN_1303` nếu trống). Cả hai: Bác sĩ không có ca `IN_PROGRESS` (`CLIN_1302`); chỉ phát `PatientCalledEvent` (`action = CALLED`), **không đổi trạng thái, không đổi `queue_order`**.
+- **Mục tiêu:** Lễ tân xếp phiếu vào hàng đợi riêng của Bác sĩ bất kỳ (không cần Bác sĩ rảnh); Bác sĩ gọi số theo phiếu (phiếu bất kỳ; khách vắng thì gọi phiếu khác, thứ tự không đổi), bắt đầu khám (T02) – chỉ được khi ca có phiếu (đã nộp phí khám hoặc cấp cứu).
+- [ ] **3.3.1** Truy vấn trạng thái Bác sĩ (`GET /api/v1/clinical/doctors/status`) theo State Machine mục 3.3: `BUSY` nếu có ca `IN_PROGRESS`, ngược lại `AVAILABLE`; kèm `waitingCount` (số phiếu `DOCTOR` `WAITING` của Bác sĩ). Danh sách Bác sĩ, tên, phòng lấy qua Feign `auth-service`.
+- [ ] **3.3.2** **API Xếp ca vào hàng đợi Bác sĩ** (`POST /api/v1/clinical/pet-visits/{id}/assign-doctor`, body `{"doctorId": 2}`, chỉ `RECEPTIONIST`): ca phải `WAITING` (`version` chống trùng); Bác sĩ phải là `VETERINARIAN` `ACTIVE` (Feign); **không kiểm tra Bác sĩ rảnh**; gán `pet_visits.doctor_id` và `doctor_id` của phiếu `DOCTOR` đang `WAITING` (nếu có), giữ nguyên số phiếu và giờ phát. Gọi lại với Bác sĩ khác = chuyển hàng đợi. Màn hình Bác sĩ thấy ca mới ở lần làm mới hàng đợi kế tiếp.
+- [ ] **3.3.2b** **API Gỡ phân công** (`POST /api/v1/clinical/pet-visits/{id}/unassign-doctor`, chỉ `RECEPTIONIST`, UC-21 Luồng 5c): ca phải `WAITING` và đã có `doctor_id`; đặt `doctor_id = NULL` (cả trên phiếu), phiếu về danh sách chờ phân công, giữ số phiếu. Trạng thái không đổi nên không ghi `pet_visit_status_histories`.
+- [ ] **3.3.2c** **API Gọi số** (Quy chuẩn 11.2 mục 6b, `QueueTicketServiceImpl`): `POST /api/v1/clinical/queue-tickets/{id}/call` gọi một phiếu **bất kỳ** trong hàng đợi của mình (phiếu `DOCTOR` phải thuộc Bác sĩ này – `CLIN_1311`; phiếu phải `WAITING` – `CLIN_1313`); `POST /api/v1/clinical/queue-tickets/call-next?queueType=DOCTOR` là phím tắt gọi phiếu đứng đầu `my-queue` (`CLIN_1303` nếu trống). Phòng Bác sĩ: không có ca `IN_PROGRESS` (`CLIN_1302`). Chỉ cập nhật `queue_tickets.last_called_at` và phát `PatientCalledEvent` (`action = CALLED`, kèm `ticketNo`), **không đổi trạng thái, không đổi thứ tự**.
 - [x] **3.3.2d** *(Đã bỏ 13/11/2026)* API Đẩy lùi 1 bậc (`POST /api/v1/clinical/pet-visits/{id}/skip`) cùng cột `skip_count`, hành động `SKIPPED` và sự kiện `PUSHED_BACK` đã bị xóa: "Đẩy lùi 1 bậc" làm hai ca đầu hàng đổi chỗ cho nhau mãi mãi và làm ca cấp cứu mất ưu tiên. Thay bằng gọi ca khác (3.3.2c).
-- [ ] **3.3.3** API Bắt đầu khám (`POST /api/v1/clinical/pet-visits/{id}/start-exam`, Quy chuẩn 11.2): chỉ Bác sĩ được gán (`CLIN_1311`), không có ca `IN_PROGRESS` khác; `WAITING → IN_PROGRESS` + lịch sử (thời điểm bắt đầu = `created_at` của dòng lịch sử, **không có cột `started_at`**); tự tạo `visit_service_details` dịch vụ khám `EXAM_GEN` (`IN_PROGRESS`) và **1 `service_invoices` `PENDING`** (snapshot `unit_price = 100000.00`, `vat_rate = 0.00`). Sinh hiệu có thể gửi kèm hoặc cập nhật sau.
+- [ ] **3.3.3** API Bắt đầu khám (`POST /api/v1/clinical/pet-visits/{id}/start-exam`, Quy chuẩn 11.2): chỉ Bác sĩ được gán (`CLIN_1311`), không có ca `IN_PROGRESS` khác; ca phải có phiếu `DOCTOR` `WAITING` (`CLIN_1314` nếu khách chưa nộp phí khám); phiếu → `IN_SERVICE`; `WAITING → IN_PROGRESS` + lịch sử (thời điểm bắt đầu = `created_at` của dòng lịch sử, **không có cột `started_at`**); dịch vụ khám (tạo lúc check-in) `PENDING → IN_PROGRESS`. **Không tạo hóa đơn mới.** Sinh hiệu có thể gửi kèm hoặc cập nhật sau.
 - [ ] **3.3.4** API cập nhật sinh hiệu & ghi chú (`PUT /api/v1/clinical/pet-visits/{id}/clinical-info`): `weight_at_visit`, `temperature`, `clinical_notes`; API lịch sử bệnh án thú cưng (`GET /api/v1/pets/{id}/medical-history`, FR-28).
 
 > **Hướng dẫn Kiểm thử Task 3.3:**
@@ -357,14 +367,14 @@
 >    curl -X POST http://localhost:8080/api/v1/clinical/pet-visits/1/assign-doctor \
 >      -H "Authorization: Bearer $TOKEN_REC" -H "Content-Type: application/json" -d '{"doctorId": 2}'
 >    ```
->    **Kỳ vọng:** `200 OK`; ca vẫn `WAITING`; `GET /doctors/status`: Bác sĩ 2 `AVAILABLE`, `waitingCount = 1`.
-> 2. Xếp tiếp ca #2 (chó Milo, check-in ở Task 3.2 bước 4) vào hàng đợi Bác sĩ 2 → `200 OK` (**không bị chặn**); `GET /pet-visits/my-queue` (token Bác sĩ 2) trả `[#1, #2]`.
-> 2b. Gọi số, khách vắng thì gọi ca khác:
+>    **Kỳ vọng:** `200 OK`; ca vẫn `WAITING`; phiếu 1 có `doctor_id = 2`, giữ `ticket_no = 1`; `GET /doctors/status`: Bác sĩ 2 `AVAILABLE`, `waitingCount = 1`.
+> 2. Xếp tiếp ca #2 (chó Milo, đã nộp phí ở Task 3.2 bước 5) vào hàng đợi Bác sĩ 2 → `200 OK` (**không bị chặn**); `GET /pet-visits/my-queue` (token Bác sĩ 2) trả phiếu `[1, 2]`.
+> 2b. Gọi số, khách vắng thì gọi phiếu khác:
 >    ```bash
->    curl -X POST http://localhost:8080/api/v1/clinical/pet-visits/call-next -H "Authorization: Bearer $TOKEN_VET"   # gọi ca #1 (đầu hàng)
->    curl -X POST http://localhost:8080/api/v1/clinical/pet-visits/2/call -H "Authorization: Bearer $TOKEN_VET"      # #1 vắng mặt: gọi thẳng ca #2
+>    curl -X POST "http://localhost:8080/api/v1/clinical/queue-tickets/call-next?queueType=DOCTOR" -H "Authorization: Bearer $TOKEN_VET"   # gọi phiếu 1 (đầu hàng)
+>    curl -X POST http://localhost:8080/api/v1/clinical/queue-tickets/2/call -H "Authorization: Bearer $TOKEN_VET"                       # phiếu 1 vắng: gọi thẳng phiếu 2
 >    ```
->    **Kỳ vọng:** cả hai lệnh `200 OK`; `my-queue` vẫn `[#1, #2]`, cả hai ca vẫn `WAITING`; mỗi lệnh phát một `PatientCalledEvent` `CALLED`. Gọi lại ca #1 (`…/1/call`) khi khách quay lại → `200 OK`, thứ tự không đổi. Gọi khi Bác sĩ đang có ca `IN_PROGRESS` → `409 CLIN_1302`; gọi ca của Bác sĩ khác → `403 CLIN_1311`.
+>    **Kỳ vọng:** cả hai lệnh `200 OK`; `my-queue` vẫn `[1, 2]`, cả hai phiếu vẫn `WAITING` và có `last_called_at`; mỗi lệnh phát một `PatientCalledEvent` `CALLED`. Gọi lại phiếu 1 (`…/queue-tickets/1/call`) khi khách quay lại → `200 OK`, thứ tự không đổi. Gọi khi Bác sĩ đang có ca `IN_PROGRESS` → `409 CLIN_1302`; gọi phiếu của Bác sĩ khác → `403 CLIN_1311`.
 > 3. Bác sĩ Tiến bắt đầu khám:
 >    ```bash
 >    curl -X POST http://localhost:8080/api/v1/clinical/pet-visits/1/start-exam \
@@ -372,19 +382,20 @@
 >      -d '{"weightAtVisit": 4.6, "temperature": 39.2, "clinicalNotes": "Niêm mạc nhợt, ấn đau vùng bụng"}'
 >    ```
 >    *(Tên trường JSON đúng theo DTO `StartExaminationRequest`; gửi sai tên, ví dụ `weight`, Jackson sẽ bỏ qua và cân nặng không được lưu.)*
-> 4. **Kết quả kỳ vọng:** `200 OK`, `status: "IN_PROGRESS"`; `SELECT * FROM service_invoices;` → 1 dòng `SINV-…`, `unit_price = 100000.00`, `payment_status = PENDING`. Bác sĩ An (id 3) gọi start-exam ca này → `403`, mã `CLIN_1311`.
+> 4. **Kết quả kỳ vọng:** `200 OK`, `status: "IN_PROGRESS"`; phiếu 1 `IN_SERVICE`; dịch vụ khám (detail 1) `IN_PROGRESS`; `service_invoices` vẫn 2 dòng (không lập thêm). Bác sĩ An (id 3) gọi start-exam ca này → `403`, mã `CLIN_1311`. Một ca vừa check-in chưa nộp phí khám gọi start-exam → `400 CLIN_1314`.
 
 ---
 
 ### Task 3.4: Chỉ định Dịch vụ, Lập Hóa đơn Dịch vụ & Tách hàng đợi Song song (Fork)
 - **Người thực hiện:** Lưu Minh Hiển (Phụ trách FR-30, FR-31, FR-32, FR-33, FR-34, UC-23, BR-19, BR-25, BR-33)
-- **Mục tiêu:** Mỗi dịch vụ được chỉ định sinh **đúng 1 hóa đơn dịch vụ** trong cùng giao dịch; chỉ định cận lâm sàng chuyển ca sang `WAITING_RESULTS` (T04) và giải phóng Bác sĩ.
+- **Mục tiêu:** Mỗi dịch vụ được chỉ định sinh **đúng 1 hóa đơn dịch vụ** trong cùng giao dịch; chỉ định cận lâm sàng chuyển ca sang `WAITING_RESULTS` (T04) và giải phóng Bác sĩ; khách **nộp tiền XN / CĐHA xong mới được phát phiếu phòng**.
 - [ ] **3.4.1** API Chỉ định cận lâm sàng (`POST /api/v1/clinical/pet-visits/{id}/paraclinical-orders`, body `{serviceIds, notes}`): chỉ nhận dịch vụ `LABORATORY` / `IMAGING`; yêu cầu đã có `weight_at_visit`, `temperature` (`CLIN_1308`) và không còn dịch vụ tại phòng dang dở (`CLIN_1309`).
-- [ ] **3.4.2** Trong **một giao dịch**: với mỗi dịch vụ tạo `visit_service_details` (`PENDING`, history `action = ORDERED`) **và** `service_invoices` (`PENDING`, snapshot `unit_price = services.price`, `vat_rate = services.vat_rate`, mã `SINV-YYYY-XXXX`); dịch vụ khám → `COMPLETED`; `pet_visits` → `WAITING_RESULTS` + lịch sử. (`visit_service_details` **không** chứa giá.)
-- [ ] **3.4.3** Dịch vụ tại phòng (tiêm, tẩy giun, thủ thuật – FR-30): `POST /api/v1/clinical/pet-visits/{id}/in-room-services` tạo chỉ định + hóa đơn `PENDING`; `POST /api/v1/clinical/service-details/{detailId}/perform` → `COMPLETED`.
-- [ ] **3.4.4** API Hủy dịch vụ (`POST /api/v1/clinical/service-details/{detailId}/cancel`, body `{"reason": "..."}`): dịch vụ `CANCELLED` **và hóa đơn của nó `CANCELLED`** cùng giao dịch; chặn nếu hóa đơn đã `PAID` (`CLIN_1310`).
-- [ ] **3.4.5** API Hủy ca / Chuyển viện GĐ 1 (`POST /api/v1/clinical/pet-visits/{id}/cancel-exam`, FR-34): chỉ khi **chưa có dịch vụ tại phòng nào `COMPLETED`** (ngược lại trả `400 CLIN_1305`, Bác sĩ phải chốt ca); hủy mọi dịch vụ của ca kèm hóa đơn, ca → `CANCELLED`, lý do vào lịch sử.
-- [ ] **3.4.6** Phát `PatientCalledEvent` hướng dẫn chủ nuôi sang khu cận lâm sàng (không còn `ServicesPrescribedEvent`).
+- [ ] **3.4.2** Trong **một giao dịch**: với mỗi dịch vụ tạo `visit_service_details` (`PENDING`, history `action = ORDERED`) **và** `service_invoices` (`PENDING`, snapshot `unit_price = services.price`, `vat_rate = services.vat_rate`, mã `SINV-YYYY-XXXX`); dịch vụ khám → `COMPLETED`; phiếu `DOCTOR` → `DONE`; `pet_visits` → `WAITING_RESULTS` + lịch sử. Dịch vụ CLS **chưa có phiếu** (hiện ở `cashier/pending?section=PARACLINIC`); ca cấp cứu thì phát phiếu phòng `priority = 2` ngay. (`visit_service_details` **không** chứa giá.)
+- [ ] **3.4.2b** Thu tiền CLS: `confirm-payment` với hóa đơn XN / CĐHA → `PAID` và `TicketIssuer` phát phiếu `LABORATORY` / `IMAGING` + `queue_ticket_items` (dịch vụ cùng phòng gộp một phiếu; đã có phiếu `WAITING` ở phòng đó thì thêm vào).
+- [ ] **3.4.3** Dịch vụ tại phòng (tiêm, tẩy giun, thủ thuật – FR-30): `POST /api/v1/clinical/pet-visits/{id}/in-room-services` tạo chỉ định + hóa đơn `PENDING` (không thu trước, không có phiếu); `POST /api/v1/clinical/service-details/{detailId}/perform` → `COMPLETED`.
+- [ ] **3.4.4** API Hủy dịch vụ (`POST /api/v1/clinical/service-details/{detailId}/cancel`, body `{"reason": "...", "reasonType": "CUSTOMER|CLINIC"}`): dịch vụ `CANCELLED`, rời phiếu; hóa đơn chưa thu → `CANCELLED`; đã thu + `CUSTOMER` → giữ `PAID`; đã thu + `CLINIC` (phòng khám không làm được) → `REFUNDED`; phí khám không bao giờ `REFUNDED` (`CLIN_1310`). Phiếu hết dịch vụ chờ → `CANCELLED`.
+- [ ] **3.4.5** API Hủy ca / Chuyển viện GĐ 1 (`POST /api/v1/clinical/pet-visits/{id}/cancel-exam`, FR-34): chỉ khi **chưa có dịch vụ tại phòng nào `COMPLETED`** (ngược lại trả `400 CLIN_1305`, Bác sĩ phải chốt ca); hủy mọi dịch vụ của ca, hủy hóa đơn chưa thu (phí khám đã thu giữ `PAID`), phiếu → `CANCELLED`, ca → `CANCELLED`, lý do vào lịch sử.
+- [ ] **3.4.6** Hướng dẫn chủ nuôi ra quầy nộp tiền rồi sang khu cận lâm sàng; phiếu phòng được phát kèm `QueueTicketIssuedEvent` (không còn `ServicesPrescribedEvent`).
 
 > **Hướng dẫn Kiểm thử Task 3.4:**
 > 1. Bác sĩ chỉ định xét nghiệm CBC (service 5) và X-quang (service 7):
@@ -395,9 +406,10 @@
 >    ```
 > 2. **Kết quả kỳ vọng:**
 >    - `200 OK`; ca `status: "WAITING_RESULTS"`; Bác sĩ 2 trở về `AVAILABLE`.
->    - `visit_service_details`: dòng 1 (khám) `COMPLETED`, dòng 2 (CBC) và 3 (X-quang) `PENDING`.
->    - `service_invoices`: 3 dòng `PENDING` với `unit_price` 100000.00 / 250000.00 / 180000.00.
+>    - `visit_service_details` của ca #1: dòng 1 (khám) `COMPLETED`, dòng 3 (CBC) và 4 (X-quang) `PENDING` (dòng 2 là dịch vụ khám của ca #2).
+>    - `service_invoices` của ca #1: hóa đơn 1 `PAID` (100000.00), hóa đơn 3, 4 `PENDING` (250000.00 / 180000.00); phiếu 1 `DONE`; `GET /lab-queue` và `/imaging-queue` **trống** (chưa nộp tiền).
 >    - `SELECT SUM(payable_amount) FROM v_service_invoice_amounts WHERE visit_id = 1;` → `530000.00`.
+> 2b. Thu tiền CLS: `confirm-payment` ca #1 với `{"invoiceIds": [3, 4]}` → hóa đơn 3, 4 `PAID`; phiếu 3 (`LABORATORY`, `ticket_no = 1`, item = detail 3) và phiếu 4 (`IMAGING`, `ticket_no = 1`, item = detail 4) `WAITING`; ca vẫn `WAITING_RESULTS`. Thu tiền hóa đơn dịch vụ làm tại phòng khi ca chưa chốt → `400 BILL_1409`.
 > 3. Thử chỉ định trên một ca chưa nhập cân nặng → `400`, mã `CLIN_1308`.
 
 ---
@@ -405,8 +417,8 @@
 ### Task 3.5: Phòng Xét nghiệm – Gọi số theo từng dòng, Lấy mẫu & Nhập Kết quả
 - **Người thực hiện:** Nguyễn Đức Khởi (Phụ trách FR-35, FR-37, FR-38, FR-39, FR-40, FR-41, UC-25, BR-23, BR-24, BR-34, EX-06, EX-07)
 - **Mục tiêu:** KTV Lab gọi số, lấy mẫu, nhập chỉ số; hệ thống lưu khoảng tham chiếu snapshot. Nhãn `LOW / NORMAL / HIGH` **tính khi hiển thị**, không lưu.
-- [ ] **3.5.1** API Hàng đợi Lab: `GET /api/v1/clinical/lab-queue` (dịch vụ `LABORATORY` `PENDING`, tự vào hàng đợi khi chỉ định; `ORDER BY is_emergency DESC, queue_order ASC`, chỉ mục `idx_vsd_queue`).
-- [ ] **3.5.2** API thao tác dịch vụ: `POST /api/v1/clinical/service-details/{id}/call` (gọi một ca bất kỳ trong hàng đợi phòng mình; chỉ phát `PatientCalledEvent`, giữ `PENDING`, không đổi `queue_order`), `POST /api/v1/clinical/lab-queue/call-next` và `/imaging-queue/call-next` (phím tắt gọi ca đứng đầu), `/start` (`PENDING → IN_PROGRESS`, `action = START_PROCESSING`), `/sample-collected` (`action = SAMPLE_COLLECTED`, giữ `IN_PROGRESS`). Các dịch vụ `PENDING` của **cùng một đợt khám trong cùng phòng** gộp thành một ca ở giao diện (gọi một lần, "Bắt đầu" cả ca). Khách vắng thì gọi ca khác, khách quay lại thì gọi lại (EX-06, EX-07), không cần API riêng. *(API `/service-details/{id}/skip` — Đẩy lùi 1 bậc — đã bị xóa.)*
+- [ ] **3.5.1** API Hàng đợi Lab: `GET /api/v1/clinical/lab-queue` (phiếu `LABORATORY` `WAITING` kèm các dịch vụ của phiếu; chỉ có khi khách đã nộp tiền; `ORDER BY priority DESC, issued_at, id`, chỉ mục `idx_qt_queue`).
+- [ ] **3.5.2** API thao tác: `POST /api/v1/clinical/queue-tickets/{id}/call` (gọi một phiếu bất kỳ của phòng mình; chỉ cập nhật `last_called_at` và phát `PatientCalledEvent`), `POST /api/v1/clinical/queue-tickets/call-next?queueType=LABORATORY|IMAGING` (phím tắt gọi phiếu đứng đầu), `POST /api/v1/clinical/queue-tickets/{id}/start` (phiếu → `IN_SERVICE`; mọi dịch vụ của phiếu `PENDING → IN_PROGRESS`, `action = START_PROCESSING`), `POST /api/v1/clinical/service-details/{id}/sample-collected` (`action = SAMPLE_COLLECTED`, giữ `IN_PROGRESS`). Dịch vụ cuối cùng của phiếu xong / hủy → phiếu `DONE`. Khách vắng thì gọi phiếu khác, khách quay lại thì gọi lại (EX-06, EX-07), không cần API riêng.
 - [ ] **3.5.3** API Nhập kết quả (`POST /api/v1/clinical/lab-results/{detailId}`), body `{"results": [{"labTestItemId": 2, "resultValue": 4.20}, …]}`:
   - Phải nhập đủ các chỉ số thuộc gói (`service_lab_test_items`).
   - Lưu `lab_test_results` (`result_value`, `min_value_snapshot`, `max_value_snapshot` theo loài của thú cưng, `performed_by`).
@@ -414,22 +426,23 @@
 - [ ] **3.5.4** API xem kết quả trả về thêm trường tính toán `evaluation` (enum `LabEvaluation`, không có cột trong CSDL).
 
 > **Hướng dẫn Kiểm thử Task 3.5:**
-> 1. KTV Lab bắt đầu và đánh dấu đã lấy mẫu cho dòng chỉ định #2:
+> 1. KTV Lab gọi phiếu 3, bắt đầu và đánh dấu đã lấy mẫu cho dòng chỉ định 3 (CBC):
 >    ```bash
->    curl -X POST http://localhost:8080/api/v1/clinical/service-details/2/start -H "Authorization: Bearer $TOKEN_LAB"
->    curl -X POST http://localhost:8080/api/v1/clinical/service-details/2/sample-collected -H "Authorization: Bearer $TOKEN_LAB"
+>    curl -X POST http://localhost:8080/api/v1/clinical/queue-tickets/3/call  -H "Authorization: Bearer $TOKEN_LAB"
+>    curl -X POST http://localhost:8080/api/v1/clinical/queue-tickets/3/start -H "Authorization: Bearer $TOKEN_LAB"
+>    curl -X POST http://localhost:8080/api/v1/clinical/service-details/3/sample-collected -H "Authorization: Bearer $TOKEN_LAB"
 >    ```
 > 2. Nhập 4 chỉ số cho mèo Lu (RBC = 4.20, ngưỡng mèo 5.00 – 10.00):
 >    ```bash
->    curl -X POST http://localhost:8080/api/v1/clinical/lab-results/2 \
+>    curl -X POST http://localhost:8080/api/v1/clinical/lab-results/3 \
 >      -H "Authorization: Bearer $TOKEN_LAB" -H "Content-Type: application/json" \
 >      -d '{"results": [{"labTestItemId": 1, "resultValue": 12.30}, {"labTestItemId": 2, "resultValue": 4.20},
 >                       {"labTestItemId": 3, "resultValue": 9.10},  {"labTestItemId": 4, "resultValue": 410.00}]}'
 >    ```
 > 3. **Kết quả kỳ vọng:**
 >    - `200 OK`; `lab_test_results` có 4 dòng; dòng RBC: `min_value_snapshot = 5.00`, `max_value_snapshot = 10.00` (bảng **không có** cột `evaluation`).
->    - `GET /api/v1/clinical/lab-results/2` trả RBC kèm `"evaluation": "LOW"`.
->    - Dòng chỉ định #2 `COMPLETED`; `visit_service_detail_histories` có các action `ORDERED`, `START_PROCESSING`, `SAMPLE_COLLECTED`, `COMPLETED`.
+>    - `GET /api/v1/clinical/lab-results/3` trả RBC kèm `"evaluation": "LOW"`.
+>    - Dòng chỉ định 3 `COMPLETED`, phiếu 3 `DONE`; `visit_service_detail_histories` có các action `ORDERED`, `START_PROCESSING`, `SAMPLE_COLLECTED`, `COMPLETED`.
 >    - Gửi thiếu chỉ số PLT → `400`, mã `SYS_1001`.
 
 ---
@@ -437,50 +450,51 @@
 ### Task 3.6: Phòng Chẩn đoán Hình ảnh – Huy hiệu liên phòng, Kết quả & Tệp đính kèm
 - **Người thực hiện:** Nguyễn Đức Khởi (Phụ trách FR-36, FR-42, UC-26, EX-09)
 - **Mục tiêu:** KTV CĐHA chụp X-quang / siêu âm, nhập mô tả, kết luận và tải ảnh. Thứ tự lưu đúng khóa ngoại: `imaging_results` trước, `imaging_attachments` sau.
-- [ ] **3.6.1** Huy hiệu liên phòng trên `GET /api/v1/clinical/imaging-queue`: `labStatus = SAMPLING` nếu dịch vụ Lab cùng ca `IN_PROGRESS` và `action` mới nhất `START_PROCESSING`; `labStatus = SAMPLE_COLLECTED` nếu đã lấy mẫu (EX-09).
+- [ ] **3.6.1** Huy hiệu liên phòng trên `GET /api/v1/clinical/imaging-queue` (danh sách phiếu `IMAGING` `WAITING`): `labStatus = SAMPLING` nếu dịch vụ Lab cùng ca `IN_PROGRESS` và `action` mới nhất `START_PROCESSING`; `labStatus = SAMPLE_COLLECTED` nếu đã lấy mẫu (EX-09).
 - [ ] **3.6.2** API Hoàn tất CĐHA **một request multipart** (`POST /api/v1/clinical/imaging-results/{detailId}`): trường `description`, `conclusion` và `files[]`. Trong một giao dịch: tạo `imaging_results` → lưu tệp vào volume `/app/uploads/imaging/` → tạo `imaging_attachments` trỏ tới `imaging_result_id` vừa tạo → dịch vụ `COMPLETED`. Lỗi lưu tệp thì rollback và xóa tệp đã ghi.
 - [ ] **3.6.3** Giới hạn định dạng `image/jpeg`, `image/png`, `application/dicom`; dung lượng tối đa mỗi tệp cấu hình ở `spring.servlet.multipart.max-file-size`.
 
 > **Hướng dẫn Kiểm thử Task 3.6:**
-> 1. KTV CĐHA hoàn tất X-quang cho dòng chỉ định #3:
+> 1. KTV CĐHA hoàn tất X-quang cho dòng chỉ định 4 (phiếu 4):
 >    ```bash
->    curl -X POST http://localhost:8080/api/v1/clinical/service-details/3/start -H "Authorization: Bearer $TOKEN_IMG"
->    curl -X POST http://localhost:8080/api/v1/clinical/imaging-results/3 \
+>    curl -X POST http://localhost:8080/api/v1/clinical/queue-tickets/4/start -H "Authorization: Bearer $TOKEN_IMG"
+>    curl -X POST http://localhost:8080/api/v1/clinical/imaging-results/4 \
 >      -H "Authorization: Bearer $TOKEN_IMG" \
 >      -F "description=Dạ dày giãn nhẹ, có hình ảnh cản quang nghi dị vật" \
 >      -F "conclusion=Nghi ngờ dị vật đường tiêu hóa đoạn môn vị" \
 >      -F "files=@xray_cat_001.jpg"
 >    ```
-> 2. **Kết quả kỳ vọng:** `200 OK`; `imaging_results` 1 dòng; `imaging_attachments` 1 dòng có `imaging_result_id` đúng; dòng chỉ định #3 `COMPLETED`.
+> 2. **Kết quả kỳ vọng:** `200 OK`; `imaging_results` 1 dòng; `imaging_attachments` 1 dòng có `imaging_result_id` đúng; dòng chỉ định 4 `COMPLETED`, phiếu 4 `DONE`.
 > 3. EX-09: trước khi Lab bấm "Đã lấy mẫu", `imaging-queue` hiển thị `labStatus: "SAMPLING"`.
 
 ---
 
-### Task 3.7: Hợp nhất Kết quả (Join) & Đưa ca lên đầu hàng đợi Bác sĩ
+### Task 3.7: Hợp nhất Kết quả (Join) & Phát phiếu ưu tiên cho Bác sĩ
 - **Người thực hiện:** Lưu Minh Hiển (Phụ trách FR-23, FR-43, FR-44, BR-11, EX-05, EX-08)
-- **Mục tiêu:** Khi mọi dịch vụ cận lâm sàng của ca đã `COMPLETED` hoặc `CANCELLED`, chuyển ca `RESULTS_READY` (T06) và đưa ca lên đầu hàng đợi của Bác sĩ khám chính.
+- **Mục tiêu:** Khi mọi dịch vụ cận lâm sàng của ca đã `COMPLETED` hoặc `CANCELLED`, chuyển ca `RESULTS_READY` (T06) và phát phiếu `DOCTOR` ưu tiên (`priority = 1`, không thu tiền) cho Bác sĩ khám chính.
 - [ ] **3.7.1** Sau mỗi lần lưu kết quả / hủy dịch vụ: nếu không còn dịch vụ `LABORATORY` / `IMAGING` nào `PENDING` hoặc `IN_PROGRESS` → `pet_visits.status = RESULTS_READY`, lịch sử `changed_by_user_id = NULL`.
 - [ ] **3.7.2** Phát `ParaclinicalResultsReadyEvent` (routing key `visit.results_ready`) sau commit.
-- [ ] **3.7.3** Đặt `queue_order = findMinQueueOrder(doctorId) − 1` trong cùng giao dịch T06: ca đứng đầu hàng đợi Bác sĩ, chỉ sau ca cấp cứu (FR-23). Lễ tân vẫn xếp ca mới vào hàng đợi Bác sĩ này bình thường.
+- [ ] **3.7.3** Gọi `ticketIssuer.issueResultsReady(visit)` trong cùng giao dịch T06: phiếu `DOCTOR` mới `priority = 1`, `issued_by = NULL`; đứng đầu hàng đợi Bác sĩ, chỉ sau phiếu cấp cứu (FR-23). Lễ tân vẫn xếp ca mới vào hàng đợi Bác sĩ này bình thường.
 
 > **Hướng dẫn Kiểm thử Task 3.7:**
 > 1. Sau Task 3.5 và 3.6: `SELECT status FROM pet_clinic_clinical_db.pet_visits WHERE id = 1;` → `RESULTS_READY`.
-> 2. `GET /pet-visits/my-queue` (Bác sĩ 2) → ca #1 (`RESULTS_READY`) đứng đầu, trước ca #2 (`WAITING`). Xếp thêm một ca mới vào hàng đợi Bác sĩ 2 → `200 OK`, ca mới đứng sau ca #1 (EX-05).
-> 3. EX-08: tạo ca khác chỉ định CBC + Siêu âm, hủy Siêu âm khi CBC đã xong → ca chuyển `RESULTS_READY`; hóa đơn Siêu âm `CANCELLED`, hóa đơn CBC vẫn `PENDING`.
+> 2. `queue_tickets` có phiếu 5 (`DOCTOR`, ca #1, `priority = 1`, `doctor_id = 2`, `issued_by = NULL`). `GET /pet-visits/my-queue` (Bác sĩ 2) → phiếu 5 (ca #1) đứng đầu, trước phiếu 2 (ca #2). Xếp thêm một ca mới (đã nộp phí) vào hàng đợi Bác sĩ 2 → `200 OK`, phiếu mới đứng sau phiếu 5 (EX-05).
+> 3. EX-08: tạo ca khác chỉ định CBC + Siêu âm, nộp tiền cả hai; CBC xong rồi hủy Siêu âm với `reasonType = CUSTOMER` → ca chuyển `RESULTS_READY`; hóa đơn Siêu âm **giữ `PAID`** (không hoàn). Lặp lại với `reasonType = CLINIC` → hóa đơn Siêu âm `REFUNDED`. Nếu khách chỉ nộp tiền CBC, hủy Siêu âm ở quầy → hóa đơn Siêu âm `CANCELLED`.
 
 ---
 
 ### Task 3.8: Bắt đầu Giai đoạn 2, Đóng ca, Chốt Ca & Mở lại Hồ sơ
 - **Người thực hiện:** Lưu Minh Hiển (Phụ trách FR-45, FR-46, FR-48, FR-49, FR-50, FR-54, UC-30, UC-33, EX-11, EX-12)
 - **Mục tiêu:** Bác sĩ đón ca có kết quả, chẩn đoán, chốt ca (`WAITING_PAYMENT`); xử lý khách vắng / bỏ về và mở lại hồ sơ.
-- [ ] **3.8.1** API Bắt đầu Giai đoạn 2 (`POST /api/v1/clinical/pet-visits/{id}/start-phase2`, T07): Bác sĩ gọi ca bằng `call-next` (Task 3.3.2c, ca có kết quả đứng đầu); khi thú cưng vào phòng gọi API này: ca `RESULTS_READY` thuộc hàng đợi của Bác sĩ, Bác sĩ không có ca `IN_PROGRESS` (`CLIN_1302`); → `IN_PROGRESS` + lịch sử.
-- [ ] **3.8.2** Khách vắng mặt khi gọi ca có kết quả (EX-10): dùng chung API `skip` (Task 3.3.2d); ca giữ `RESULTS_READY`. Không còn API `postpone-callback` và tab "ca đã hoãn" (bỏ T13).
-- [ ] **3.8.3** API Đóng ca / Khách bỏ về (`POST /api/v1/clinical/pet-visits/{id}/abandon`, T08 / T12, EX-11, FR-45, FR-48): áp dụng cho `RESULTS_READY` hoặc `WAITING_RESULTS` (không có dịch vụ đang `IN_PROGRESS`); dịch vụ còn `PENDING` → `CANCELLED` kèm hóa đơn; **không tạo hóa đơn mới** – hóa đơn của dịch vụ đã làm giữ `PENDING` làm công nợ; ca → `COMPLETED`.
-- [ ] **3.8.4** API Chốt đợt khám (`POST /api/v1/clinical/pet-visits/{id}/close-visit`, T05 / T09): body `{diagnosis, treatmentPlan, doctorAdvice}`; chặn khi thiếu chẩn đoán (`CLIN_1307`, EX-12) hoặc còn dịch vụ tại phòng chưa xử lý (`CLIN_1309`); → `WAITING_PAYMENT` + lịch sử (**không có cột `closed_at`**); không lập thêm hóa đơn; không phát sự kiện sang billing.
+- [ ] **3.8.1** API Bắt đầu Giai đoạn 2 (`POST /api/v1/clinical/pet-visits/{id}/start-phase2`, T07): Bác sĩ gọi phiếu bằng `queue-tickets/call-next?queueType=DOCTOR` (phiếu ưu tiên đứng đầu); khi thú cưng vào phòng gọi API này: ca `RESULTS_READY` có phiếu `DOCTOR` `WAITING` thuộc Bác sĩ, Bác sĩ không có ca `IN_PROGRESS` (`CLIN_1302`); phiếu → `IN_SERVICE`, ca → `IN_PROGRESS` + lịch sử.
+- [ ] **3.8.2** Khách vắng mặt khi gọi ca có kết quả (EX-10): gọi phiếu khác bằng `queue-tickets/{id}/call` (Task 3.3.2c); ca giữ `RESULTS_READY`, phiếu giữ vị trí. Không còn API `skip`, `postpone-callback` và tab "ca đã hoãn" (bỏ T13).
+- [ ] **3.8.3** API Đóng ca / Khách bỏ về (`POST /api/v1/clinical/pet-visits/{id}/abandon`, T08 / T12, EX-11, FR-45, FR-48): áp dụng cho `RESULTS_READY` hoặc `WAITING_RESULTS` (không có dịch vụ đang `IN_PROGRESS`); dịch vụ còn `PENDING` → `CANCELLED` (hóa đơn chưa thu → `CANCELLED`, đã thu giữ `PAID`); phiếu `WAITING` → `CANCELLED`; **không tạo hóa đơn mới, không hoàn tiền** – hóa đơn của dịch vụ đã làm mà chưa thu (ca cấp cứu) giữ `PENDING` làm công nợ; ca → `COMPLETED`.
+- [ ] **3.8.4** API Chốt đợt khám (`POST /api/v1/clinical/pet-visits/{id}/close-visit`, T05 / T09): body `{diagnosis, treatmentPlan, doctorAdvice}`; chặn khi thiếu chẩn đoán (`CLIN_1307`, EX-12) hoặc còn dịch vụ tại phòng chưa xử lý (`CLIN_1309`); → phiếu `DONE`, `WAITING_PAYMENT` + lịch sử (**không có cột `closed_at`**); không lập thêm hóa đơn; không phát sự kiện sang billing.
 - [ ] **3.8.5** API Mở lại hồ sơ (`POST /api/v1/clinical/pet-visits/{id}/reopen`, T14): Bác sĩ phụ trách hoặc ADMIN, lý do bắt buộc; `WAITING_PAYMENT → IN_PROGRESS`.
 
 > **Hướng dẫn Kiểm thử Task 3.8:**
-> 1. Bác sĩ gọi số rồi đón ca #1: `curl -X POST …/pet-visits/call-next -H "Authorization: Bearer $TOKEN_VET"` (trả ca #1), sau đó `curl -X POST …/pet-visits/1/start-phase2 -H "Authorization: Bearer $TOKEN_VET"` → `IN_PROGRESS`.
+> 1. Bác sĩ gọi số rồi đón ca #1: `curl -X POST "…/queue-tickets/call-next?queueType=DOCTOR" -H "Authorization: Bearer $TOKEN_VET"` (trả phiếu 5), sau đó `curl -X POST …/pet-visits/1/start-phase2 -H "Authorization: Bearer $TOKEN_VET"` → `IN_PROGRESS`, phiếu 5 `IN_SERVICE`.
+> 1b. Dịch vụ làm tại phòng ở GĐ 2 (không thu trước): `POST …/pet-visits/1/in-room-services` với `{"serviceIds": [4]}` (Tẩy giun 50.000) → detail 5 + hóa đơn 5 `PENDING`, không có phiếu; `POST …/service-details/5/perform` → `COMPLETED`.
 > 2. Bấm chốt khi chưa có chẩn đoán → `400`, mã `CLIN_1307`.
 > 3. Chốt chuyên môn (đơn thuốc đã lưu ở Task 4.2):
 >    ```bash
@@ -490,28 +504,28 @@
 >           "treatmentPlan": "Gel tiêu lông, bù nước điện giải, kháng sinh 5 ngày",
 >           "doctorAdvice": "Theo dõi phân; nếu tiếp tục nôn phải tái khám ngay"}'
 >    ```
-> 4. **Kết quả kỳ vọng:** `200 OK`, `status: "WAITING_PAYMENT"`; mọi API sửa chuyên môn trên ca #1 trả `400 CLIN_1305`; `service_invoices` vẫn 3 dòng `PENDING`.
-> 5. EX-10: với một ca `RESULTS_READY` khác, `call-next` rồi `…/{id}/call` ở ca khác → ca vắng vẫn `RESULTS_READY` và giữ nguyên vị trí (đứng đầu); Bác sĩ vẫn `AVAILABLE`.
+> 4. **Kết quả kỳ vọng:** `200 OK`, `status: "WAITING_PAYMENT"`; phiếu 5 `DONE`; mọi API sửa chuyên môn trên ca #1 trả `400 CLIN_1305`; hóa đơn của ca #1: 1, 3, 4 `PAID`, hóa đơn 5 (tẩy giun) `PENDING`.
+> 5. EX-10: với một ca `RESULTS_READY` khác, `call-next` rồi `…/queue-tickets/{id}/call` ở phiếu khác → ca vắng vẫn `RESULTS_READY`, phiếu giữ nguyên vị trí (đứng đầu); Bác sĩ vẫn `AVAILABLE`.
 
 ---
 
 ### Task 3.9: Thu tiền Hóa đơn Dịch vụ & Hoàn tất Ca khám (`clinical-service`)
 - **Người thực hiện:** Lưu Minh Hiển (Phụ trách FR-55, FR-56, FR-57, FR-58, FR-59, FR-60, UC-34, UC-35, BR-27, BR-28, EX-14)
-- **Mục tiêu:** Thu ngân thu tiền các hóa đơn dịch vụ; khi mọi hóa đơn dịch vụ `PAID` / `CANCELLED`, ca `COMPLETED` **trong cùng giao dịch cục bộ** (T10). Không phụ thuộc việc mua thuốc.
-- [ ] **3.9.1** API Bảng kê (`GET /api/v1/clinical/pet-visits/{id}/service-invoices`): danh sách hóa đơn + số tiền từ VIEW `v_service_invoice_amounts`, tổng cần thu = tổng các hóa đơn `PENDING`. Danh sách ca chờ thu: `GET /api/v1/clinical/pet-visits?status=WAITING_PAYMENT` và `GET /api/v1/clinical/pet-visits/with-debt` (ca `COMPLETED` còn hóa đơn `PENDING`).
+- **Mục tiêu:** Thu ngân thu các hóa đơn dịch vụ còn lại khi chốt ca (chủ yếu dịch vụ làm tại phòng; phí khám, XN, CĐHA đã thu ở Task 3.2, 3.4); khi mọi hóa đơn dịch vụ `PAID` / `CANCELLED` / `REFUNDED`, ca `COMPLETED` **trong cùng giao dịch cục bộ** (T10). Không phụ thuộc việc mua thuốc.
+- [ ] **3.9.1** API Bảng kê (`GET /api/v1/clinical/pet-visits/{id}/service-invoices`): danh sách hóa đơn + số tiền từ VIEW `v_service_invoice_amounts`, tổng cần thu = tổng các hóa đơn `PENDING`. Danh sách ca chờ thu cuối ca: `GET /api/v1/clinical/cashier/pending?section=FINAL` (ca `WAITING_PAYMENT`) và `GET /api/v1/clinical/pet-visits/with-debt` (ca `COMPLETED` còn hóa đơn `PENDING`).
 - [ ] **3.9.2** API Giảm giá (`POST /api/v1/clinical/service-invoices/{id}/discount`, body `{"discountAmount": 30000}`): `discountAmount ≤ quantity × unit_price × (1 + vat_rate)` của **chính hóa đơn đó** (`BILL_1402`, EX-14).
-- [ ] **3.9.3** API Xác nhận thanh toán (`POST /api/v1/clinical/pet-visits/{id}/service-invoices/confirm-payment`, body `{"invoiceIds": [...]}`, Quy chuẩn 8.3): ca phải `WAITING_PAYMENT` hoặc `COMPLETED` có công nợ (`BILL_1409`); hóa đơn `PAID`, `paid_at`, `cashier_id`; mọi `invoiceIds` phải thuộc ca (`BILL_1401`), đang `PENDING` (`BILL_1403` nếu đã thu, `BILL_1408` nếu đã hủy); `@Version` chống thu trùng (`SYS_1005`); nếu hết hóa đơn `PENDING` và ca `WAITING_PAYMENT` → `COMPLETED` + lịch sử; phát `VisitCompletedEvent`. Không lưu phương thức thanh toán (FR-57).
+- [ ] **3.9.3** API Xác nhận thanh toán (`POST /api/v1/clinical/pet-visits/{id}/service-invoices/confirm-payment`, body `{"invoiceIds": [...]}`, Quy chuẩn 8.3): dịch vụ thu trước (`requires_prepayment`) thu được bất cứ lúc nào và phát phiếu; dịch vụ làm tại phòng chỉ thu khi ca `WAITING_PAYMENT` hoặc `COMPLETED` có công nợ (`BILL_1409`); hóa đơn `PAID`, `paid_at`, `cashier_id`; mọi `invoiceIds` phải thuộc ca (`BILL_1401`), đang `PENDING` (`BILL_1403` nếu đã thu, `BILL_1408` nếu đã hủy); `@Version` chống thu trùng (`SYS_1005`); nếu hết hóa đơn `PENDING` và ca `WAITING_PAYMENT` → `COMPLETED` + lịch sử; phát `VisitCompletedEvent`. Không lưu phương thức thanh toán (FR-57).
 - [ ] **3.9.4** API in phiếu tạm tính / phiếu thu (FR-58).
 
 > **Hướng dẫn Kiểm thử Task 3.9:**
-> 1. Xem bảng kê ca #1: `curl http://localhost:8080/api/v1/clinical/pet-visits/1/service-invoices -H "Authorization: Bearer $TOKEN_REC"` → 3 hóa đơn, tổng `530000.00`.
-> 2. Giảm giá 300.000 cho hóa đơn X-quang (180.000) → `400`, mã `BILL_1402`.
+> 1. Xem bảng kê ca #1: `curl http://localhost:8080/api/v1/clinical/pet-visits/1/service-invoices -H "Authorization: Bearer $TOKEN_REC"` → 4 hóa đơn (1, 3, 4 `PAID`; 5 `PENDING`), cần thu `50000.00`.
+> 2. Giảm giá 300.000 cho hóa đơn tẩy giun (50.000) → `400`, mã `BILL_1402`.
 > 3. Thanh toán:
 >    ```bash
 >    curl -X POST http://localhost:8080/api/v1/clinical/pet-visits/1/service-invoices/confirm-payment \
->      -H "Authorization: Bearer $TOKEN_REC" -H "Content-Type: application/json" -d '{"invoiceIds": [1, 2, 3]}'
+>      -H "Authorization: Bearer $TOKEN_REC" -H "Content-Type: application/json" -d '{"invoiceIds": [5]}'
 >    ```
-> 4. **Kết quả kỳ vọng:** `200 OK`; 3 hóa đơn `PAID` (`cashier_id = 5`); `pet_visits.status = COMPLETED` ngay trong cùng phản hồi; lịch sử có dòng `WAITING_PAYMENT → COMPLETED`.
+> 4. **Kết quả kỳ vọng:** `200 OK`; hóa đơn 5 `PAID` (`cashier_id = 5`); cả 4 hóa đơn của ca #1 đã `PAID` → `pet_visits.status = COMPLETED` ngay trong cùng phản hồi; không phát thêm phiếu; lịch sử có dòng `WAITING_PAYMENT → COMPLETED`.
 > 5. Gửi lại cùng request → `409`, mã `BILL_1403`.
 
 ---
@@ -609,7 +623,7 @@
 - **Mục tiêu:** Lắng nghe sự kiện trên exchange `clinic.events`, đẩy thông báo realtime qua WebSocket STOMP và gửi Email. Không dùng SMS.
 - [ ] **5.1.1** Cấu hình STOMP Broker (`/topic/lobby`, `/topic/doctor/{id}`, `/topic/lab`, `/topic/imaging`, `/topic/admin`, `/user/queue/notifications`).
 - [ ] **5.1.2** Listener `AppointmentBookedEvent`, `AppointmentStatusChangedEvent`, `AppointmentNoShowEvent` → Email / thông báo Portal cho chủ nuôi.
-- [ ] **5.1.3** Listener `VisitCheckedInEvent`, `PatientCalledEvent` → cập nhật bảng hàng đợi và màn hình gọi số ở sảnh.
+- [ ] **5.1.3** Listener `VisitCheckedInEvent` (mục chờ thu phí khám), `QueueTicketIssuedEvent` (làm mới hàng đợi Bác sĩ / Lab / CĐHA, gửi số phiếu cho chủ nuôi), `PatientCalledEvent` → màn hình gọi số ở sảnh.
 - [ ] **5.1.4** Listener `ParaclinicalResultsReadyEvent` → huy hiệu "Có kết quả" và làm mới hàng đợi trên `/topic/doctor/{doctorId}`.
 - [ ] **5.1.5** Listener `VisitCompletedEvent`, `MedicineInvoicePaidEvent` → gửi phiếu thu / hóa đơn thuốc điện tử; `MedicineLowStockEvent` → cảnh báo `/topic/admin`.
 
@@ -628,8 +642,8 @@
 - [ ] **5.2.3** Route Guards:
   - Chưa đăng nhập: trang chủ, bảng giá dịch vụ, tra cứu khung giờ trống, đăng nhập / đăng ký.
   - `PET_OWNER`: thú cưng của tôi, đặt lịch, lịch hẹn, bệnh án, đơn thuốc (in để mua ngoài).
-  - `RECEPTIONIST`: tiếp đón, xếp ca vào hàng đợi riêng của Bác sĩ, thu tiền hóa đơn dịch vụ, công nợ, bán thuốc theo đơn.
-  - `VETERINARIAN`: màn hình khám 2 pha, ca chờ tái khám / đã hoãn, kê đơn.
+  - `RECEPTIONIST`: tiếp đón, xếp ca vào hàng đợi riêng của Bác sĩ, thu phí khám / tiền XN, CĐHA (phát phiếu), thu hóa đơn cuối ca, công nợ, hoàn tiền, bán thuốc theo đơn.
+  - `VETERINARIAN`: màn hình khám 2 pha, danh sách phiếu (nút "Gọi", "Bắt đầu"), kê đơn.
   - `LAB_TECHNICIAN` / `IMAGING_TECHNICIAN`: hàng đợi và nhập kết quả phòng mình.
   - `ADMIN`: tài khoản, danh mục, kho, báo cáo doanh thu (2 nguồn) & công nợ.
 
@@ -644,10 +658,10 @@
 - **Người thực hiện:** Vũ Hồng Linh
 - **Mục tiêu:** Hiện thực hóa bản vẽ Figma, gắn API Backend qua Gateway :8080.
 - [ ] **5.3.1** Cổng Đặt lịch (Customer Portal): chọn ngày → tải khung giờ trống → chọn thú cưng → nhập triệu chứng → nhận mã hẹn.
-- [ ] **5.3.2** Tiếp đón Lễ tân: lịch hẹn trong ngày, nút Check-in một chạm (chọn Bác sĩ theo gợi ý), tiếp nhận vãng lai, **bảng điều phối**: danh sách chờ phân công + một cột hàng đợi cho mỗi Bác sĩ (trạng thái, số người chờ, ca cấp cứu), nút Xếp / Chuyển / Gỡ phân công luôn dùng được.
-- [ ] **5.3.3** Bệnh án Bác sĩ 2 Pha: GĐ 1 (sinh hiệu, ghi chú, dịch vụ tại phòng, chỉ định CLS) → kết quả Lab / CĐHA tô màu Vàng / Xanh / Đỏ → đơn thuốc (cảnh báo tồn kho) → chốt ca; màn hình hàng đợi của Bác sĩ với nút "Gọi" / "Bắt đầu khám" trên từng ca (phím tắt "Gọi số tiếp theo"); nút mở lại hồ sơ.
-- [ ] **5.3.4** Hàng đợi Cận lâm sàng: nút "Gọi" / "Gọi lại" trên từng ca (phím tắt "Gọi số tiếp theo"), bắt đầu cả ca, "Đã lấy mẫu", form nhập chỉ số theo gói, form CĐHA multipart, huy hiệu liên phòng.
-- [ ] **5.3.5** Thu ngân: bảng kê hóa đơn dịch vụ (giảm giá từng hóa đơn, xác nhận thanh toán, in phiếu thu, thu công nợ) và màn hình **Bán thuốc theo đơn** (chọn thuốc / số lượng khách mua, hóa đơn thuốc, xác nhận thanh toán & xuất thuốc, in đơn cho khách mua ngoài).
+- [ ] **5.3.2** Tiếp đón Lễ tân: lịch hẹn trong ngày, nút Check-in một chạm (chọn Bác sĩ theo gợi ý), tiếp nhận vãng lai, **bảng điều phối**: mục chờ thu phí khám + danh sách chờ phân công + một cột hàng đợi (phiếu) cho mỗi Bác sĩ (trạng thái, số phiếu chờ, phiếu cấp cứu), nút Xếp / Chuyển / Gỡ phân công luôn dùng được.
+- [ ] **5.3.3** Bệnh án Bác sĩ 2 Pha: GĐ 1 (sinh hiệu, ghi chú, dịch vụ tại phòng, chỉ định CLS) → kết quả Lab / CĐHA tô màu Vàng / Xanh / Đỏ → đơn thuốc (cảnh báo tồn kho) → chốt ca; màn hình hàng đợi của Bác sĩ với số phiếu, giờ gọi và nút "Gọi" / "Bắt đầu" trên từng phiếu (phím tắt "Gọi số tiếp theo"); nút mở lại hồ sơ.
+- [ ] **5.3.4** Hàng đợi Cận lâm sàng: chỉ hiện phiếu đã nộp tiền; nút "Gọi" / "Gọi lại" trên từng phiếu (phím tắt "Gọi số tiếp theo"), bắt đầu cả phiếu, "Đã lấy mẫu", form nhập chỉ số theo gói, form CĐHA multipart, huy hiệu liên phòng.
+- [ ] **5.3.5** Thu ngân: 3 mục (chờ thu phí khám / chờ thu tiền CLS / chờ thanh toán cuối ca), bảng kê hóa đơn dịch vụ (giảm giá từng hóa đơn, xác nhận thanh toán, **in phiếu số thứ tự**, in phiếu thu, thu công nợ, hoàn tiền) và màn hình **Bán thuốc theo đơn** (chọn thuốc / số lượng khách mua, hóa đơn thuốc, xác nhận thanh toán & xuất thuốc, in đơn cho khách mua ngoài).
 
 > **Hướng dẫn Kiểm thử Task 5.3:**
 > 1. Thao tác trọn vẹn luồng Đặt lịch → Tiếp đón → Khám → Thanh toán dịch vụ → (tùy chọn) Mua thuốc trên giao diện.
@@ -660,17 +674,17 @@
 - **Mục tiêu:** Kiểm thử xuyên suốt một ca khám thực tế từ A đến Z với dữ liệu demo.
 - [ ] **5.4.1** Bước 1: Chủ nuôi `khach_lan` đặt lịch cho mèo Lu lúc 09:00 ngày khám trên Web Portal → `PENDING`.
 - [ ] **5.4.2** Bước 2: Lễ tân duyệt lịch → `CONFIRMED`.
-- [ ] **5.4.3** Bước 3: Đúng ngày, Lễ tân bấm Check-in (không cân đo) → ca `WAITING`; lịch hẹn tự chuyển `CHECKED_IN` qua sự kiện.
-- [ ] **5.4.4** Bước 4: Lễ tân xếp ca vào hàng đợi Bác sĩ Tiến (P101, gợi ý vì đang 0 người chờ) → Bác sĩ Tiến bấm "Gọi số tiếp theo", màn hình sảnh gọi mèo Lu.
-- [ ] **5.4.5** Bước 5: Bác sĩ bấm "Bắt đầu khám" (hệ thống tạo hóa đơn phí khám 100.000), cân 4,6 kg, đo 39,2°C, chỉ định CBC + X-quang (2 hóa đơn 250.000 và 180.000) → ca `WAITING_RESULTS`, Bác sĩ `AVAILABLE`.
-- [ ] **5.4.6** Bước 6: KTV Lab lấy mẫu, bấm "Đã lấy mẫu", nhập 4 chỉ số → KTV CĐHA chụp X-quang, nhập kết luận và tải ảnh.
-- [ ] **5.4.7** Bước 7: Ca `RESULTS_READY`, tự lên đầu hàng đợi Bác sĩ Tiến → Bác sĩ "Gọi số tiếp theo", bấm "Bắt đầu GĐ 2", kê 10 viên Clavamox, chốt chuyên môn → `WAITING_PAYMENT`.
-- [ ] **5.4.8** Bước 8: Thu ngân xác nhận thanh toán **3 hóa đơn dịch vụ, tổng 530.000đ** → 3 hóa đơn `PAID`, **ca khám `COMPLETED` ngay**, dữ liệu vào lịch sử bệnh án.
+- [ ] **5.4.3** Bước 3: Đúng ngày, Lễ tân bấm Check-in (không cân đo), chọn Bác sĩ Tiến (P101, gợi ý vì đang 0 người chờ) → ca `WAITING`, hóa đơn phí khám 100.000 `PENDING`; lịch hẹn tự chuyển `CHECKED_IN` qua sự kiện. Màn hình Bác sĩ **chưa thấy** mèo Lu.
+- [ ] **5.4.4** Bước 4: Khách nộp phí khám 100.000 → hệ thống in **phiếu P101 – số 001**, mèo Lu xuất hiện trong hàng đợi Bác sĩ Tiến → Bác sĩ bấm "Gọi số tiếp theo", màn hình sảnh gọi số 001.
+- [ ] **5.4.5** Bước 5: Bác sĩ bấm "Bắt đầu" (phiếu `IN_SERVICE`), cân 4,6 kg, đo 39,2°C, chỉ định CBC + X-quang (2 hóa đơn 250.000 và 180.000) → ca `WAITING_RESULTS`, Bác sĩ `AVAILABLE`; phòng Lab / CĐHA **chưa thấy** ca.
+- [ ] **5.4.6** Bước 6: Khách nộp 430.000 → in phiếu **Xét nghiệm số 001** và **CĐHA số 001**; KTV Lab gọi, lấy mẫu, bấm "Đã lấy mẫu", nhập 4 chỉ số → KTV CĐHA gọi, chụp X-quang, nhập kết luận và tải ảnh.
+- [ ] **5.4.7** Bước 7: Ca `RESULTS_READY`, hệ thống phát **phiếu ưu tiên** cho Bác sĩ Tiến (không thu tiền) → Bác sĩ "Gọi số tiếp theo", bấm "Bắt đầu GĐ 2", cho tẩy giun tại phòng (50.000, làm ngay không thu trước), kê 10 viên Clavamox, chốt chuyên môn → `WAITING_PAYMENT`.
+- [ ] **5.4.8** Bước 8: Thu ngân xác nhận thanh toán **hóa đơn tẩy giun 50.000đ** (3 hóa đơn còn lại đã thu trước, tổng dịch vụ 580.000đ) → **ca khám `COMPLETED` ngay**, dữ liệu vào lịch sử bệnh án.
 - [ ] **5.4.9** Bước 9 (tùy chọn): Khách chọn mua thuốc tại phòng khám → hóa đơn thuốc **157.500đ** (10 × 15.000 × 1,05) → xác nhận thanh toán & xuất thuốc → hóa đơn thuốc `PAID`, tồn kho Clavamox 200 → 190, có dòng `EXPORT_SALE -10`. *(Biến thể: khách mua ngoài → in đơn thuốc, không có hóa đơn thuốc, kho không đổi, ca vẫn `COMPLETED`.)*
 
 > **Hướng dẫn Kiểm thử Task 5.4:**
 > 1. Thực hiện 9 bước trên trình duyệt, đối chiếu CSDL sau mỗi bước.
-> 2. **Kết quả kỳ vọng:** không lỗi 500; doanh thu dịch vụ hôm đó (`v_service_invoice_amounts`, `PAID`) = 530.000; doanh thu thuốc (`v_medicine_invoice_amounts`, `PAID`) = 157.500 (hoặc 0 ở biến thể mua ngoài).
+> 2. **Kết quả kỳ vọng:** không lỗi 500; doanh thu dịch vụ hôm đó (`v_service_invoice_amounts`, `PAID`) = 580.000 (khám 100.000 + CBC 250.000 + X-quang 180.000 + tẩy giun 50.000; hóa đơn `REFUNDED` không tính); doanh thu thuốc (`v_medicine_invoice_amounts`, `PAID`) = 157.500 (hoặc 0 ở biến thể mua ngoài).
 
 ---
 
@@ -678,16 +692,16 @@
 - **Người thực hiện:** Cả nhóm (Hiển, Khởi, Linh)
 - **Mục tiêu:** Chứng minh hệ thống xử lý đúng mọi ngoại lệ theo `TONG_HOP_NGOAI_LE_VA_XU_LY_HE_THONG.md` v3.0.
 - [ ] **5.5.1 [EX-01]** Lịch `CONFIRMED` quá `start_time + 30'` chưa check-in → tự chuyển `NO_SHOW`, lịch sử `changed_by_user_id = NULL`, khung giờ được giải phóng.
-- [ ] **5.5.2 [EX-02]** Khách vãng lai → check-in với `appointmentId = null`, ca `WAITING`.
-- [ ] **5.5.3 [EX-03]** Khách bỏ về khi đang chờ → `CANCELLED`, lý do trong `pet_visit_status_histories.notes`; ca rời khỏi hàng đợi Bác sĩ, người phía sau lên một bậc.
-- [ ] **5.5.4 [EX-04]** Ca cấp cứu → `is_emergency = true`, lên đầu danh sách chờ phân công, đầu hàng đợi Bác sĩ và hàng đợi Lab / CĐHA; gọi ca khác khi khách vắng thì ca cấp cứu vẫn giữ ưu tiên và cảnh báo đỏ.
-- [ ] **5.5.5 [EX-05]** Xếp ca mới vào hàng đợi Bác sĩ đang có ca vừa có kết quả → `200 OK`, ca có kết quả vẫn đứng đầu và được gọi trước.
-- [ ] **5.5.6 [EX-06]** Vắng mặt khi gọi vào Lab / CĐHA → KTV bấm `…/service-details/{id}/call` ở ca khác; dịch vụ ca vắng giữ `PENDING` và giữ nguyên vị trí (không đổi `queue_order`, không ghi lịch sử), thông báo ứng dụng (không SMS).
-- [ ] **5.5.7 [EX-07]** Khách quay lại sau khi vắng → KTV bấm `call` lại ở đúng ca đó, sau đó `start` → `IN_PROGRESS`.
-- [ ] **5.5.8 [EX-08]** Hủy 1 dịch vụ CLS → dịch vụ và **hóa đơn của nó `CANCELLED`**; dịch vụ còn lại xong → ca `RESULTS_READY`.
-- [ ] **5.5.9 [EX-09]** CĐHA gọi khi Lab chưa bấm "Đã lấy mẫu" → huy hiệu `SAMPLING`; CĐHA `call` ca khác, thú cưng sang thì `call` lại.
-- [ ] **5.5.10 [EX-10]** Bác sĩ gọi số (ca `WAITING` hoặc `RESULTS_READY`) nhưng khách vắng → `…/pet-visits/{id}/call` ở ca khác, ca vắng giữ trạng thái và vị trí, Bác sĩ vẫn `AVAILABLE`.
-- [ ] **5.5.11 [EX-11]** Khách bỏ về (ở `WAITING_RESULTS` hoặc `RESULTS_READY`) → `abandon`: dịch vụ chưa làm hủy kèm hóa đơn, hóa đơn dịch vụ đã làm giữ `PENDING` (công nợ), ca `COMPLETED`; lần sau thu được qua Task 3.9.
+- [ ] **5.5.2 [EX-02]** Khách vãng lai → check-in với `appointmentId = null`, ca `WAITING`, hóa đơn phí khám `PENDING`; nộp phí → phiếu `DOCTOR`.
+- [ ] **5.5.3 [EX-03]** Khách bỏ về khi đang chờ → `CANCELLED`, lý do trong `pet_visit_status_histories.notes`; phiếu `CANCELLED`, người phía sau lên một bậc; phí khám đã nộp giữ `PAID` (không hoàn), chưa nộp thì hóa đơn `CANCELLED`.
+- [ ] **5.5.4 [EX-04]** Ca cấp cứu → `is_emergency = true`, **phát phiếu `priority = 2` ngay không cần nộp tiền** (cả phiếu Lab / CĐHA khi chỉ định), lên đầu danh sách chờ phân công, đầu hàng đợi Bác sĩ và hàng đợi Lab / CĐHA; các hóa đơn thu khi chốt ca; gọi ca khác khi khách vắng thì ca cấp cứu vẫn giữ ưu tiên và cảnh báo đỏ.
+- [ ] **5.5.5 [EX-05]** Xếp ca mới vào hàng đợi Bác sĩ đang có ca vừa có kết quả → `200 OK`, phiếu `priority = 1` của ca có kết quả vẫn đứng đầu và được gọi trước.
+- [ ] **5.5.6 [EX-06]** Vắng mặt khi gọi vào Lab / CĐHA → KTV bấm `…/queue-tickets/{id}/call` ở phiếu khác; phiếu vắng giữ `WAITING`, dịch vụ giữ `PENDING`, giữ nguyên vị trí (không ghi lịch sử), thông báo ứng dụng (không SMS).
+- [ ] **5.5.7 [EX-07]** Khách quay lại sau khi vắng → KTV bấm `call` lại ở đúng phiếu đó, sau đó `start` → phiếu `IN_SERVICE`, dịch vụ `IN_PROGRESS`.
+- [ ] **5.5.8 [EX-08]** Hủy 1 dịch vụ CLS → dịch vụ `CANCELLED`; hóa đơn: chưa nộp → `CANCELLED`, khách tự hủy → giữ `PAID`, phòng khám không làm được → `REFUNDED`; dịch vụ còn lại xong → ca `RESULTS_READY`.
+- [ ] **5.5.9 [EX-09]** CĐHA gọi khi Lab chưa bấm "Đã lấy mẫu" → huy hiệu `SAMPLING`; CĐHA `call` phiếu khác, thú cưng sang thì `call` lại.
+- [ ] **5.5.10 [EX-10]** Bác sĩ gọi số (ca `WAITING` hoặc `RESULTS_READY`) nhưng khách vắng → `…/queue-tickets/{id}/call` ở phiếu khác, ca vắng giữ trạng thái, phiếu giữ vị trí, Bác sĩ vẫn `AVAILABLE`.
+- [ ] **5.5.11 [EX-11]** Khách bỏ về (ở `WAITING_RESULTS` hoặc `RESULTS_READY`) → `abandon`: dịch vụ chưa làm hủy (đã nộp thì giữ `PAID`, không hoàn), phiếu chờ `CANCELLED`, hóa đơn đã làm mà chưa thu (ca cấp cứu) giữ `PENDING` (công nợ), ca `COMPLETED`; lần sau thu được qua Task 3.9.
 - [ ] **5.5.12 [EX-12]** Chốt ca khi thiếu chẩn đoán → `400 CLIN_1307`.
 - [ ] **5.5.13 [EX-13]** Kê vượt tồn kho → lưu đơn thành công kèm `stockWarnings` (không chặn).
 - [ ] **5.5.14 [EX-14]** Giảm giá vượt số tiền của một hóa đơn (dịch vụ hoặc thuốc) → `400 BILL_1402`.
@@ -704,15 +718,15 @@
 
 | Mã Task | Tên Nhiệm vụ trọng tâm | Thành viên chính | FR / Ngoại lệ liên quan | Tình trạng |
 | :---: | :--- | :---: | :---: | :---: |
-| **T1.1 - T1.3** | Multi-Module, Docker Compose, CSDL 25 bảng + dữ liệu demo, Common-Library (Auto-Configuration) | Hiển, Khởi | NFR-07, NFR-08 | `[ ] Chưa xong` |
+| **T1.1 - T1.3** | Multi-Module, Docker Compose, CSDL 27 bảng + dữ liệu demo, Common-Library (Auto-Configuration) | Hiển, Khởi | NFR-07, NFR-08 | `[ ] Chưa xong` |
 | **T1.4 - T1.5** | Service Registry (Eureka :8761) & API Gateway (:8080, trả 401) | Khởi | NFR-02, NFR-03 | `[ ] Chưa xong` |
 | **T2.1 - T2.4** | `auth-service` (:8081): BCrypt, JWT, Refresh Token Rotation, nhân sự & phòng | Khởi | FR-01, FR-02, FR-09, NFR-02, NFR-03 | `[ ] Chưa xong` |
 | **T2.5 - T2.8** | `appointment-service` (:8082): Slot động, Đặt / duyệt / hủy lịch, No-Show | Hiển | FR-12 → FR-17, EX-01 | `[ ] Chưa xong` |
-| **T3.1 - T3.3** | `clinical-service` (:8083): Danh mục, Thú cưng, Check-in, Hàng đợi riêng từng Bác sĩ (xếp ca, gọi theo từng dòng), Bắt đầu khám | Khởi, Hiển | FR-03, FR-05 → FR-08, FR-10, FR-11, FR-18 → FR-29, EX-02 → EX-05 | `[ ] Chưa xong` |
-| **T3.4 - T3.8** | `clinical-service`: Chỉ định + hóa đơn dịch vụ, CLS song song (gọi theo từng dòng, gộp ca), GĐ 2 | Hiển, Khởi | FR-30 → FR-50, FR-54, EX-06 → EX-12 | `[ ] Chưa xong` |
-| **T3.9** | `clinical-service`: Thu tiền hóa đơn dịch vụ & hoàn tất ca khám | Hiển | FR-55 → FR-60, EX-11, EX-14 | `[ ] Chưa xong` |
+| **T3.1 - T3.3** | `clinical-service` (:8083): Danh mục, Thú cưng, Check-in + hóa đơn phí khám, Thu phí → phát phiếu, Hàng đợi riêng từng Bác sĩ (phiếu, gọi theo từng dòng), Bắt đầu khám | Khởi, Hiển | FR-03, FR-05 → FR-08, FR-10, FR-11, FR-18 → FR-29, EX-02 → EX-05 | `[ ] Chưa xong` |
+| **T3.4 - T3.8** | `clinical-service`: Chỉ định + hóa đơn dịch vụ, thu tiền CLS → phiếu phòng, CLS song song (gọi theo từng dòng, gộp phiếu), phiếu ưu tiên, GĐ 2 | Hiển, Khởi | FR-30 → FR-50, FR-54, EX-06 → EX-12 | `[ ] Chưa xong` |
+| **T3.9** | `clinical-service`: Thu tiền hóa đơn còn lại (dịch vụ tại phòng), hoàn tiền & hoàn tất ca khám | Hiển | FR-55 → FR-60, EX-11, EX-14 | `[ ] Chưa xong` |
 | **T4.1 - T4.4** | `billing-pharmacy-service` (:8084): Kê đơn, Hóa đơn thuốc, Trừ kho nguyên tử, Nhập kho | Hiển | FR-04, FR-51 → FR-53, FR-61 → FR-66, EX-13 → EX-16 | `[ ] Chưa xong` |
-| **T5.1** | `notification-service` (:8085): WebSocket STOMP & Email theo 9 sự kiện | Khởi | Thông báo cho FR-12 → FR-60 | `[ ] Chưa xong` |
+| **T5.1** | `notification-service` (:8085): WebSocket STOMP & Email theo 10 sự kiện | Khởi | Thông báo cho FR-12 → FR-60 | `[ ] Chưa xong` |
 | **T5.2 - T5.3** | Frontend React Vite: phân quyền 6 vai trò, ghép nối API | Linh | FR-67 → FR-70, NFR-01, NFR-05 | `[ ] Chưa xong` |
 | **T5.4 - T5.5** | Kiểm thử E2E Happy Path & 16 ngoại lệ | Cả nhóm | Toàn bộ hệ thống, NFR-04, NFR-06 | `[ ] Chưa xong` |
 
@@ -758,3 +772,4 @@
 | 3.2, 3.3, 3.5, 3.7, 3.8, 5.1, 5.3, 5.4, 5.5 (rà soát 11/11) | Hàng đợi sảnh chung; phân công chỉ cho Bác sĩ `AVAILABLE` (`CLIN_1302` / `CLIN_1303`); CLS `postpone` / `recall`; GĐ 2 `call-in`, `postpone-callback`; Khóa ưu tiên | `GET …/queue` (danh sách chờ + hàng đợi từng Bác sĩ), `…/my-queue`; `assign-doctor` không kiểm tra Bác sĩ rảnh; thêm `call-next`, `skip` (Bác sĩ) và `lab-queue/call-next`, `imaging-queue/call-next`, `service-details/{id}/skip`; `start-phase2`; test 3.3, 3.7, 3.8 và EX-03 → EX-10 viết lại | Mô hình hàng đợi riêng từng Bác sĩ + Đẩy lùi 1 bậc |
 | 3.3, 3.5, 5.3, 5.5 (cập nhật 13/11) | `call-next` + `skip` (Đẩy lùi 1 bậc, xếp sau người kế tiếp, `skip_count + 1`, `action = SKIPPED`); test 2b `skip` rồi "đẩy lùi ca #2 để trả lại thứ tự"; EX-04, EX-06, EX-07, EX-09, EX-10 dùng `skip` | Thêm `POST …/pet-visits/{id}/call` và `…/service-details/{id}/call` (gọi ca bất kỳ, không đổi thứ tự/trạng thái); `call-next` giữ làm phím tắt; đã xóa API `skip` và cột `skip_count`; CLS gộp dịch vụ cùng đợt khám, cùng phòng thành một ca; test 2b và EX-04/06/07/09/10 viết lại | Đẩy lùi 1 bậc làm hai ca đầu hàng đổi chỗ mãi mãi (ca thứ 3, 4 không được gọi) và làm ca cấp cứu mất ưu tiên |
 | 4.3.1, 4.3.4, test 4.3 (cập nhật 13/11) | Số lượng mua ≤ số lượng kê, vượt → `400 PHARM_1410` | Số kê chỉ tham khảo; mua vượt **tồn kho** → `409 PHARM_1406` ngay lúc lập / sửa hóa đơn (lúc thu tiền vẫn kiểm tra lại bằng UPDATE nguyên tử, EX-15); bỏ mã `PHARM_1410` (còn 38 mã); response kèm `stockQuantity`, `minStockAlert` | Khách có thể cần nhiều hơn / ít hơn đơn; ràng buộc đúng là tồn kho |
+| 1.2, 3.1–3.9, 5.1, 5.3, 5.4, 5.5, ma trận (cập nhật 16–17/11) | 25 bảng / 25 khóa ngoại; hóa đơn phí khám tạo ở `start-exam`; dịch vụ CLS tự vào hàng đợi; API gọi số `pet-visits/{id}/call`, `service-details/{id}/call`; `queue_order`; thu tiền một lần khi chốt ca (3 hóa đơn 530.000) | 27 bảng / 28 khóa ngoại; check-in lập hóa đơn phí khám, **nộp phí xong mới có phiếu**; thu tiền XN / CĐHA xong mới có phiếu phòng; API `queue-tickets/{id}/call`, `/start`, `call-next?queueType=`, `cashier/pending`; phiếu ưu tiên T06; kịch bản test đánh số lại (detail 3 = CBC, 4 = X-quang; phiếu 1–5) và thêm dịch vụ tẩy giun thu cuối ca; EX-03, EX-08, EX-11 kiểm tra không hoàn / `REFUNDED`; 10 sự kiện | Góp ý GVHD: tách quy trình thanh toán khỏi quy trình khám, tách dữ liệu hàng đợi khỏi hồ sơ khám |

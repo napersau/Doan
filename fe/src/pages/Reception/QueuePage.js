@@ -8,7 +8,7 @@ import useAsync from '../../hooks/useAsync';
 import useAction from '../../hooks/useAction';
 import usePolling from '../../hooks/usePolling';
 import { formatDateTime, formatTimeOfInstant } from '../../lib/format';
-import { DOCTOR_STATUS, VISIT_STATUS } from '../../lib/labels';
+import { DOCTOR_STATUS, TICKET_PRIORITY, VISIT_STATUS } from '../../lib/labels';
 
 const waitedMinutes = (instant) => Math.max(0, Math.floor((Date.now() - new Date(instant).getTime()) / 60000));
 // Ca đang xử lý ngoài hàng đợi bác sĩ: đang khám, chờ kết quả CLS, chờ thanh toán (ca WAITING / RESULTS_READY nằm trong hàng đợi từng bác sĩ)
@@ -19,7 +19,7 @@ async function loadBoard() {
   return { board, active: active.flatMap((page) => page.items).sort((a, b) => String(a.checkedInAt).localeCompare(String(b.checkedInAt))) };
 }
 
-/** Lễ tân xếp ca cho BẤT KỲ bác sĩ nào, bất cứ lúc nào, không cần bác sĩ rảnh (Q2). Đổi bác sĩ giữ nguyên thứ tự trong hàng đợi. */
+/** Lễ tân xếp ca cho BẤT KỲ bác sĩ nào, bất cứ lúc nào, không cần bác sĩ rảnh (Q3). Đổi bác sĩ: phiếu đi theo, giữ nguyên số và giờ phát. */
 function AssignDialog({ visit, doctors, suggestedDoctorId, onClose, onDone }) {
   const [doctorId, setDoctorId] = useState(visit.doctorId ? '' : String(suggestedDoctorId || ''));
   const change = Boolean(visit.doctorId);
@@ -29,11 +29,11 @@ function AssignDialog({ visit, doctors, suggestedDoctorId, onClose, onDone }) {
     onDone(`Đã ${change ? 'đổi bác sĩ' : 'phân công bác sĩ'} cho ${visit.petName} (${visit.visitCode}).`);
   };
   return <FormDialog title={`${change ? 'Đổi bác sĩ' : 'Phân công bác sĩ'} — ${visit.petName}`} onClose={onClose} onSubmit={submit} submitLabel={change ? 'Đổi bác sĩ' : 'Phân công'}>
-    <p className="ui-confirm-text">Chọn bác sĩ bất kỳ, kể cả bác sĩ đang khám ca khác — ca sẽ vào hàng đợi riêng của bác sĩ đó{change ? ' và giữ nguyên thứ tự đến' : ''}. Bác sĩ có ít người chờ nhất được gợi ý.</p>
+    <p className="ui-confirm-text">Chọn bác sĩ bất kỳ, kể cả bác sĩ đang khám ca khác — ca (khi đã có phiếu) vào hàng đợi riêng của bác sĩ đó{change ? ', phiếu giữ nguyên số và giờ phát' : ''}. Bác sĩ có ít phiếu chờ nhất được gợi ý.</p>
     <Field label="Bác sĩ *"><select className="ui-input" value={doctorId} onChange={(event) => setDoctorId(event.target.value)} autoFocus>
       <option value="">Chọn bác sĩ</option>
       {doctors.map((doctor) => <option key={doctor.doctorId} value={doctor.doctorId} disabled={doctor.doctorId === visit.doctorId}>
-        {doctor.fullName} — phòng {doctor.roomNumber || '?'} — {doctor.waitingCount} ca chờ{doctor.doctorId === suggestedDoctorId ? ' — gợi ý' : ''}{doctor.doctorId === visit.doctorId ? ' — đang được phân công ca này' : ''}</option>)}
+        {doctor.fullName} — phòng {doctor.roomNumber || '?'} — {doctor.waitingCount} phiếu chờ{doctor.doctorId === suggestedDoctorId ? ' — gợi ý' : ''}{doctor.doctorId === visit.doctorId ? ' — đang được phân công ca này' : ''}</option>)}
     </select></Field>
   </FormDialog>;
 }
@@ -60,7 +60,9 @@ function HistoryDialog({ visit, onClose }) {
 
 function VisitCell({ visit }) {
   return <>
+    {visit.ticket && <><strong className="ui-ticket-no">Số {visit.ticket.ticketNo}</strong>{' '}</>}
     <strong>{visit.petName}</strong>{visit.emergency && <span className="ui-emergency"> · CẤP CỨU</span>}
+    {visit.ticket && visit.ticket.priority === 1 && <Badge map={TICKET_PRIORITY} value={1} />}
     <small>{visit.speciesName} · {visit.visitCode}</small>
   </>;
 }
@@ -69,14 +71,14 @@ export default function QueuePage() {
   const board = useAsync(loadBoard, []);
   const [dialog, setDialog] = useState(null);
   const action = useAction();
-  useNotificationEvents(() => board.refresh(), ['VISIT_CHECKED_IN', 'PATIENT_CALLED', 'RESULTS_READY', 'VISIT_COMPLETED']);
+  useNotificationEvents(() => board.refresh(), ['VISIT_CHECKED_IN', 'TICKET_ISSUED', 'PATIENT_CALLED', 'RESULTS_READY', 'VISIT_COMPLETED']);
   usePolling(board.refresh, 30000);
   const done = (text) => { setDialog(null); action.setNotice({ type: 'success', text }); board.refresh(); };
   const run = (fn, text) => action.run(fn, text).then((result) => { if (result) board.refresh(); });
 
   return <StaffLayout area="reception" title="Bảng điều phối">
     <PageHead eyebrow="ĐIỀU PHỐI" title="Bảng điều phối hàng đợi" actions={<Button onClick={board.reload}>Làm mới</Button>}>
-      Mỗi bác sĩ có hàng đợi riêng (cấp cứu trước, rồi theo thứ tự đến; ca đã có kết quả cận lâm sàng lên đầu). Bạn có thể xếp hoặc chuyển ca cho bác sĩ bất kỳ, bất cứ lúc nào.
+      Khách nộp phí khám xong mới được phát phiếu và vào hàng đợi bác sĩ (ca cấp cứu vào ngay). Mỗi bác sĩ có hàng đợi phiếu riêng: cấp cứu trước, rồi ca quay lại với kết quả cận lâm sàng, rồi theo giờ phát phiếu. Bạn có thể xếp hoặc chuyển ca cho bác sĩ bất kỳ, bất cứ lúc nào.
     </PageHead>
     <Notice notice={action.notice} onClose={action.clear} />
     <AsyncView state={board}>
@@ -84,17 +86,30 @@ export default function QueuePage() {
         const doctorName = (id) => d.doctors.find((doctor) => doctor.doctorId === id)?.fullName || (id ? `#${id}` : '—');
         const waitingTotal = d.unassigned.length + d.doctors.reduce((sum, doctor) => sum + doctor.waitingCount, 0);
         const emergencies = [...d.unassigned, ...d.doctors.flatMap((doctor) => doctor.visits)].filter((visit) => visit.emergency).length;
+        const awaiting = d.awaitingPayment || [];
         return <>
-          <Stats items={[['Chờ phân công', d.unassigned.length, undefined, d.unassigned.length ? 'amber' : ''],
+          <Stats items={[['Chờ nộp phí khám', awaiting.length, undefined, awaiting.length ? 'amber' : ''],
+            ['Chờ phân công', d.unassigned.length, undefined, d.unassigned.length ? 'amber' : ''],
             ['Tổng ca đang chờ', waitingTotal, `${emergencies} ca cấp cứu`, emergencies ? 'red' : ''],
             ['Đang khám / chờ kết quả', active.filter((v) => ['IN_PROGRESS', 'WAITING_RESULTS'].includes(v.status)).length],
             ['Chờ thanh toán', active.filter((v) => v.status === 'WAITING_PAYMENT').length, undefined, 'amber'],
             ['Bác sĩ đang rảnh', d.doctors.filter((doctor) => doctor.status === 'AVAILABLE').length, `${d.doctors.length} bác sĩ đang hoạt động`, 'green']]} />
 
-          <Panel title="Danh sách chờ phân công" subtitle="Ca chưa có bác sĩ. Bác sĩ có ít người chờ nhất được gợi ý nhưng bạn quyết định." flush>
-            <Table caption="Danh sách chờ phân công" empty="Không có ca nào đang chờ phân công." rows={d.unassigned} rowClass={(row) => (row.emergency ? 'emergency' : '')} columns={[
+          <Panel title="Chờ nộp phí khám" subtitle="Ca vừa tiếp đón, chưa nộp phí khám nên chưa có phiếu và chưa vào hàng đợi bác sĩ. Thu phí xong hệ thống tự phát phiếu." flush>
+            <Table caption="Chờ nộp phí khám" empty="Không có ca nào chờ nộp phí khám." rows={awaiting} columns={[
               { title: 'Thú cưng', render: (row) => <VisitCell visit={row} /> },
               { title: 'Giờ đến', render: (row) => <>{formatTimeOfInstant(row.checkedInAt)}<small>chờ {waitedMinutes(row.checkedInAt)} phút</small></> },
+              { title: 'Bác sĩ đã chọn', render: (row) => (row.doctorId ? doctorName(row.doctorId) : <span className="ui-muted">Chưa chọn</span>) },
+              { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
+                <Link className="ui-button small primary" to={`/reception/invoices/${row.id}`}>Thu phí khám</Link>
+                <Button className="small" onClick={() => setDialog({ type: 'assign', visit: row })}>{row.doctorId ? 'Đổi bác sĩ' : 'Chọn bác sĩ'}</Button>
+                <Button className="small" onClick={() => setDialog({ type: 'cancel', visit: row })}>Hủy</Button></div> }]} />
+          </Panel>
+
+          <Panel title="Danh sách chờ phân công" subtitle="Ca đã nộp phí (có phiếu) nhưng chưa có bác sĩ. Bác sĩ có ít phiếu chờ nhất được gợi ý nhưng bạn quyết định." flush>
+            <Table caption="Danh sách chờ phân công" empty="Không có ca nào đang chờ phân công." rows={d.unassigned} rowClass={(row) => (row.emergency ? 'emergency' : '')} columns={[
+              { title: 'Thú cưng', render: (row) => <VisitCell visit={row} /> },
+              { title: 'Phát phiếu', render: (row) => <>{formatTimeOfInstant(row.ticket?.issuedAt || row.checkedInAt)}<small>chờ {waitedMinutes(row.ticket?.issuedAt || row.checkedInAt)} phút</small></> },
               { title: 'Triệu chứng', render: (row) => row.initialSymptoms || '—' },
               { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
                 <Button className="small primary" onClick={() => setDialog({ type: 'assign', visit: row })}>Phân công{d.suggestedDoctorId ? ` (gợi ý: ${doctorName(d.suggestedDoctorId)})` : ''}</Button>
@@ -103,10 +118,10 @@ export default function QueuePage() {
 
           <div className="ui-cols">
             {d.doctors.length === 0 && <Panel title="Hàng đợi bác sĩ"><p className="ui-muted">Chưa có bác sĩ nào đang hoạt động.</p></Panel>}
-            {d.doctors.map((doctor) => <Panel key={doctor.doctorId} title={`${doctor.fullName} — phòng ${doctor.roomNumber || '?'}`} subtitle={`${doctor.waitingCount} ca đang chờ`} actions={<Badge map={DOCTOR_STATUS} value={doctor.status} />} flush>
+            {d.doctors.map((doctor) => <Panel key={doctor.doctorId} title={`${doctor.fullName} — phòng ${doctor.roomNumber || '?'}`} subtitle={`${doctor.waitingCount} phiếu đang chờ`} actions={<Badge map={DOCTOR_STATUS} value={doctor.status} />} flush>
               <Table caption={`Hàng đợi của ${doctor.fullName}`} empty="Hàng đợi trống." rows={doctor.visits} rowClass={(row) => (row.emergency ? 'emergency' : '')} columns={[
                 { title: 'Thú cưng', render: (row) => <VisitCell visit={row} /> },
-                { title: 'Trạng thái', render: (row) => <><Badge map={VISIT_STATUS} value={row.status} /><small>đến {formatTimeOfInstant(row.checkedInAt)}</small></> },
+                { title: 'Trạng thái', render: (row) => <><Badge map={VISIT_STATUS} value={row.status} /><small>phiếu lúc {formatTimeOfInstant(row.ticket?.issuedAt || row.checkedInAt)}{row.ticket?.lastCalledAt ? ` · đã gọi ${formatTimeOfInstant(row.ticket.lastCalledAt)}` : ''}</small></> },
                 { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
                   {row.status === 'WAITING' && <>
                     <Button className="small" onClick={() => setDialog({ type: 'assign', visit: row })}>Đổi bác sĩ</Button>
@@ -125,7 +140,8 @@ export default function QueuePage() {
               { title: 'Trạng thái', render: (row) => <Badge map={VISIT_STATUS} value={row.status} /> },
               { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
                 {row.status === 'WAITING_PAYMENT' && <Link className="ui-button small primary" to={`/reception/invoices/${row.id}`}>Thu tiền</Link>}
-                {row.status === 'WAITING_RESULTS' && <Button className="small" onClick={() => setDialog({ type: 'abandon', visit: row })}>Khách bỏ về</Button>}
+                {row.status === 'WAITING_RESULTS' && <><Link className="ui-button small" to={`/reception/invoices/${row.id}`}>Thu tiền XN / CĐHA</Link>
+                  <Button className="small" onClick={() => setDialog({ type: 'abandon', visit: row })}>Khách bỏ về</Button></>}
                 <Button className="small" onClick={() => setDialog({ type: 'history', visit: row })}>Lịch sử</Button></div> },
             ]} />
           </Panel>

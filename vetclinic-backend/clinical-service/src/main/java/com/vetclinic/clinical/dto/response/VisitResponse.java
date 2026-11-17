@@ -12,7 +12,7 @@ import java.util.List;
  * <p>
  * Lược đồ v3.0 bỏ các cột assigned_room, started_at, closed_at, completed_at, cancel_reason khỏi pet_visits: hình dạng
  * response giữ các trường đó nhưng được SUY RA (phòng từ Bác sĩ qua auth-service, các mốc và lý do hủy từ lịch sử trạng thái).
- * queueOrder cho giao diện hàng đợi (thứ tự).
+ * ticket: phiếu xếp hàng còn hiệu lực của ca (chỉ gắn ở các API hàng đợi; null ở chỗ khác). Thứ tự hàng đợi nằm ở queue_tickets.
  */
 public record VisitResponse(
         Long id,
@@ -29,7 +29,7 @@ public record VisitResponse(
         boolean emergency,
         VisitStatus status,
         boolean locked,
-        long queueOrder,
+        TicketInfo ticket,
         BigDecimal weightAtVisit,
         BigDecimal temperature,
         String initialSymptoms,
@@ -50,7 +50,15 @@ public record VisitResponse(
     /** Gắn số phòng của Bác sĩ phụ trách (users.room_number): lấy từ auth-service ở tầng controller, ngoài transaction. */
     public VisitResponse withAssignedRoom(String room) {
         return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId,
-                receptionistId, room, emergency, status, locked, queueOrder, weightAtVisit, temperature,
+                receptionistId, room, emergency, status, locked, ticket, weightAtVisit, temperature,
+                initialSymptoms, clinicalNotes, diagnosis, treatmentPlan, doctorAdvice, cancelReason, checkedInAt,
+                startedAt, closedAt, completedAt, services, labResults, imagingResults);
+    }
+
+    /** Gắn phiếu xếp hàng (số in trên phiếu, ưu tiên, giờ gọi) cho màn hình hàng đợi. */
+    public VisitResponse withTicket(TicketInfo t) {
+        return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId,
+                receptionistId, assignedRoom, emergency, status, locked, t, weightAtVisit, temperature,
                 initialSymptoms, clinicalNotes, diagnosis, treatmentPlan, doctorAdvice, cancelReason, checkedInAt,
                 startedAt, closedAt, completedAt, services, labResults, imagingResults);
     }
