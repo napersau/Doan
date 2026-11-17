@@ -2,14 +2,24 @@ package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.constant.LabEvaluation;
 import com.vetclinic.clinical.constant.PaymentStatus;
+import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
+import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.LabResultItemRequest;
 import com.vetclinic.clinical.dto.request.LabResultRequest;
 import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.dto.response.QueueItemResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
+import com.vetclinic.clinical.entity.PetVisitStatusHistory;
+import com.vetclinic.clinical.entity.QueueTicket;
+import com.vetclinic.clinical.entity.QueueTicketItem;
+import com.vetclinic.clinical.repository.QueueTicketItemRepository;
+import com.vetclinic.clinical.repository.QueueTicketRepository;
+import com.vetclinic.clinical.repository.ServiceLabTestItemRepository;
+import com.vetclinic.clinical.service.TicketIssuer;
+import com.vetclinic.clinical.testsupport.TestData;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.PatientCalledEvent;
 import com.vetclinic.clinical.dto.response.ServiceDetailResponse;
@@ -37,14 +47,19 @@ import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.clinical.service.VisitTimeline;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
+import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
+import java.time.Instant;
+import java.time.LocalDate;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mock.web.MockMultipartFile;
@@ -100,7 +115,7 @@ class ParaclinicServiceImplTest {
     @Mock
     private LabTestReferenceRangeRepository rangeRepository;
     @Mock
-    private com.vetclinic.clinical.repository.ServiceLabTestItemRepository serviceLabItemRepository;
+    private ServiceLabTestItemRepository serviceLabItemRepository;
     @Mock
     private LabTestResultRepository labResultRepository;
     @Mock
@@ -112,11 +127,11 @@ class ParaclinicServiceImplTest {
     @Mock
     private ApplicationEventPublisher publisher;
     @Mock
-    private com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
+    private QueueTicketRepository ticketRepository;
     @Mock
-    private com.vetclinic.clinical.repository.QueueTicketItemRepository ticketItemRepository;
+    private QueueTicketItemRepository ticketItemRepository;
     @Mock
-    private com.vetclinic.clinical.service.TicketIssuer ticketIssuer;
+    private TicketIssuer ticketIssuer;
 
     private ParaclinicServiceImpl service;
 
@@ -141,16 +156,16 @@ class ParaclinicServiceImplTest {
 
     // ================================================================== hàng đợi (phiếu xếp hàng, 17/11/2026)
 
-    private static com.vetclinic.clinical.entity.QueueTicket ticket(long id, com.vetclinic.clinical.constant.QueueType type,
+    private static QueueTicket ticket(long id, QueueType type,
                                                                     long visitId, int no, int priority,
-                                                                    com.vetclinic.clinical.constant.TicketStatus status) {
-        return com.vetclinic.clinical.entity.QueueTicket.builder().id(id).queueType(type).serviceDate(java.time.LocalDate.of(2026, 10, 30))
+                                                                    TicketStatus status) {
+        return QueueTicket.builder().id(id).queueType(type).serviceDate(LocalDate.of(2026, 10, 30))
                 .ticketNo(no).visitId(visitId).priority(priority).status(status)
-                .issuedAt(java.time.Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
+                .issuedAt(Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
     }
 
-    private static com.vetclinic.clinical.entity.QueueTicketItem item(long ticketId, long detailId) {
-        return com.vetclinic.clinical.entity.QueueTicketItem.of(ticketId, detailId);
+    private static QueueTicketItem item(long ticketId, long detailId) {
+        return QueueTicketItem.of(ticketId, detailId);
     }
 
     @Test
@@ -165,12 +180,12 @@ class ParaclinicServiceImplTest {
         VisitServiceDetail d3 = detail(3L, 12L, CBC, ServiceDetailStatus.PENDING);
         VisitServiceDetail d4 = detail(4L, 12L, CBC, ServiceDetailStatus.CANCELLED);   // dịch vụ đã hủy của phiếu: không hiện
 
-        var lab = com.vetclinic.clinical.constant.QueueType.LABORATORY;
-        var waiting = com.vetclinic.clinical.constant.TicketStatus.WAITING;
+        var lab = QueueType.LABORATORY;
+        var waiting = TicketStatus.WAITING;
         // Thứ tự do truy vấn phiếu quyết định (priority DESC, issued_at, id): service giữ nguyên, không tự sắp lại
-        when(ticketRepository.findRoomQueue(lab, com.vetclinic.clinical.constant.TicketStatus.ACTIVE)).thenReturn(List.of(
+        when(ticketRepository.findRoomQueue(lab, TicketStatus.ACTIVE)).thenReturn(List.of(
                 ticket(71L, lab, 11L, 2, 2, waiting),
-                ticket(70L, lab, 10L, 1, 0, com.vetclinic.clinical.constant.TicketStatus.IN_SERVICE),
+                ticket(70L, lab, 10L, 1, 0, TicketStatus.IN_SERVICE),
                 ticket(72L, lab, 12L, 3, 0, waiting)));
         when(ticketItemRepository.findByTicketIdIn(anyCollection())).thenReturn(List.of(
                 item(70L, 1L), item(71L, 2L), item(72L, 3L), item(72L, 4L)));
@@ -195,8 +210,8 @@ class ParaclinicServiceImplTest {
 
     @Test
     void queue_isEmptyWhenNoTicketHasBeenIssued_unpaidServicesNeverShowUp() {
-        when(ticketRepository.findRoomQueue(com.vetclinic.clinical.constant.QueueType.IMAGING,
-                com.vetclinic.clinical.constant.TicketStatus.ACTIVE)).thenReturn(List.of());
+        when(ticketRepository.findRoomQueue(QueueType.IMAGING,
+                TicketStatus.ACTIVE)).thenReturn(List.of());
         assertThat(service.queue(ServiceCategory.IMAGING)).isEmpty();
         verify(detailRepository, never()).findAllById(anyCollection());
     }
@@ -216,9 +231,9 @@ class ParaclinicServiceImplTest {
         VisitServiceDetail img3 = detail(3L, 12L, ULTRASOUND, ServiceDetailStatus.PENDING);
         VisitServiceDetail lab1 = detail(4L, 10L, CBC, ServiceDetailStatus.IN_PROGRESS);
         VisitServiceDetail lab2 = detail(5L, 11L, CBC, ServiceDetailStatus.IN_PROGRESS);
-        var img = com.vetclinic.clinical.constant.QueueType.IMAGING;
-        var waiting = com.vetclinic.clinical.constant.TicketStatus.WAITING;
-        when(ticketRepository.findRoomQueue(img, com.vetclinic.clinical.constant.TicketStatus.ACTIVE)).thenReturn(List.of(
+        var img = QueueType.IMAGING;
+        var waiting = TicketStatus.WAITING;
+        when(ticketRepository.findRoomQueue(img, TicketStatus.ACTIVE)).thenReturn(List.of(
                 ticket(80L, img, 10L, 1, 0, waiting), ticket(81L, img, 11L, 2, 0, waiting), ticket(82L, img, 12L, 3, 0, waiting)));
         when(ticketItemRepository.findByTicketIdIn(anyCollection())).thenReturn(List.of(item(80L, 1L), item(81L, 2L), item(82L, 3L)));
         when(detailRepository.findAllById(anyCollection())).thenReturn(List.of(img1, img2, img3));
@@ -295,7 +310,7 @@ class ParaclinicServiceImplTest {
         assertThat(response.status()).isEqualTo(ServiceDetailStatus.COMPLETED);
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
         ArgumentCaptor<VisitServiceDetailHistory> audit = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
-        verify(detailHistoryRepository, org.mockito.Mockito.times(2)).save(audit.capture());
+        verify(detailHistoryRepository, Mockito.times(2)).save(audit.capture());
         assertThat(audit.getAllValues()).extracting(VisitServiceDetailHistory::getAction).containsExactly("START_PROCESSING", "COMPLETED");
     }
 
@@ -317,7 +332,7 @@ class ParaclinicServiceImplTest {
         stubLocks(detail(4L, 103L, DEWORM, ServiceDetailStatus.COMPLETED), VisitStatus.IN_PROGRESS);
         assertError(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, () -> service.perform(4L));
         // Bác sĩ khác không phải Bác sĩ được gán
-        loginAs(com.vetclinic.clinical.testsupport.TestData.OTHER_DOCTOR, RoleCode.VETERINARIAN);
+        loginAs(TestData.OTHER_DOCTOR, RoleCode.VETERINARIAN);
         stubLocks(detail(5L, 104L, DEWORM, ServiceDetailStatus.PENDING), VisitStatus.IN_PROGRESS);
         assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.perform(5L));
     }
@@ -390,7 +405,7 @@ class ParaclinicServiceImplTest {
         when(labTestItemRepository.findAllById(Set.of(4L))).thenReturn(List.of(plt));
         when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
 
-        var ex = org.junit.jupiter.api.Assertions.assertThrows(com.vetclinic.common.exception.AppException.class,
+        var ex = Assertions.assertThrows(AppException.class,
                 () -> service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null)))));
 
         assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT_DATA);   // SYS_1001
@@ -472,8 +487,8 @@ class ParaclinicServiceImplTest {
 
         service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
 
-        ArgumentCaptor<com.vetclinic.clinical.entity.PetVisitStatusHistory> history =
-                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.PetVisitStatusHistory.class);
+        ArgumentCaptor<PetVisitStatusHistory> history =
+                ArgumentCaptor.forClass(PetVisitStatusHistory.class);
         verify(historyRepository).save(history.capture());
         assertThat(history.getValue().getFromStatus()).isEqualTo(VisitStatus.WAITING_RESULTS);
         assertThat(history.getValue().getToStatus()).isEqualTo(VisitStatus.RESULTS_READY);
@@ -481,7 +496,7 @@ class ParaclinicServiceImplTest {
         assertThat(history.getValue().getChangedByUserId()).isNull();   // T06: hệ thống tự chuyển
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher, org.mockito.Mockito.times(1)).publishEvent(event.capture());   // chỉ visit.results_ready (v3.0)
+        verify(publisher, Mockito.times(1)).publishEvent(event.capture());   // chỉ visit.results_ready (v3.0)
         ParaclinicalResultsReadyEvent ready = event.getAllValues().stream().filter(ParaclinicalResultsReadyEvent.class::isInstance)
                 .map(ParaclinicalResultsReadyEvent.class::cast).findFirst().orElseThrow();
         assertThat(ready.visitId()).isEqualTo(100L);
@@ -799,7 +814,7 @@ class ParaclinicServiceImplTest {
 
     private VisitServiceDetailHistory lastDetailHistory() {
         ArgumentCaptor<VisitServiceDetailHistory> captor = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
-        verify(detailHistoryRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        verify(detailHistoryRepository, Mockito.atLeastOnce()).save(captor.capture());
         return captor.getValue();
     }
 }

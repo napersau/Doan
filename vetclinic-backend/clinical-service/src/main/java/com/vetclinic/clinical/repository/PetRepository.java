@@ -1,6 +1,7 @@
 package com.vetclinic.clinical.repository;
 
 import com.vetclinic.clinical.entity.Pet;
+import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -23,5 +24,5 @@ public interface PetRepository extends JpaRepository<Pet, Long>, JpaSpecificatio
     Page<Pet> findAll(Specification<Pet> spec, Pageable pageable);
 
     /** Thú cưng của một chủ nuôi (dùng cho appointment-service: appointments không còn cột owner_id). */
-    java.util.List<Pet> findByOwnerId(Long ownerId);
+    List<Pet> findByOwnerId(Long ownerId);
 }

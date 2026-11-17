@@ -1,17 +1,21 @@
 package com.vetclinic.clinical.testsupport;
 
 import com.vetclinic.clinical.constant.PetGender;
+import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
+import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.entity.Pet;
 import com.vetclinic.clinical.entity.PetVisit;
+import com.vetclinic.clinical.entity.QueueTicket;
 import com.vetclinic.clinical.entity.Species;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
+import java.time.LocalDate;
 import org.assertj.core.api.ThrowableAssert;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -75,11 +79,11 @@ public final class TestData {
     }
 
     /** Phiếu xếp hàng phát lúc 09:00 + id giây (thứ tự phát = thứ tự id). */
-    public static com.vetclinic.clinical.entity.QueueTicket ticket(long id, com.vetclinic.clinical.constant.QueueType type,
+    public static QueueTicket ticket(long id, QueueType type,
                                                                    long visitId, Long doctorId, int ticketNo, int priority,
-                                                                   com.vetclinic.clinical.constant.TicketStatus status) {
-        return com.vetclinic.clinical.entity.QueueTicket.builder().id(id).queueType(type)
-                .serviceDate(java.time.LocalDate.of(2026, 10, 30)).ticketNo(ticketNo).visitId(visitId).doctorId(doctorId)
+                                                                   TicketStatus status) {
+        return QueueTicket.builder().id(id).queueType(type)
+                .serviceDate(LocalDate.of(2026, 10, 30)).ticketNo(ticketNo).visitId(visitId).doctorId(doctorId)
                 .priority(priority).status(status).issuedAt(Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
     }
 

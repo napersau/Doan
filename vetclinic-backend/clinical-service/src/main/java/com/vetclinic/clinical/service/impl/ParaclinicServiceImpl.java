@@ -2,6 +2,7 @@ package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.TicketStatus;
+import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.entity.QueueTicket;
 import com.vetclinic.clinical.entity.QueueTicketItem;
 import com.vetclinic.clinical.repository.QueueTicketItemRepository;
@@ -42,6 +43,7 @@ import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
 import com.vetclinic.common.security.SecurityUtils;
+import java.util.HashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -201,7 +203,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     /** action mới nhất của từng chỉ định (lịch sử luôn có dòng ORDERED đầu tiên). */
     private Map<Long, String> latestActions(List<Long> detailIds) {
-        Map<Long, String> latest = new java.util.HashMap<>();
+        Map<Long, String> latest = new HashMap<>();
         for (VisitServiceDetailHistory h : detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(detailIds)) {
             latest.put(h.getVisitServiceDetailId(), h.getAction());   // đã sắp theo id tăng dần: dòng cuối thắng
         }
@@ -345,7 +347,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<com.vetclinic.clinical.dto.response.LabResultResponse> labResults(Long detailId) {
+    public List<LabResultResponse> labResults(Long detailId) {
         VisitServiceDetail detail = detailRepository.findById(detailId)
                 .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
         if (detail.getService().getCategory() != ServiceCategory.LABORATORY) {

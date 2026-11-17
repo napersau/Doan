@@ -4,6 +4,7 @@ import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -45,6 +46,6 @@ public interface VisitServiceDetailRepository extends JpaRepository<VisitService
     @Query("select count(distinct d.visitId) from VisitServiceDetail d, PetVisit v where v.id = d.visitId "
             + "and d.service.category in :categories and d.status <> com.vetclinic.clinical.constant.ServiceDetailStatus.CANCELLED "
             + "and v.checkedInAt >= :start and v.checkedInAt < :end")
-    long countVisitsWithCategoriesBetween(@Param("categories") Collection<com.vetclinic.clinical.constant.ServiceCategory> categories,
-                                          @Param("start") java.time.Instant start, @Param("end") java.time.Instant end);
+    long countVisitsWithCategoriesBetween(@Param("categories") Collection<ServiceCategory> categories,
+                                          @Param("start") Instant start, @Param("end") Instant end);
 }

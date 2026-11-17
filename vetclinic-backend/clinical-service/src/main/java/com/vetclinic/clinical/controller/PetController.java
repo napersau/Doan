@@ -2,8 +2,10 @@ package com.vetclinic.clinical.controller;
 
 import com.vetclinic.clinical.dto.request.CreatePetRequest;
 import com.vetclinic.clinical.dto.request.UpdatePetRequest;
+import com.vetclinic.clinical.dto.response.MedicalHistoryEntry;
 import com.vetclinic.clinical.dto.response.PetResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
+import com.vetclinic.clinical.service.MedicalHistoryService;
 import com.vetclinic.clinical.service.PetService;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
@@ -23,7 +25,7 @@ import java.util.List;
 public class PetController {
 
     private final PetService petService;
-    private final com.vetclinic.clinical.service.MedicalHistoryService medicalHistoryService;
+    private final MedicalHistoryService medicalHistoryService;
 
     /** Chủ nuôi tự thêm (ownerId bị bỏ qua) hoặc Lễ tân thêm hộ (bắt buộc ownerId). */
     @PostMapping
@@ -62,7 +64,7 @@ public class PetController {
      */
     @GetMapping("/{id}/medical-history")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<com.vetclinic.common.dto.PageResponse<com.vetclinic.clinical.dto.response.MedicalHistoryEntry>>> medicalHistory(
+    public ResponseEntity<ApiResponse<PageResponse<MedicalHistoryEntry>>> medicalHistory(
             @PathVariable Long id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
         return ResponseEntity.ok(ApiResponse.success(medicalHistoryService.history(id, page, size)));
     }

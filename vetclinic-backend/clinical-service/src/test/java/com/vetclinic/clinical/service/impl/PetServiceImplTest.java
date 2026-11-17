@@ -3,14 +3,22 @@ package com.vetclinic.clinical.service.impl;
 import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.dto.response.PetSummaryResponse;
 import com.vetclinic.clinical.entity.Pet;
+import com.vetclinic.clinical.mapper.ClinicalMapperImpl;
 import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.SpeciesRepository;
 import com.vetclinic.clinical.service.VisitAssembler;
+import com.vetclinic.clinical.testsupport.TestData;
+import com.vetclinic.common.security.RoleCode;
+import java.math.BigDecimal;
+import java.util.Collections;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Clock;
@@ -47,7 +55,7 @@ class PetServiceImplTest {
 
     private PetServiceImpl service() {
         return new PetServiceImpl(petRepository, speciesRepository, visitRepository, authClient,
-                new com.vetclinic.clinical.mapper.ClinicalMapperImpl(), assembler, CLOCK, transactionManager);
+                new ClinicalMapperImpl(), assembler, CLOCK, transactionManager);
     }
 
     @Test
@@ -72,35 +80,35 @@ class PetServiceImplTest {
 
     @Test
     void getById_attachesTheWeightOfTheMostRecentWeighedVisit_becausePetsHasNoWeightColumn() {
-        com.vetclinic.clinical.testsupport.TestData.loginAs(com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST,
-                com.vetclinic.common.security.RoleCode.RECEPTIONIST);
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(java.util.Optional.of(
-                com.vetclinic.clinical.testsupport.TestData.pet(11L, com.vetclinic.clinical.testsupport.TestData.dog())));
+        TestData.loginAs(TestData.RECEPTIONIST,
+                RoleCode.RECEPTIONIST);
+        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(
+                TestData.pet(11L, TestData.dog())));
         when(visitRepository.findLatestWeights(List.of(11L)))
-                .thenReturn(java.util.Collections.singletonList(new Object[]{11L, new java.math.BigDecimal("4.60")}));
+                .thenReturn(Collections.singletonList(new Object[]{11L, new BigDecimal("4.60")}));
 
         var response = service().getById(11L);
 
         assertThat(response.weight()).isEqualByComparingTo("4.60");   // = weight_at_visit của đợt khám gần nhất (v3.0 bỏ pets.weight)
-        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        SecurityContextHolder.clearContext();
     }
 
     @Test
     void getById_weightIsNullWhenThePetWasNeverWeighed() {
-        com.vetclinic.clinical.testsupport.TestData.loginAs(com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST,
-                com.vetclinic.common.security.RoleCode.RECEPTIONIST);
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(java.util.Optional.of(
-                com.vetclinic.clinical.testsupport.TestData.pet(11L, com.vetclinic.clinical.testsupport.TestData.dog())));
+        TestData.loginAs(TestData.RECEPTIONIST,
+                RoleCode.RECEPTIONIST);
+        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(
+                TestData.pet(11L, TestData.dog())));
         when(visitRepository.findLatestWeights(List.of(11L))).thenReturn(List.of());
 
         assertThat(service().getById(11L).weight()).isNull();
-        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        SecurityContextHolder.clearContext();
     }
 
     @Test
     void getSummariesByOwner_nullOwner_doesNotQuery() {
         assertThat(service().getSummariesByOwner(null)).isEmpty();
 
-        verify(petRepository, never()).findByOwnerId(org.mockito.ArgumentMatchers.any());
+        verify(petRepository, never()).findByOwnerId(ArgumentMatchers.any());
     }
 }

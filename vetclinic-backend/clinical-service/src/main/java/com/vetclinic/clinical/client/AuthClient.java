@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
 import java.util.List;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /** Endpoint nội bộ của auth-service (không cần header người dùng, Gateway không định tuyến ra ngoài). */
 @FeignClient(name = "auth-service", path = "/internal/auth")
@@ -17,7 +18,7 @@ public interface AuthClient {
 
     /** Tra cứu hàng loạt theo ?ids=1,2,3 (hiển thị tên bác sĩ trong bệnh án). */
     @GetMapping("/users")
-    ApiResponse<List<UserSummaryResponse>> getUsers(@org.springframework.web.bind.annotation.RequestParam("ids") List<Long> ids);
+    ApiResponse<List<UserSummaryResponse>> getUsers(@RequestParam("ids") List<Long> ids);
 
     /** Bác sĩ (VETERINARIAN) đang ACTIVE kèm số phòng cố định. */
     @GetMapping("/doctors")

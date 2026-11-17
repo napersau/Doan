@@ -33,6 +33,7 @@ import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.common.dto.ApiResponse;
+import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
@@ -40,8 +41,17 @@ import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.lock.NamedLockService;
 import com.vetclinic.common.security.RoleCode;
 import com.vetclinic.common.security.SecurityUtils;
+import jakarta.persistence.criteria.Predicate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -154,7 +164,7 @@ public class VisitServiceImpl implements VisitService {
                 try {
                     return transactionTemplate.execute(
                             tx -> createVisit(actor.id(), finalPetId, appointmentId, finalSymptoms, emergency, doctorId));
-                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                } catch (DataIntegrityViolationException e) {
                     // ca cấp cứu được phát phiếu ngay: hai quầy cùng phát có thể trùng số phiếu -> thử lại trong giao dịch mới
                     if (attempt >= ServiceInvoiceServiceImpl.MAX_TICKET_ATTEMPTS || !ServiceInvoiceServiceImpl.isTicketNumberClash(e)) {
                         throw e;
@@ -213,33 +223,33 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional(readOnly = true)
-    public com.vetclinic.common.dto.PageResponse<VisitResponse> search(VisitStatus status, java.time.LocalDate date,
+    public PageResponse<VisitResponse> search(VisitStatus status, LocalDate date,
             Long doctorId, Long petId, String keyword, int page, int size) {
-        org.springframework.data.jpa.domain.Specification<PetVisit> spec = (root, query, cb) -> {
-            List<jakarta.persistence.criteria.Predicate> predicates = new java.util.ArrayList<>();
+        Specification<PetVisit> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
             if (doctorId != null) predicates.add(cb.equal(root.get("doctorId"), doctorId));
             if (petId != null) predicates.add(cb.equal(root.get("pet").get("id"), petId));
             if (date != null) {
-                java.time.ZoneId zone = clock.getZone();
+                ZoneId zone = clock.getZone();
                 predicates.add(cb.greaterThanOrEqualTo(root.get("checkedInAt"), date.atStartOfDay(zone).toInstant()));
                 predicates.add(cb.lessThan(root.get("checkedInAt"), date.plusDays(1).atStartOfDay(zone).toInstant()));
             }
             if (keyword != null && !keyword.isBlank()) {
-                String escaped = keyword.trim().toLowerCase(java.util.Locale.ROOT)
+                String escaped = keyword.trim().toLowerCase(Locale.ROOT)
                         .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
                 predicates.add(cb.like(cb.lower(root.get("visitCode")), "%" + escaped + "%", '\\'));
             }
-            return cb.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));
+            return cb.and(predicates.toArray(Predicate[]::new));
         };
-        org.springframework.data.domain.PageRequest pageable = org.springframework.data.domain.PageRequest.of(
+        PageRequest pageable = PageRequest.of(
                 Math.max(page, 0), Math.min(Math.max(size, 1), 100),
-                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "id"));
-        org.springframework.data.domain.Page<PetVisit> result = visitRepository.findAll(spec, pageable);
+                Sort.by(Sort.Direction.DESC, "id"));
+        Page<PetVisit> result = visitRepository.findAll(spec, pageable);
         // Một truy vấn lịch sử cho cả trang (VisitTimeline), không N+1
         Map<Long, VisitResponse> byId = assembler.summaries(result.getContent()).stream()
                 .collect(Collectors.toMap(VisitResponse::id, Function.identity()));
-        return com.vetclinic.common.dto.PageResponse.of(result.getContent(), result.getNumber(), result.getSize(),
+        return PageResponse.of(result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages(), result.isLast(), v -> byId.get(v.getId()));
     }
 
@@ -391,7 +401,7 @@ public class VisitServiceImpl implements VisitService {
         }
 
         String notes = blankToNull(request.notes());
-        List<VisitServiceDetail> ordered = new java.util.ArrayList<>();
+        List<VisitServiceDetail> ordered = new ArrayList<>();
         for (ClinicService service : services) {
             // Mỗi dịch vụ: dòng chỉ định PENDING + hóa đơn PENDING, cùng giao dịch. CHƯA vào hàng đợi phòng: khách nộp tiền xong mới có phiếu
             ordered.add(createDetail(visit.getId(), service, 1, notes, doctorId, ServiceDetailStatus.PENDING));

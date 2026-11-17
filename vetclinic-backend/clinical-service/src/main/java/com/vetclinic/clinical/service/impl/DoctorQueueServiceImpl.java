@@ -20,6 +20,7 @@ import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.SecurityUtils;
+import java.util.LinkedHashSet;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -114,7 +115,7 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
     // ================================================================== helper
 
     private Map<Long, VisitResponse> visitsOf(List<QueueTicket> a, List<QueueTicket> b, List<PetVisit> extra) {
-        Set<Long> ids = new java.util.LinkedHashSet<>();
+        Set<Long> ids = new LinkedHashSet<>();
         a.forEach(t -> ids.add(t.getVisitId()));
         b.forEach(t -> ids.add(t.getVisitId()));
         List<PetVisit> visits = new ArrayList<>(ids.isEmpty() ? List.of() : visitRepository.findWithPetByIdIn(ids));

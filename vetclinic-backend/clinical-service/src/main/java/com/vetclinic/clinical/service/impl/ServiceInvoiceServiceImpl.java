@@ -27,6 +27,7 @@ import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.SecurityUtils;
+import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -178,7 +179,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
     /** Chờ ngẫu nhiên tăng dần trước khi thử lại, để các quầy đang tranh cùng một số phiếu tách nhau ra. */
     static void backOff(int attempt) {
         try {
-            Thread.sleep(java.util.concurrent.ThreadLocalRandom.current().nextLong(5, 20L * attempt));
+            Thread.sleep(ThreadLocalRandom.current().nextLong(5, 20L * attempt));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
         }

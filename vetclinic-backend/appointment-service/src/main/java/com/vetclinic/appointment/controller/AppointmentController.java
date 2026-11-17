@@ -5,9 +5,12 @@ import com.vetclinic.appointment.dto.request.CancelAppointmentRequest;
 import com.vetclinic.appointment.dto.request.CreateAppointmentRequest;
 import com.vetclinic.appointment.dto.request.RescheduleAppointmentRequest;
 import com.vetclinic.appointment.dto.response.AppointmentHistoryResponse;
+import com.vetclinic.appointment.dto.response.AppointmentReportResponse;
 import com.vetclinic.appointment.dto.response.AppointmentResponse;
 import com.vetclinic.appointment.dto.response.SlotAvailabilityResponse;
+import com.vetclinic.appointment.service.AppointmentEnricher;
 import com.vetclinic.appointment.service.AppointmentFilter;
+import com.vetclinic.appointment.service.AppointmentReportService;
 import com.vetclinic.appointment.service.AppointmentService;
 import com.vetclinic.appointment.service.SlotService;
 import com.vetclinic.common.dto.ApiResponse;
@@ -36,8 +39,8 @@ public class AppointmentController {
 
     private final AppointmentService appointmentService;
     private final SlotService slotService;
-    private final com.vetclinic.appointment.service.AppointmentEnricher enricher;
-    private final com.vetclinic.appointment.service.AppointmentReportService reportService;
+    private final AppointmentEnricher enricher;
+    private final AppointmentReportService reportService;
 
     /** Tình trạng 14 khung giờ của một ngày (Còn N chỗ / Đã kín lịch). CÔNG KHAI: không cần đăng nhập (Portal, FR-13). */
     @GetMapping("/slots")
@@ -126,7 +129,7 @@ public class AppointmentController {
     /** FR-70: thống kê lịch hẹn theo trạng thái và kênh đặt, tỉ lệ bỏ hẹn (NO_SHOW) và tỉ lệ hủy. */
     @GetMapping("/reports/summary")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<com.vetclinic.appointment.dto.response.AppointmentReportResponse>> report(
+    public ResponseEntity<ApiResponse<AppointmentReportResponse>> report(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
         return ResponseEntity.ok(ApiResponse.success(reportService.summary(fromDate, toDate)));

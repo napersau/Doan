@@ -6,6 +6,7 @@ import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.DoctorStatusResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.repository.PetVisitRepository;
+import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.service.DoctorStatusService;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
@@ -24,7 +25,7 @@ import java.util.Set;
 public class DoctorStatusServiceImpl implements DoctorStatusService {
 
     private final PetVisitRepository visitRepository;
-    private final com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
+    private final QueueTicketRepository ticketRepository;
     private final AuthClient authClient;
 
     @Override

@@ -3,6 +3,7 @@ package com.vetclinic.clinical.dto.response;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 
+import com.vetclinic.clinical.constant.TicketStatus;
 import java.time.Instant;
 
 /**
@@ -34,7 +35,7 @@ public record QueueItemResponse(
         Long ticketId,
         int ticketNo,
         int ticketPriority,
-        com.vetclinic.clinical.constant.TicketStatus ticketStatus,
+        TicketStatus ticketStatus,
         Instant issuedAt,
         Instant lastCalledAt
 ) {

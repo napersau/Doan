@@ -104,12 +104,12 @@ public class CatalogServiceImpl implements CatalogService {
                 .name(request.name().trim())
                 .category(request.category())
                 .price(request.price())
-                .vatRate(request.vatRate() == null ? java.math.BigDecimal.ZERO.setScale(2) : request.vatRate())
+                .vatRate(request.vatRate() == null ? BigDecimal.ZERO.setScale(2) : request.vatRate())
                 .description(blankToNull(request.description()))
                 .active(true)
                 // Chính sách thu trước: mặc định khám / XN / CĐHA thu tiền xong mới phát phiếu, dịch vụ tại phòng thu khi chốt ca
                 .requiresPrepayment(request.requiresPrepayment() != null ? request.requiresPrepayment()
-                        : request.category() == com.vetclinic.clinical.constant.ServiceCategory.EXAMINATION
+                        : request.category() == ServiceCategory.EXAMINATION
                         || request.category().isParaclinical())
                 .build();
         return mapper.toResponse(serviceRepository.saveAndFlush(service));

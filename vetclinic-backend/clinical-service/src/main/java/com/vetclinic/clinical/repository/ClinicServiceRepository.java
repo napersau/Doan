@@ -1,6 +1,9 @@
 package com.vetclinic.clinical.repository;
 
 import com.vetclinic.clinical.entity.ClinicService;
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -8,11 +11,11 @@ import org.springframework.stereotype.Repository;
 public interface ClinicServiceRepository extends JpaRepository<ClinicService, Long> {
     boolean existsByCode(String code);
 
-    java.util.Optional<ClinicService> findByCode(String code);
+    Optional<ClinicService> findByCode(String code);
 
-    java.util.List<ClinicService> findByActiveTrueOrderByCategoryAscNameAsc();
+    List<ClinicService> findByActiveTrueOrderByCategoryAscNameAsc();
 
-    java.util.List<ClinicService> findAllByOrderByCategoryAscNameAsc();
+    List<ClinicService> findAllByOrderByCategoryAscNameAsc();
 
-    java.util.List<ClinicService> findByIdInAndActiveTrue(java.util.Collection<Long> ids);
+    List<ClinicService> findByIdInAndActiveTrue(Collection<Long> ids);
 }

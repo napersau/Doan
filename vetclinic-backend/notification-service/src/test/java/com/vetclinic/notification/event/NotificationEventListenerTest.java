@@ -2,10 +2,12 @@ package com.vetclinic.notification.event;
 
 import com.vetclinic.common.event.AppointmentBookedEvent;
 import com.vetclinic.common.event.AppointmentNoShowEvent;
+import com.vetclinic.common.event.AppointmentStatusChangedEvent;
 import com.vetclinic.common.event.MedicineInvoicePaidEvent;
 import com.vetclinic.common.event.MedicineLowStockEvent;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.event.PatientCalledEvent;
+import com.vetclinic.common.event.QueueTicketIssuedEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
@@ -21,6 +23,8 @@ import com.vetclinic.notification.service.EmailService;
 import com.vetclinic.notification.service.NotificationDispatcher;
 import com.vetclinic.notification.service.PeopleLookup;
 import com.vetclinic.notification.service.ProcessedEvents;
+import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -95,7 +99,7 @@ class NotificationEventListenerTest {
         return captor.getValue();
     }
 
-    private java.util.List<NotificationMessage> captureUser(long userId, int times) {
+    private List<NotificationMessage> captureUser(long userId, int times) {
         ArgumentCaptor<NotificationMessage> captor = ArgumentCaptor.forClass(NotificationMessage.class);
         verify(dispatcher, times(times)).toUser(eq(userId), captor.capture());
         return captor.getAllValues();
@@ -131,8 +135,8 @@ class NotificationEventListenerTest {
         verify(emailService).send(eq("a@example.com"), anyString(), contains("Đã xác nhận"));
     }
 
-    private static com.vetclinic.common.event.AppointmentStatusChangedEvent statusChanged(String status, boolean rescheduled, String reason) {
-        return new com.vetclinic.common.event.AppointmentStatusChangedEvent(UUID.randomUUID(), NOW, 5L, 3L, "APT-20261030-00003", OWNER, 11L,
+    private static AppointmentStatusChangedEvent statusChanged(String status, boolean rescheduled, String reason) {
+        return new AppointmentStatusChangedEvent(UUID.randomUUID(), NOW, 5L, 3L, "APT-20261030-00003", OWNER, 11L,
                 LocalDate.of(2026, 10, 31), LocalTime.of(9, 30), status, rescheduled, reason);
     }
 
@@ -351,8 +355,8 @@ class NotificationEventListenerTest {
 
     // ================================================================== queue.ticket_issued
 
-    private static com.vetclinic.common.event.QueueTicketIssuedEvent issued(String type, Long doctorId, int priority) {
-        return new com.vetclinic.common.event.QueueTicketIssuedEvent(UUID.randomUUID(), NOW, 5L, 60L, type, 8, 7L, "VIS-2026-7",
+    private static QueueTicketIssuedEvent issued(String type, Long doctorId, int priority) {
+        return new QueueTicketIssuedEvent(UUID.randomUUID(), NOW, 5L, 60L, type, 8, 7L, "VIS-2026-7",
                 11L, doctorId, priority);
     }
 
@@ -472,7 +476,7 @@ class NotificationEventListenerTest {
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
         listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, 9L, 4L, "MINV-2026-0004", 3L, 7L,
-                new java.math.BigDecimal("157500.00")));
+                new BigDecimal("157500.00")));
 
         NotificationMessage forOwner = captureUser(OWNER);
         assertThat(forOwner.type()).isEqualTo(NotificationType.MEDICINE_INVOICE_PAID);
@@ -489,7 +493,7 @@ class NotificationEventListenerTest {
         when(people.findVisit(7L)).thenReturn(Optional.empty());
 
         listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, 9L, 4L, "MINV-2026-0004", 3L, 7L,
-                new java.math.BigDecimal("157500.00")));
+                new BigDecimal("157500.00")));
 
         verifyNoInteractions(dispatcher, emailService);
     }

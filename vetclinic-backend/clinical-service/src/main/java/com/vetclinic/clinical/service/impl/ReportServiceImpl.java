@@ -15,6 +15,8 @@ import com.vetclinic.clinical.service.ReportService;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
+import java.util.HashSet;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -106,7 +108,7 @@ public class ReportServiceImpl implements ReportService {
                             e.getValue()[0], e.getValue()[1], e.getValue()[2], e.getValue()[3]))
                     .toList();
 
-            java.util.Set<Long> debtVisits = new java.util.HashSet<>();
+            Set<Long> debtVisits = new HashSet<>();
             long debtInvoices = 0;
             BigDecimal debtAmount = zero();
             for (InvoiceAmountRow row : invoiceRepository.findDebt()) {
@@ -160,7 +162,7 @@ public class ReportServiceImpl implements ReportService {
                 raw.emergency(), total - raw.paraclinical(), raw.paraclinical(), byStatus, doctors);
     }
 
-    private Map<Long, String> doctorNames(java.util.Set<Long> ids) {
+    private Map<Long, String> doctorNames(Set<Long> ids) {
         if (ids.isEmpty()) {
             return Map.of();
         }

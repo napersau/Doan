@@ -6,6 +6,7 @@ import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.DoctorStatusResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.repository.PetVisitRepository;
+import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -30,7 +31,7 @@ class DoctorStatusServiceImplTest {
     @Mock
     private PetVisitRepository visitRepository;
     @Mock
-    private com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
+    private QueueTicketRepository ticketRepository;
     @Mock
     private AuthClient authClient;
     @InjectMocks

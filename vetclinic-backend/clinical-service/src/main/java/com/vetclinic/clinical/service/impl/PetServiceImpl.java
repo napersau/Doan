@@ -23,6 +23,9 @@ import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
 import com.vetclinic.common.security.SecurityUtils;
 import jakarta.persistence.criteria.Predicate;
+import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.HashMap;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -176,7 +179,7 @@ public class PetServiceImpl implements PetService {
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
                 Sort.by(Sort.Direction.DESC, "id"));
         Page<Pet> result = petRepository.findAll(spec, pageable);
-        Map<Long, java.math.BigDecimal> weights = latestWeights(result.getContent().stream().map(Pet::getId).toList());
+        Map<Long, BigDecimal> weights = latestWeights(result.getContent().stream().map(Pet::getId).toList());
         return PageResponse.of(result.getContent(), result.getNumber(), result.getSize(), result.getTotalElements(),
                 result.getTotalPages(), result.isLast(), p -> mapper.toResponse(p).withWeight(weights.get(p.getId())));
     }
@@ -186,13 +189,13 @@ public class PetServiceImpl implements PetService {
         return pet.withWeight(latestWeights(List.of(pet.id())).get(pet.id()));
     }
 
-    private Map<Long, java.math.BigDecimal> latestWeights(java.util.Collection<Long> petIds) {
+    private Map<Long, BigDecimal> latestWeights(Collection<Long> petIds) {
         if (petIds.isEmpty()) {
             return Map.of();
         }
-        Map<Long, java.math.BigDecimal> result = new java.util.HashMap<>();
+        Map<Long, BigDecimal> result = new HashMap<>();
         for (Object[] row : visitRepository.findLatestWeights(petIds)) {
-            result.put((Long) row[0], (java.math.BigDecimal) row[1]);
+            result.put((Long) row[0], (BigDecimal) row[1]);
         }
         return result;
     }
@@ -214,7 +217,7 @@ public class PetServiceImpl implements PetService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<PetSummaryResponse> getSummaries(java.util.Collection<Long> ids) {
+    public List<PetSummaryResponse> getSummaries(Collection<Long> ids) {
         if (ids == null || ids.isEmpty()) {
             return List.of();
         }

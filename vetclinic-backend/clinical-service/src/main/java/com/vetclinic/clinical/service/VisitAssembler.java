@@ -1,10 +1,13 @@
 package com.vetclinic.clinical.service;
 
 import com.vetclinic.clinical.constant.LabEvaluation;
+import com.vetclinic.clinical.constant.QueueType;
+import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.dto.response.AttachmentResponse;
 import com.vetclinic.clinical.dto.response.ImagingResultResponse;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.ServiceDetailResponse;
+import com.vetclinic.clinical.dto.response.TicketInfo;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.entity.ImagingAttachment;
 import com.vetclinic.clinical.entity.ImagingResult;
@@ -16,6 +19,7 @@ import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
 import com.vetclinic.clinical.repository.ImagingResultRepository;
 import com.vetclinic.clinical.repository.LabTestResultRepository;
+import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import lombok.RequiredArgsConstructor;
@@ -44,7 +48,7 @@ public class VisitAssembler {
     private final ImagingAttachmentRepository attachmentRepository;
     private final ServiceInvoiceRepository invoiceRepository;
     private final VisitTimeline timeline;
-    private final com.vetclinic.clinical.repository.QueueTicketRepository ticketRepository;
+    private final QueueTicketRepository ticketRepository;
 
     /** Dùng cho API danh sách: không kèm dịch vụ và kết quả. */
     public VisitResponse summary(PetVisit visit) {
@@ -77,8 +81,8 @@ public class VisitAssembler {
                 imagingResults.stream().map(r -> toImaging(r, attachments.getOrDefault(r.getId(), List.of()))).toList())
                 // Phiếu DOCTOR còn hiệu lực (nếu có): giao diện hồ sơ ca hiện số phiếu, Bác sĩ chỉ "Bắt đầu" được khi có phiếu
                 .withTicket(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatusIn(visit.getId(),
-                                com.vetclinic.clinical.constant.QueueType.DOCTOR, com.vetclinic.clinical.constant.TicketStatus.ACTIVE)
-                        .map(com.vetclinic.clinical.dto.response.TicketInfo::of).orElse(null));
+                                QueueType.DOCTOR, TicketStatus.ACTIVE)
+                        .map(TicketInfo::of).orElse(null));
     }
 
     /** Kết quả xét nghiệm của MỘT chỉ định (kèm nhãn LOW / NORMAL / HIGH tính khi hiển thị). */

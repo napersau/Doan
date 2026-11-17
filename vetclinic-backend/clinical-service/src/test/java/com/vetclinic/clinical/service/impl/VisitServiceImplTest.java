@@ -2,13 +2,16 @@ package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AppointmentClient;
 import com.vetclinic.clinical.client.AuthClient;
+import com.vetclinic.clinical.constant.PaymentStatus;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.AssignDoctorRequest;
 import com.vetclinic.clinical.dto.request.CheckInRequest;
+import com.vetclinic.clinical.dto.request.ClinicalInfoRequest;
 import com.vetclinic.clinical.dto.request.CloseVisitRequest;
 import com.vetclinic.clinical.dto.request.OrderServicesRequest;
+import com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest;
 import com.vetclinic.clinical.dto.request.ReasonRequest;
 import com.vetclinic.clinical.dto.request.ServiceOrderItem;
 import com.vetclinic.clinical.dto.request.StartExamRequest;
@@ -18,6 +21,7 @@ import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.entity.PetVisitStatusHistory;
+import com.vetclinic.clinical.entity.ServiceInvoice;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.repository.ClinicServiceRepository;
 import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
@@ -26,14 +30,18 @@ import com.vetclinic.clinical.repository.LabTestResultRepository;
 import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
+import com.vetclinic.clinical.repository.QueueTicketRepository;
+import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitSupport;
+import com.vetclinic.clinical.service.VisitTimeline;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
+import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.lock.NamedLockService;
 import com.vetclinic.common.security.RoleCode;
@@ -42,9 +50,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -96,7 +110,7 @@ class VisitServiceImplTest {
     @Mock
     private ClinicServiceRepository serviceRepository;
     @Mock
-    private com.vetclinic.clinical.repository.ServiceInvoiceRepository invoiceRepository;
+    private ServiceInvoiceRepository invoiceRepository;
     @Mock
     private AuthClient authClient;
     @Mock
@@ -116,11 +130,11 @@ class VisitServiceImplTest {
                 detailHistoryRepository, invoiceRepository, ticketIssuer, publisher, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, mock(LabTestResultRepository.class),
                 mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), invoiceRepository,
-                new com.vetclinic.clinical.service.VisitTimeline(historyRepository),
-                mock(com.vetclinic.clinical.repository.QueueTicketRepository.class));
+                new VisitTimeline(historyRepository),
+                mock(QueueTicketRepository.class));
         // Mỗi dòng chỉ định được lập hóa đơn riêng ngay khi tạo (BR-19): giả lập INSERT hóa đơn có id
-        lenient().when(invoiceRepository.saveAndFlush(any(com.vetclinic.clinical.entity.ServiceInvoice.class))).thenAnswer(inv -> {
-            com.vetclinic.clinical.entity.ServiceInvoice saved = inv.getArgument(0);
+        lenient().when(invoiceRepository.saveAndFlush(any(ServiceInvoice.class))).thenAnswer(inv -> {
+            ServiceInvoice saved = inv.getArgument(0);
             saved.setId(900L + saved.getVisitServiceDetailId());
             return saved;
         });
@@ -219,11 +233,11 @@ class VisitServiceImplTest {
         verify(detailRepository).saveAndFlush(fee.capture());
         assertThat(fee.getValue().getService().getCode()).isEqualTo("EXAM_GEN");
         assertThat(fee.getValue().getStatus()).isEqualTo(ServiceDetailStatus.PENDING);   // IN_PROGRESS ở T02
-        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoice =
-                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
+        ArgumentCaptor<ServiceInvoice> invoice =
+                ArgumentCaptor.forClass(ServiceInvoice.class);
         verify(invoiceRepository).saveAndFlush(invoice.capture());
         assertThat(invoice.getValue().getUnitPrice()).isEqualByComparingTo("100000.00");
-        assertThat(invoice.getValue().getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.PENDING);
+        assertThat(invoice.getValue().getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
         // BR-35: chưa nộp phí khám thì chưa có phiếu, chưa vào hàng đợi Bác sĩ
         verify(ticketIssuer, never()).issueForPaidServices(any(), anyCollection(), any());
         assertThat(lastHistory().getNotes()).contains("lịch hẹn #7");
@@ -238,7 +252,7 @@ class VisitServiceImplTest {
 
         service.checkIn(new CheckInRequest(11L, null, "Co giật", true, null));
 
-        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), org.mockito.ArgumentMatchers.isNull());
+        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), ArgumentMatchers.isNull());
     }
 
     @Test
@@ -253,7 +267,7 @@ class VisitServiceImplTest {
 
         service.checkIn(new CheckInRequest(11L, null, "Khám", false, null));
 
-        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), org.mockito.ArgumentMatchers.isNull());
+        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), ArgumentMatchers.isNull());
     }
 
     @Test
@@ -450,7 +464,7 @@ class VisitServiceImplTest {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         PetVisit visit = visit(100L, VisitStatus.WAITING, DOCTOR);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(ticketIssuer.startDoctorTicket(100L, DOCTOR)).thenThrow(new com.vetclinic.common.exception.AppException(ErrorCode.NO_QUEUE_TICKET));
+        when(ticketIssuer.startDoctorTicket(100L, DOCTOR)).thenThrow(new AppException(ErrorCode.NO_QUEUE_TICKET));
 
         assertError(ErrorCode.NO_QUEUE_TICKET, () -> service.startExam(100L, new StartExamRequest(null, null, null)));
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);
@@ -495,7 +509,7 @@ class VisitServiceImplTest {
         PetVisit visit = visitWithVitals(100L, VisitStatus.IN_PROGRESS);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
 
-        service.updateClinicalInfo(100L, new com.vetclinic.clinical.dto.request.ClinicalInfoRequest(null, new BigDecimal("38.1"), "Hạ sốt"));
+        service.updateClinicalInfo(100L, new ClinicalInfoRequest(null, new BigDecimal("38.1"), "Hạ sốt"));
 
         assertThat(visit.getWeightAtVisit()).isEqualByComparingTo("4.60");   // giữ nguyên
         assertThat(visit.getTemperature()).isEqualByComparingTo("38.1");
@@ -507,7 +521,7 @@ class VisitServiceImplTest {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR)));   // đã khóa
         when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.IN_PROGRESS, OTHER_DOCTOR)));
-        var request = new com.vetclinic.clinical.dto.request.ClinicalInfoRequest(null, null, "x");
+        var request = new ClinicalInfoRequest(null, null, "x");
 
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.updateClinicalInfo(100L, request));
         assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.updateClinicalInfo(101L, request));
@@ -529,18 +543,18 @@ class VisitServiceImplTest {
         stubSaveDetail();
 
         VisitResponse response = service.orderParaclinical(100L,
-                new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L, 7L), "Nghi viêm tụy"));
+                new ParaclinicalOrderRequest(List.of(5L, 7L), "Nghi viêm tụy"));
 
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING_RESULTS);
         assertThat(examLine.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // dịch vụ khám của GĐ 1 hoàn tất
         ArgumentCaptor<VisitServiceDetail> lines = ArgumentCaptor.forClass(VisitServiceDetail.class);
-        verify(detailRepository, org.mockito.Mockito.times(2)).saveAndFlush(lines.capture());
+        verify(detailRepository, Mockito.times(2)).saveAndFlush(lines.capture());
         assertThat(lines.getAllValues()).extracting(VisitServiceDetail::getStatus)
                 .containsOnly(ServiceDetailStatus.PENDING);   // tự vào hàng đợi Lab / CĐHA
         assertThat(lines.getAllValues()).extracting(VisitServiceDetail::getNotes).containsOnly("Nghi viêm tụy");
-        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoices =
-                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
-        verify(invoiceRepository, org.mockito.Mockito.times(2)).saveAndFlush(invoices.capture());
+        ArgumentCaptor<ServiceInvoice> invoices =
+                ArgumentCaptor.forClass(ServiceInvoice.class);
+        verify(invoiceRepository, Mockito.times(2)).saveAndFlush(invoices.capture());
         assertThat(invoices.getAllValues()).extracting(i -> i.getUnitPrice().toPlainString()).containsExactly("250000.00", "180000.00");
         assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.WAITING_RESULTS);
     }
@@ -550,7 +564,7 @@ class VisitServiceImplTest {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
         when(serviceRepository.findByIdInAndActiveTrue(List.of(5L))).thenReturn(List.of(cbc));
-        var request = new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L), null);
+        var request = new ParaclinicalOrderRequest(List.of(5L), null);
 
         PetVisit noVitals = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(noVitals));
@@ -571,7 +585,7 @@ class VisitServiceImplTest {
         when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.IN_ROOM, ServiceDetailStatus.OPEN)).thenReturn(1L);
 
         assertError(ErrorCode.IN_ROOM_SERVICE_PENDING,
-                () -> service.orderParaclinical(100L, new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L), null)));
+                () -> service.orderParaclinical(100L, new ParaclinicalOrderRequest(List.of(5L), null)));
         verify(detailRepository, never()).saveAndFlush(any());
     }
 
@@ -581,15 +595,15 @@ class VisitServiceImplTest {
         // Dịch vụ tại phòng không đi qua cận lâm sàng
         when(serviceRepository.findByIdInAndActiveTrue(List.of(2L))).thenReturn(List.of(service(2L, "VAC_7B", ServiceCategory.VACCINATION, "150000.00")));
         assertError(ErrorCode.INVALID_INPUT_DATA,
-                () -> service.orderParaclinical(100L, new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(2L), null)));
+                () -> service.orderParaclinical(100L, new ParaclinicalOrderRequest(List.of(2L), null)));
         // Dịch vụ không tồn tại / đã ngừng
         when(serviceRepository.findByIdInAndActiveTrue(List.of(99L))).thenReturn(List.of());
         assertError(ErrorCode.SERVICE_NOT_FOUND,
-                () -> service.orderParaclinical(100L, new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(99L), null)));
+                () -> service.orderParaclinical(100L, new ParaclinicalOrderRequest(List.of(99L), null)));
 
         ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
         when(serviceRepository.findByIdInAndActiveTrue(List.of(5L))).thenReturn(List.of(cbc));
-        var request = new com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest(List.of(5L), null);
+        var request = new ParaclinicalOrderRequest(List.of(5L), null);
         // Hồ sơ đã khóa
         when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visitWithVitals(101L, VisitStatus.WAITING_PAYMENT)));
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.orderParaclinical(101L, request));
@@ -621,8 +635,8 @@ class VisitServiceImplTest {
         verify(detailRepository).saveAndFlush(line.capture());
         assertThat(line.getValue().getStatus()).isEqualTo(ServiceDetailStatus.PENDING);   // chờ "Đã thực hiện"
         assertThat(line.getValue().getQuantity()).isEqualTo(2);
-        ArgumentCaptor<com.vetclinic.clinical.entity.ServiceInvoice> invoice =
-                ArgumentCaptor.forClass(com.vetclinic.clinical.entity.ServiceInvoice.class);
+        ArgumentCaptor<ServiceInvoice> invoice =
+                ArgumentCaptor.forClass(ServiceInvoice.class);
         verify(invoiceRepository).saveAndFlush(invoice.capture());
         assertThat(invoice.getValue().getUnitPrice()).isEqualByComparingTo("150000.00");
         verify(historyRepository, never()).save(any());   // không đổi trạng thái ca
@@ -766,7 +780,7 @@ class VisitServiceImplTest {
         VisitServiceDetail done = detail(2L, 100L, service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00"), ServiceDetailStatus.COMPLETED);
         VisitServiceDetail pending = detail(3L, 100L, service(6L, "IMG_US_AB", ServiceCategory.IMAGING, "200000.00"), ServiceDetailStatus.PENDING);
         when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(exam, done, pending));
-        com.vetclinic.clinical.entity.ServiceInvoice invoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
+        ServiceInvoice invoice = ServiceInvoice.builder()
                 .id(50L).visitServiceDetailId(3L).unitPrice(new BigDecimal("200000.00")).vatRate(BigDecimal.ZERO).build();
         when(invoiceRepository.findByVisitServiceDetailId(3L)).thenReturn(Optional.of(invoice));
 
@@ -774,7 +788,7 @@ class VisitServiceImplTest {
 
         assertThat(response.status()).isEqualTo(VisitStatus.COMPLETED);
         assertThat(pending.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
-        assertThat(invoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
+        assertThat(invoice.getPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(done.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // đã làm: giữ hóa đơn PENDING làm công nợ
         assertThat(exam.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
         verify(invoiceRepository, never()).findByVisitServiceDetailId(2L);
@@ -817,9 +831,9 @@ class VisitServiceImplTest {
         VisitServiceDetail exam = detail(1L, 100L, service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00"), ServiceDetailStatus.IN_PROGRESS);
         VisitServiceDetail vaccine = detail(2L, 100L, service(2L, "VAC_7B", ServiceCategory.VACCINATION, "150000.00"), ServiceDetailStatus.PENDING);
         when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(exam, vaccine));
-        com.vetclinic.clinical.entity.ServiceInvoice examInvoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
+        ServiceInvoice examInvoice = ServiceInvoice.builder()
                 .id(50L).visitServiceDetailId(1L).unitPrice(new BigDecimal("100000.00")).vatRate(BigDecimal.ZERO).build();
-        com.vetclinic.clinical.entity.ServiceInvoice vaccineInvoice = com.vetclinic.clinical.entity.ServiceInvoice.builder()
+        ServiceInvoice vaccineInvoice = ServiceInvoice.builder()
                 .id(51L).visitServiceDetailId(2L).unitPrice(new BigDecimal("150000.00")).vatRate(BigDecimal.ZERO).build();
         when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(examInvoice));
         when(invoiceRepository.findByVisitServiceDetailId(2L)).thenReturn(Optional.of(vaccineInvoice));
@@ -829,8 +843,8 @@ class VisitServiceImplTest {
         assertThat(response.status()).isEqualTo(VisitStatus.CANCELLED);
         assertThat(exam.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
         assertThat(vaccine.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
-        assertThat(examInvoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
-        assertThat(vaccineInvoice.getPaymentStatus()).isEqualTo(com.vetclinic.clinical.constant.PaymentStatus.CANCELLED);
+        assertThat(examInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(vaccineInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(lastHistory().getNotes()).isEqualTo("Chuyển viện cấp cứu");   // lý do ghi nguyên văn vào lịch sử
         assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.CANCELLED);
     }
@@ -959,16 +973,16 @@ class VisitServiceImplTest {
     @SuppressWarnings("unchecked")
     void search_returnsPagedVisits_newestFirst_andClampsPageSize() {
         PetVisit visit = visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR);
-        when(visitRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), any(org.springframework.data.domain.Pageable.class)))
-                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(visit), org.springframework.data.domain.PageRequest.of(0, 100), 1));
+        when(visitRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(visit), PageRequest.of(0, 100), 1));
 
         var page = service.search(VisitStatus.WAITING_PAYMENT, LocalDate.of(2026, 10, 30), DOCTOR, null, "vis-", -3, 5000);
 
         assertThat(page.getItems()).hasSize(1);
         assertThat(page.getItems().get(0).status()).isEqualTo(VisitStatus.WAITING_PAYMENT);
         assertThat(page.getTotalElements()).isEqualTo(1);
-        ArgumentCaptor<org.springframework.data.domain.Pageable> pageable = ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
-        verify(visitRepository).findAll(any(org.springframework.data.jpa.domain.Specification.class), pageable.capture());
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(visitRepository).findAll(any(Specification.class), pageable.capture());
         assertThat(pageable.getValue().getPageNumber()).isZero();          // trang âm bị đưa về 0
         assertThat(pageable.getValue().getPageSize()).isEqualTo(100);      // kích thước tối đa 100
         assertThat(pageable.getValue().getSort().getOrderFor("id").isDescending()).isTrue();
@@ -985,7 +999,7 @@ class VisitServiceImplTest {
 
     private PetVisitStatusHistory lastHistory() {
         ArgumentCaptor<PetVisitStatusHistory> captor = ArgumentCaptor.forClass(PetVisitStatusHistory.class);
-        verify(historyRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        verify(historyRepository, Mockito.atLeastOnce()).save(captor.capture());
         return captor.getValue();
     }
 }

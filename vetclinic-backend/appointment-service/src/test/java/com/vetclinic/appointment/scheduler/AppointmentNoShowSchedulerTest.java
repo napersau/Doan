@@ -6,6 +6,7 @@ import com.vetclinic.appointment.repository.AppointmentRepository;
 import com.vetclinic.appointment.service.AppointmentService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -44,7 +45,7 @@ class AppointmentNoShowSchedulerTest {
 
         scheduler().scanAndMarkNoShowAppointments();
 
-        verify(appointmentService, never()).markNoShowBySystem(org.mockito.ArgumentMatchers.anyLong());
+        verify(appointmentService, never()).markNoShowBySystem(ArgumentMatchers.anyLong());
     }
 
     @Test

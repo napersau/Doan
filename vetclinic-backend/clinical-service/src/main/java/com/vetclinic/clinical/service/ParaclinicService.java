@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service;
 
+import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.dto.request.LabResultRequest;
@@ -46,7 +47,7 @@ public interface ParaclinicService {
     ServiceDetailResponse cancel(Long detailId, String reason, String reasonType);
 
     /** GET /lab-results/{detailId}: kết quả đã nhập của một chỉ định xét nghiệm, kèm nhãn đánh giá theo khoảng đã snapshot. */
-    List<com.vetclinic.clinical.dto.response.LabResultResponse> labResults(Long detailId);
+    List<LabResultResponse> labResults(Long detailId);
 
     /**
      * UC-25: nhập chỉ số xét nghiệm, tự đối chiếu khoảng tham chiếu theo loài và snapshot lại (BR-23, BR-24). Dịch vụ đã cấu hình

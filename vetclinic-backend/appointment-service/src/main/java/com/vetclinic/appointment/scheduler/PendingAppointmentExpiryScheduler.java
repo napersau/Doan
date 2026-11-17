@@ -1,5 +1,6 @@
 package com.vetclinic.appointment.scheduler;
 
+import com.vetclinic.appointment.config.BookingProperties;
 import com.vetclinic.appointment.constant.AppointmentStatus;
 import com.vetclinic.appointment.repository.AppointmentRepository;
 import com.vetclinic.appointment.service.AppointmentService;
@@ -24,7 +25,7 @@ public class PendingAppointmentExpiryScheduler {
 
     private final AppointmentRepository appointmentRepository;
     private final AppointmentService appointmentService;
-    private final com.vetclinic.appointment.config.BookingProperties properties;
+    private final BookingProperties properties;
     private final Clock clock;
 
     @Scheduled(cron = "${vetclinic.booking.pending-expiry-cron}", zone = "${vetclinic.booking.zone}")

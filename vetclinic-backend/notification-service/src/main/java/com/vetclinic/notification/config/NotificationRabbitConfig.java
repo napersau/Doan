@@ -4,8 +4,10 @@ import com.vetclinic.common.event.EventRouting;
 import com.vetclinic.common.event.RabbitCommonConfig;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Declarable;
 import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.DirectExchange;
+import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,12 +49,12 @@ public class NotificationRabbitConfig {
         };
         for (String[] entry : queues) {
             String queueName = entry[0];
-            org.springframework.amqp.core.Queue queue = RabbitCommonConfig.durableQueueWithDlq(queueName);
-            org.springframework.amqp.core.Queue deadLetterQueue = RabbitCommonConfig.deadLetterQueue(queueName);
+            Queue queue = RabbitCommonConfig.durableQueueWithDlq(queueName);
+            Queue deadLetterQueue = RabbitCommonConfig.deadLetterQueue(queueName);
             Binding binding = BindingBuilder.bind(queue).to(clinicEventsExchange).with(entry[1]);
             Binding deadLetterBinding = BindingBuilder.bind(deadLetterQueue).to(clinicEventsDeadLetterExchange).with(queueName);
             declarations.addAll(List.of(queue, deadLetterQueue, binding, deadLetterBinding));
         }
-        return new Declarables(declarations.stream().map(o -> (org.springframework.amqp.core.Declarable) o).toList());
+        return new Declarables(declarations.stream().map(o -> (Declarable) o).toList());
     }
 }

@@ -16,12 +16,14 @@ import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
 import com.vetclinic.clinical.repository.ImagingResultRepository;
 import com.vetclinic.clinical.repository.LabTestResultRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
+import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -62,7 +64,7 @@ class VisitAssemblerTest {
     void setUp() {
         assembler = new VisitAssembler(detailRepository, labResultRepository, imagingResultRepository, attachmentRepository,
                 invoiceRepository, new VisitTimeline(historyRepository),
-                org.mockito.Mockito.mock(com.vetclinic.clinical.repository.QueueTicketRepository.class));
+                Mockito.mock(QueueTicketRepository.class));
     }
 
     private static PetVisitStatusHistory h(VisitStatus from, VisitStatus to, String at, String notes) {
@@ -95,7 +97,7 @@ class VisitAssemblerTest {
         var list = assembler.summaries(List.of(a, b));
 
         assertThat(list).hasSize(2);
-        org.mockito.Mockito.verify(historyRepository, org.mockito.Mockito.times(1)).findByVisitIdInOrderByIdAsc(anyCollection());
+        Mockito.verify(historyRepository, Mockito.times(1)).findByVisitIdInOrderByIdAsc(anyCollection());
     }
 
     @Test

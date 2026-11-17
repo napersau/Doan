@@ -7,6 +7,7 @@ import com.vetclinic.clinical.dto.response.PetSummaryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.common.dto.PageResponse;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface PetService {
@@ -28,7 +29,7 @@ public interface PetService {
     PetSummaryResponse getSummary(Long id);
 
     /** Như getSummary nhưng theo lô; id không tồn tại bị bỏ qua (làm giàu danh sách lịch hẹn). */
-    List<PetSummaryResponse> getSummaries(java.util.Collection<Long> ids);
+    List<PetSummaryResponse> getSummaries(Collection<Long> ids);
 
     /**
      * Các thú cưng của một chủ nuôi. appointment-service dùng để lọc "lịch hẹn của tôi" bằng {@code pet_id IN (...)} vì bảng

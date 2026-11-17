@@ -1,5 +1,7 @@
 package com.vetclinic.clinical.controller;
 
+import com.vetclinic.clinical.dto.request.CancelServiceRequest;
+import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.dto.request.LabResultRequest;
@@ -64,7 +66,7 @@ public class ParaclinicController {
     @PostMapping("/service-details/{id}/cancel")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN','VETERINARIAN')")
     public ResponseEntity<ApiResponse<ServiceDetailResponse>> cancel(@PathVariable Long id,
-                                                                     @Valid @RequestBody com.vetclinic.clinical.dto.request.CancelServiceRequest request) {
+                                                                     @Valid @RequestBody CancelServiceRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã hủy chỉ định",
                 paraclinicService.cancel(id, request.reason(), request.reasonType())));
     }
@@ -79,7 +81,7 @@ public class ParaclinicController {
     /** Kết quả xét nghiệm đã nhập của một chỉ định (có nhãn LOW / NORMAL / HIGH). */
     @GetMapping("/lab-results/{id}")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<List<com.vetclinic.clinical.dto.response.LabResultResponse>>> getLabResults(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<LabResultResponse>>> getLabResults(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(paraclinicService.labResults(id)));
     }
 

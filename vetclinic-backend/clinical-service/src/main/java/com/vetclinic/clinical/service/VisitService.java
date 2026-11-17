@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service;
 
+import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.AssignDoctorRequest;
 import com.vetclinic.clinical.dto.request.CheckInRequest;
 import com.vetclinic.clinical.dto.request.ClinicalInfoRequest;
@@ -12,6 +13,8 @@ import com.vetclinic.clinical.dto.response.VisitHistoryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.dto.response.VisitSummaryResponse;
 
+import com.vetclinic.common.dto.PageResponse;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 
@@ -22,8 +25,8 @@ public interface VisitService {
     VisitResponse checkIn(CheckInRequest request);
 
     /** Danh sách đợt khám có lọc (bảng điều phối): trạng thái, ngày check-in theo giờ phòng khám, bác sĩ, thú cưng, mã ca. Mới nhất trước. */
-    com.vetclinic.common.dto.PageResponse<VisitResponse> search(com.vetclinic.clinical.constant.VisitStatus status,
-            java.time.LocalDate date, Long doctorId, Long petId, String keyword, int page, int size);
+    PageResponse<VisitResponse> search(VisitStatus status,
+            LocalDate date, Long doctorId, Long petId, String keyword, int page, int size);
 
     VisitResponse getById(Long id);
 

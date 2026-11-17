@@ -8,6 +8,7 @@ import com.vetclinic.billing.repository.MedicineRevenueRow;
 import com.vetclinic.billing.service.RevenuePeriods.Granularity;
 import com.vetclinic.billing.service.impl.ReportServiceImpl;
 import com.vetclinic.common.exception.ErrorCode;
+import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,7 +49,7 @@ class RevenueReportTest {
     }
 
     private static List<Object[]> statusRows(Object[]... rows) {
-        List<Object[]> list = new java.util.ArrayList<>();
+        List<Object[]> list = new ArrayList<>();
         Collections.addAll(list, rows);
         return list;
     }

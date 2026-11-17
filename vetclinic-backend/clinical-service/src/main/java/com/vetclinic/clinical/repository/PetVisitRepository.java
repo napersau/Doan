@@ -3,6 +3,9 @@ package com.vetclinic.clinical.repository;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.entity.PetVisit;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -65,22 +68,22 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
     List<PetVisit> findByPetIdOrderByIdDesc(Long petId);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    org.springframework.data.domain.Page<PetVisit> findByPetId(Long petId, org.springframework.data.domain.Pageable pageable);
+    Page<PetVisit> findByPetId(Long petId, Pageable pageable);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    org.springframework.data.domain.Page<PetVisit> findByPetIdAndStatus(Long petId, VisitStatus status,
-                                                                        org.springframework.data.domain.Pageable pageable);
+    Page<PetVisit> findByPetIdAndStatus(Long petId, VisitStatus status,
+                                                                        Pageable pageable);
 
     /** Báo cáo vận hành: số ca theo trạng thái, ngày check-in trong [start, end). */
     @Query("select v.status, count(v) from PetVisit v where v.checkedInAt >= :start and v.checkedInAt < :end group by v.status")
-    List<Object[]> countByStatusBetween(@Param("start") java.time.Instant start, @Param("end") java.time.Instant end);
+    List<Object[]> countByStatusBetween(@Param("start") Instant start, @Param("end") Instant end);
 
     @Query("select count(v) from PetVisit v where v.emergency = true and v.checkedInAt >= :start and v.checkedInAt < :end")
-    long countEmergencyBetween(@Param("start") java.time.Instant start, @Param("end") java.time.Instant end);
+    long countEmergencyBetween(@Param("start") Instant start, @Param("end") Instant end);
 
     @Query("select v.doctorId, v.status, count(v) from PetVisit v where v.doctorId is not null "
             + "and v.checkedInAt >= :start and v.checkedInAt < :end group by v.doctorId, v.status")
-    List<Object[]> countByDoctorAndStatusBetween(@Param("start") java.time.Instant start, @Param("end") java.time.Instant end);
+    List<Object[]> countByDoctorAndStatusBetween(@Param("start") Instant start, @Param("end") Instant end);
 
     boolean existsByPetIdAndStatusIn(Long petId, Collection<VisitStatus> statuses);
 

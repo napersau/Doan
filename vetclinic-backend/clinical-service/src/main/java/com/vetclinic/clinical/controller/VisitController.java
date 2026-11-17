@@ -1,17 +1,26 @@
 package com.vetclinic.clinical.controller;
 
+import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.AssignDoctorRequest;
 import com.vetclinic.clinical.dto.request.CheckInRequest;
+import com.vetclinic.clinical.dto.request.ClinicalInfoRequest;
 import com.vetclinic.clinical.dto.request.CloseVisitRequest;
 import com.vetclinic.clinical.dto.request.OrderServicesRequest;
+import com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest;
 import com.vetclinic.clinical.dto.request.ReasonRequest;
 import com.vetclinic.clinical.dto.request.StartExamRequest;
+import com.vetclinic.clinical.dto.response.QueueBoardResponse;
 import com.vetclinic.clinical.dto.response.VisitHistoryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
+import com.vetclinic.clinical.service.DoctorQueueService;
+import com.vetclinic.clinical.service.VisitEnricher;
 import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.common.dto.ApiResponse;
+import com.vetclinic.common.dto.PageResponse;
 import jakarta.validation.Valid;
+import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,9 +35,9 @@ import java.util.List;
 public class VisitController {
 
     private final VisitService visitService;
-    private final com.vetclinic.clinical.service.DoctorQueueService doctorQueueService;
+    private final DoctorQueueService doctorQueueService;
     /** Số phòng của Bác sĩ lấy từ auth-service SAU commit (pet_visits không còn cột assigned_room). */
-    private final com.vetclinic.clinical.service.VisitEnricher enricher;
+    private final VisitEnricher enricher;
 
     /** UC-19: tiếp nhận khách có hẹn (appointmentId) hoặc vãng lai (petId). */
     @PostMapping("/check-in")
@@ -44,7 +53,7 @@ public class VisitController {
      */
     @GetMapping("/queue")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','ADMIN')")
-    public ResponseEntity<ApiResponse<com.vetclinic.clinical.dto.response.QueueBoardResponse>> queue() {
+    public ResponseEntity<ApiResponse<QueueBoardResponse>> queue() {
         return ResponseEntity.ok(ApiResponse.success(doctorQueueService.board()));
     }
 
@@ -58,9 +67,9 @@ public class VisitController {
     /** Danh sách đợt khám có lọc, phân trang, mới nhất trước (bảng điều phối của lễ tân, lịch sử ca của bác sĩ). */
     @GetMapping
     @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<com.vetclinic.common.dto.PageResponse<VisitResponse>>> search(
-            @RequestParam(required = false) com.vetclinic.clinical.constant.VisitStatus status,
-            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+    public ResponseEntity<ApiResponse<PageResponse<VisitResponse>>> search(
+            @RequestParam(required = false) VisitStatus status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestParam(required = false) Long doctorId,
             @RequestParam(required = false) Long petId,
             @RequestParam(required = false) String keyword,
@@ -111,7 +120,7 @@ public class VisitController {
     @PutMapping("/{id}/clinical-info")
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> clinicalInfo(@PathVariable Long id,
-                                                                   @Valid @RequestBody com.vetclinic.clinical.dto.request.ClinicalInfoRequest request) {
+                                                                   @Valid @RequestBody ClinicalInfoRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã cập nhật thông tin lâm sàng", enricher.enrich(visitService.updateClinicalInfo(id, request))));
     }
 
@@ -122,7 +131,7 @@ public class VisitController {
     @PostMapping("/{id}/paraclinical-orders")
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<VisitResponse>> paraclinicalOrders(@PathVariable Long id,
-                                                                         @Valid @RequestBody com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest request) {
+                                                                         @Valid @RequestBody ParaclinicalOrderRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã chỉ định cận lâm sàng", enricher.enrich(visitService.orderParaclinical(id, request))));
     }
 

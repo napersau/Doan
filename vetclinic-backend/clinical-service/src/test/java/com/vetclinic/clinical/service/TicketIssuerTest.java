@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -151,11 +152,11 @@ class TicketIssuerTest {
         issuer.issueForPaidServices(v, List.of(lab, us, xray), RECEPTIONIST);
 
         ArgumentCaptor<QueueTicket> saved = ArgumentCaptor.forClass(QueueTicket.class);
-        verify(ticketRepository, org.mockito.Mockito.times(2)).saveAndFlush(saved.capture());
+        verify(ticketRepository, Mockito.times(2)).saveAndFlush(saved.capture());
         assertThat(saved.getAllValues()).extracting(QueueTicket::getQueueType).containsExactly(QueueType.LABORATORY, QueueType.IMAGING);
         assertThat(saved.getAllValues()).extracting(QueueTicket::getDoctorId).containsOnlyNulls();
         ArgumentCaptor<QueueTicketItem> items = ArgumentCaptor.forClass(QueueTicketItem.class);
-        verify(itemRepository, org.mockito.Mockito.times(3)).save(items.capture());
+        verify(itemRepository, Mockito.times(3)).save(items.capture());
         assertThat(items.getAllValues()).extracting(QueueTicketItem::getVisitServiceDetailId).containsExactly(2L, 3L, 4L);
         assertThat(items.getAllValues().get(2).getTicketId()).isEqualTo(91L);   // X-quang vào chung phiếu với siêu âm
     }

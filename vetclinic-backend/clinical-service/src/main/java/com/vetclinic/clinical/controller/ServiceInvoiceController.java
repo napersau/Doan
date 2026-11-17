@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -57,7 +58,7 @@ public class ServiceInvoiceController {
     @GetMapping("/cashier/pending")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','ADMIN')")
     public ResponseEntity<ApiResponse<List<VisitResponse>>> cashierPending(
-            @org.springframework.web.bind.annotation.RequestParam com.vetclinic.clinical.service.ServiceInvoiceService.CashierSection section) {
+            @RequestParam ServiceInvoiceService.CashierSection section) {
         return ResponseEntity.ok(ApiResponse.success(enricher.enrichAll(invoiceService.cashierPending(section))));
     }
 

@@ -16,20 +16,33 @@ import com.vetclinic.appointment.entity.AppointmentStatusHistory;
 import com.vetclinic.appointment.mapper.AppointmentMapperImpl;
 import com.vetclinic.appointment.repository.AppointmentRepository;
 import com.vetclinic.appointment.repository.AppointmentStatusHistoryRepository;
+import com.vetclinic.appointment.service.AppointmentFilter;
 import com.vetclinic.appointment.service.SlotLockService;
 import com.vetclinic.appointment.service.SlotPolicy;
 import com.vetclinic.common.dto.ApiResponse;
+import com.vetclinic.common.event.AppointmentBookedEvent;
+import com.vetclinic.common.event.AppointmentNoShowEvent;
+import com.vetclinic.common.event.AppointmentStatusChangedEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import java.util.Collection;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -142,8 +155,8 @@ class AppointmentServiceImplTest {
         assertThat(history.getChangedByUserId()).isEqualTo(OWNER);
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, org.mockito.Mockito.times(1)).publishEvent(event.capture());   // chỉ appointment.booked (v3.0)
-        com.vetclinic.common.event.AppointmentBookedEvent booked = (com.vetclinic.common.event.AppointmentBookedEvent) event.getValue();
+        verify(eventPublisher, Mockito.times(1)).publishEvent(event.capture());   // chỉ appointment.booked (v3.0)
+        AppointmentBookedEvent booked = (AppointmentBookedEvent) event.getValue();
         assertThat(booked.routingKey()).isEqualTo("appointment.booked");
         assertThat(booked.appointmentId()).isEqualTo(100L);
         assertThat(booked.ownerId()).isEqualTo(OWNER);
@@ -159,7 +172,7 @@ class AppointmentServiceImplTest {
         service.create(new CreateAppointmentRequest(PET, null, TOMORROW, LocalTime.of(9, 0), "Khám", null));
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<java.util.Collection<String>> locks = ArgumentCaptor.forClass(java.util.Collection.class);
+        ArgumentCaptor<Collection<String>> locks = ArgumentCaptor.forClass(Collection.class);
         verify(slotLockService).runLocked(locks.capture(), any());
         assertThat(locks.getValue()).containsExactlyInAnyOrder(
                 SlotLockService.slotLock(TOMORROW, LocalTime.of(9, 0)),
@@ -426,12 +439,12 @@ class AppointmentServiceImplTest {
         assertThat(a.getStatus()).isEqualTo(AppointmentStatus.PENDING);
     }
 
-    private com.vetclinic.common.event.AppointmentStatusChangedEvent publishedStatusEvent() {
+    private AppointmentStatusChangedEvent publishedStatusEvent() {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+        verify(eventPublisher, Mockito.atLeastOnce()).publishEvent(captor.capture());
         return captor.getAllValues().stream()
-                .filter(com.vetclinic.common.event.AppointmentStatusChangedEvent.class::isInstance)
-                .map(com.vetclinic.common.event.AppointmentStatusChangedEvent.class::cast)
+                .filter(AppointmentStatusChangedEvent.class::isInstance)
+                .map(AppointmentStatusChangedEvent.class::cast)
                 .findFirst().orElseThrow();
     }
 
@@ -463,7 +476,7 @@ class AppointmentServiceImplTest {
         assertThat(event.status()).isEqualTo("CANCELLED");
         assertThat(event.reason()).isEqualTo("Phòng khám bảo trì thiết bị");
 
-        org.mockito.Mockito.clearInvocations(eventPublisher);
+        Mockito.clearInvocations(eventPublisher);
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment own = appointment(2L, OWNER, AppointmentStatus.CONFIRMED, TOMORROW, LocalTime.of(10, 0));
         lenient().when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(own));
@@ -482,8 +495,8 @@ class AppointmentServiceImplTest {
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, org.mockito.Mockito.times(1)).publishEvent(captor.capture());   // không để chủ nuôi nhận hai thông báo
-        var event = (com.vetclinic.common.event.AppointmentNoShowEvent) captor.getValue();
+        verify(eventPublisher, Mockito.times(1)).publishEvent(captor.capture());   // không để chủ nuôi nhận hai thông báo
+        var event = (AppointmentNoShowEvent) captor.getValue();
         assertThat(event.actorUserId()).isNull();
     }
 
@@ -647,10 +660,10 @@ class AppointmentServiceImplTest {
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+        verify(eventPublisher, Mockito.atLeastOnce()).publishEvent(captor.capture());
         var noShow = captor.getAllValues().stream()
-                .filter(com.vetclinic.common.event.AppointmentNoShowEvent.class::isInstance)
-                .map(com.vetclinic.common.event.AppointmentNoShowEvent.class::cast)
+                .filter(AppointmentNoShowEvent.class::isInstance)
+                .map(AppointmentNoShowEvent.class::cast)
                 .findFirst().orElseThrow();
         assertThat(noShow.routingKey()).isEqualTo("appointment.no_show");
         assertThat(noShow.actorUserId()).isNull();                 // null = hệ thống tự quét
@@ -820,12 +833,12 @@ class AppointmentServiceImplTest {
     @Test
     void search_byOwner_ignoresTheOwnerIdParameterAndUsesTheCallersOwnPets() {
         loginAs(OWNER, RoleCode.PET_OWNER);
-        when(appointmentRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class),
-                any(org.springframework.data.domain.Pageable.class)))
-                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+        when(appointmentRepository.findAll(any(Specification.class),
+                any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
 
         // Cố ý gửi ownerId của người khác: phải bị bỏ qua
-        service.search(new com.vetclinic.appointment.service.AppointmentFilter(
+        service.search(new AppointmentFilter(
                 OTHER_OWNER, null, null, null, null, null, null, false, 0, 20));
 
         verify(petClient).getPetsByOwner(OWNER);
@@ -835,12 +848,12 @@ class AppointmentServiceImplTest {
     @Test
     void search_byReceptionistWithoutOwnerFilter_doesNotCallClinical() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(appointmentRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class),
-                any(org.springframework.data.domain.Pageable.class)))
-                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(
+        when(appointmentRepository.findAll(any(Specification.class),
+                any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(
                         appointment(1L, OWNER, AppointmentStatus.PENDING, TOMORROW, LocalTime.of(9, 0)))));
 
-        var page = service.search(new com.vetclinic.appointment.service.AppointmentFilter(
+        var page = service.search(new AppointmentFilter(
                 null, null, null, null, null, null, null, false, 0, 20));
 
         verify(petClient, never()).getPetsByOwner(any());
@@ -852,24 +865,24 @@ class AppointmentServiceImplTest {
     void search_whenClinicalIsDown_failsClosedInsteadOfDroppingTheOwnerFilter() {
         loginAs(OWNER, RoleCode.PET_OWNER);
         when(petClient.getPetsByOwner(OWNER)).thenThrow(new RuntimeException("clinical down"));
-        var captor = org.mockito.ArgumentCaptor.forClass(org.springframework.data.jpa.domain.Specification.class);
-        when(appointmentRepository.findAll(captor.capture(), any(org.springframework.data.domain.Pageable.class)))
-                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+        var captor = ArgumentCaptor.forClass(Specification.class);
+        when(appointmentRepository.findAll(captor.capture(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
 
-        service.search(new com.vetclinic.appointment.service.AppointmentFilter(
+        service.search(new AppointmentFilter(
                 null, null, null, null, null, null, null, false, 0, 20));
 
         // Vẫn có điều kiện lọc: danh sách thú cưng rỗng => specification KHỚP KHÔNG LỊCH NÀO (disjunction),
         // tuyệt đối không bỏ điều kiện (nếu không chủ nuôi sẽ thấy lịch của người khác)
         @SuppressWarnings({"unchecked", "rawtypes"})
-        org.springframework.data.jpa.domain.Specification<Appointment> applied = captor.getValue();
+        Specification<Appointment> applied = captor.getValue();
         @SuppressWarnings("unchecked")
-        jakarta.persistence.criteria.Root<Appointment> root = mock(jakarta.persistence.criteria.Root.class);
-        jakarta.persistence.criteria.CriteriaBuilder cb = mock(jakarta.persistence.criteria.CriteriaBuilder.class);
-        jakarta.persistence.criteria.Predicate none = mock(jakarta.persistence.criteria.Predicate.class);
+        Root<Appointment> root = mock(Root.class);
+        CriteriaBuilder cb = mock(CriteriaBuilder.class);
+        Predicate none = mock(Predicate.class);
         when(cb.disjunction()).thenReturn(none);
-        when(cb.and(any(jakarta.persistence.criteria.Predicate[].class))).thenReturn(none);
-        applied.toPredicate(root, mock(jakarta.persistence.criteria.CriteriaQuery.class), cb);
+        when(cb.and(any(Predicate[].class))).thenReturn(none);
+        applied.toPredicate(root, mock(CriteriaQuery.class), cb);
         verify(cb).disjunction();
     }
 
@@ -895,7 +908,7 @@ class AppointmentServiceImplTest {
 
     private AppointmentStatusHistory lastHistory() {
         ArgumentCaptor<AppointmentStatusHistory> captor = ArgumentCaptor.forClass(AppointmentStatusHistory.class);
-        verify(historyRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        verify(historyRepository, Mockito.atLeastOnce()).save(captor.capture());
         return captor.getValue();
     }
 
