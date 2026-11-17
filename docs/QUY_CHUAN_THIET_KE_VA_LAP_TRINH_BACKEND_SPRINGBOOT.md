@@ -870,7 +870,7 @@ public class TicketIssuer {
 }
 ```
 
-> Phát số `ticket_no` bằng `MAX + 1` có thể trùng khi hai quầy thu cùng lúc; ràng buộc `UNIQUE (queue_type, service_date, ticket_no)` chặn lại và tầng service bắt `DataIntegrityViolationException` để thử lại tối đa 3 lần (`@Retryable`). Hủy dịch vụ đã thu: lý do "phòng khám không thực hiện được" → hóa đơn `REFUNDED`; lý do "khách tự hủy" → giữ `PAID`; phí khám không bao giờ `REFUNDED` (lỗi `CLIN_1310`).
+> Phát số `ticket_no` bằng `MAX + 1` có thể trùng khi hai quầy thu cùng lúc; ràng buộc `UNIQUE (queue_type, service_date, ticket_no)` chặn lại và tầng service bắt `DataIntegrityViolationException` để thử lại tối đa 8 lần (mỗi lần là một giao dịch mới, chờ ngẫu nhiên tăng dần giữa các lần; kiểm thử 6 quầy thu đồng thời cho thấy 3 lần là không đủ). Hủy dịch vụ đã thu: lý do "phòng khám không thực hiện được" → hóa đơn `REFUNDED`; lý do "khách tự hủy" → giữ `PAID`; phí khám không bao giờ `REFUNDED` (lỗi `CLIN_1310`).
 
 ---
 

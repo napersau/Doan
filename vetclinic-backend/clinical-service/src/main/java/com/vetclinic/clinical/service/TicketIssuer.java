@@ -160,8 +160,8 @@ public class TicketIssuer {
     }
 
     /**
-     * Sau khi một dịch vụ của phiếu phòng hoàn tất / bị hủy: phiếu đang chờ mà không còn dịch vụ chờ -> CANCELLED; phiếu đang làm
-     * mà mọi dịch vụ đã xong / hủy -> DONE (hoặc CANCELLED nếu không dịch vụ nào được làm).
+     * Sau khi một dịch vụ của phiếu phòng hoàn tất / bị hủy (SM-07): phiếu đang chờ mà không còn dịch vụ chờ -> CANCELLED; phiếu đang
+     * làm (IN_SERVICE) mà mọi dịch vụ đã xong / hủy -> DONE (đã phục vụ xong lượt này, kể cả khi dịch vụ bị hủy giữa chừng).
      */
     public void refreshRoomTicketOf(Long detailId) {
         roomTicketOf(detailId).ifPresent(ticket -> {
@@ -171,11 +171,10 @@ public class TicketIssuer {
             List<VisitServiceDetail> details = detailRepository.findAllById(detailIdsOf(ticket.getId()));
             boolean anyPending = details.stream().anyMatch(d -> d.getStatus() == ServiceDetailStatus.PENDING);
             boolean anyOpen = details.stream().anyMatch(d -> ServiceDetailStatus.OPEN.contains(d.getStatus()));
-            boolean anyCompleted = details.stream().anyMatch(d -> d.getStatus() == ServiceDetailStatus.COMPLETED);
             if (ticket.getStatus() == TicketStatus.WAITING && !anyPending) {
                 ticket.setStatus(TicketStatus.CANCELLED);
             } else if (ticket.getStatus() == TicketStatus.IN_SERVICE && !anyOpen) {
-                ticket.setStatus(anyCompleted ? TicketStatus.DONE : TicketStatus.CANCELLED);
+                ticket.setStatus(TicketStatus.DONE);
             } else {
                 return;
             }

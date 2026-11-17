@@ -213,7 +213,7 @@ class TicketIssuerTest {
     }
 
     @Test
-    void refreshRoomTicket_isDoneWhenEveryServiceIsFinished_andCancelledWhenNothingWasDone() {
+    void refreshRoomTicket_inServiceBecomesDoneWhenNothingIsOpen_waitingBecomesCancelledWhenNothingIsPending() {
         QueueTicket inService = ticket(80L, QueueType.IMAGING, 100L, null, 1, 0, TicketStatus.IN_SERVICE);
         when(itemRepository.findByVisitServiceDetailId(3L)).thenReturn(Optional.of(QueueTicketItem.of(80L, 3L)));
         when(ticketRepository.findById(80L)).thenReturn(Optional.of(inService));
