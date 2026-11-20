@@ -1,5 +1,7 @@
 package com.vetclinic.billing.service.impl;
 
+import com.vetclinic.common.event.DomainEvent;
+import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.billing.constant.InventoryTransactionType;
 import com.vetclinic.billing.constant.PaymentStatus;
 import com.vetclinic.billing.constant.VisitStatus;
@@ -30,7 +32,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -53,6 +54,7 @@ import static com.vetclinic.billing.testsupport.TestData.prescription;
 import static com.vetclinic.billing.testsupport.TestData.visit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.inOrder;
@@ -78,7 +80,7 @@ class MedicineInvoiceServiceImplTest {
     @Mock
     private StockAlertPublisher stockAlerts;
     @Mock
-    private ApplicationEventPublisher publisher;
+    private OutboxWriter outboxWriter;
     @Mock
     private EntityManager entityManager;
 
@@ -114,7 +116,7 @@ class MedicineInvoiceServiceImplTest {
         });
         lenient().when(visitLookup.tryFind(anyLong())).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
         service = new MedicineInvoiceServiceImpl(invoiceRepository, prescriptionRepository, medicineRepository,
-                inventoryRepository, visitLookup, new BillingAssembler(), stockAlerts, publisher, entityManager, CLOCK, tm);
+                inventoryRepository, visitLookup, new BillingAssembler(), stockAlerts, outboxWriter, entityManager, CLOCK, tm);
     }
 
     @AfterEach
@@ -394,8 +396,8 @@ class MedicineInvoiceServiceImplTest {
         assertThat(log.getValue().getMedicineInvoiceId()).isEqualTo(5L);
         assertThat(log.getValue().getCreatedBy()).isEqualTo(RECEPTIONIST);
 
-        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(events.capture());
+        ArgumentCaptor<DomainEvent> events = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("MEDICINE_INVOICE"), eq(5L), events.capture());
         MedicineInvoicePaidEvent paid = (MedicineInvoicePaidEvent) events.getValue();
         assertThat(paid.payableAmount()).isEqualByComparingTo("157500");
         assertThat(paid.visitId()).isEqualTo(7L);
@@ -437,7 +439,7 @@ class MedicineInvoiceServiceImplTest {
         assertThat(invoice.getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
         assertThat(invoice.getPaidAt()).isNull();
         verify(invoiceRepository, never()).saveAndFlush(any());
-        verify(publisher, never()).publishEvent(any());   // không có thông báo giả
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));   // không có thông báo giả
         verify(stockAlerts, never()).publishIfLow(any(), anyLong());
     }
 

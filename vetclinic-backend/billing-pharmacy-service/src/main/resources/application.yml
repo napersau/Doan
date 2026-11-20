@@ -33,6 +33,7 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:vetclinic}
     password: ${RABBITMQ_PASSWORD:vetclinic_dev}
+    publisher-confirm-type: correlated   # OutboxRelay chờ RabbitMQ xác nhận mới đánh dấu PUBLISHED
     listener:
       simple:
         default-requeue-rejected: false   # Hết retry -> đẩy sang DLQ, không requeue vô hạn

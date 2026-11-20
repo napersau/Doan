@@ -21,12 +21,13 @@ import com.vetclinic.billing.service.MedicineInvoiceAmounts;
 import com.vetclinic.billing.service.MedicineInvoiceService;
 import com.vetclinic.billing.service.StockAlertPublisher;
 import com.vetclinic.billing.service.VisitLookup;
+import com.vetclinic.common.event.outbox.OutboxWriter;
+import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.event.MedicineInvoicePaidEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.SecurityUtils;
 import jakarta.persistence.EntityManager;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -52,6 +53,9 @@ import java.util.stream.Collectors;
 @Service
 public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
 
+    /** aggregate_type của các dòng outbox gắn với một hóa đơn thuốc (aggregate_id = id hóa đơn). */
+    private static final String AGGREGATE_INVOICE = "MEDICINE_INVOICE";
+
     private final MedicineInvoiceRepository invoiceRepository;
     private final PrescriptionRepository prescriptionRepository;
     private final MedicineRepository medicineRepository;
@@ -59,7 +63,7 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
     private final VisitLookup visitLookup;
     private final BillingAssembler assembler;
     private final StockAlertPublisher stockAlerts;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxWriter outboxWriter;
     private final EntityManager entityManager;
     private final Clock clock;
     private final TransactionTemplate tx;
@@ -70,7 +74,7 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
                                       MedicineRepository medicineRepository,
                                       InventoryTransactionRepository inventoryRepository, VisitLookup visitLookup,
                                       BillingAssembler assembler, StockAlertPublisher stockAlerts,
-                                      ApplicationEventPublisher eventPublisher, EntityManager entityManager,
+                                      OutboxWriter outboxWriter, EntityManager entityManager,
                                       Clock clock, PlatformTransactionManager transactionManager) {
         this.invoiceRepository = invoiceRepository;
         this.prescriptionRepository = prescriptionRepository;
@@ -79,7 +83,7 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
         this.visitLookup = visitLookup;
         this.assembler = assembler;
         this.stockAlerts = stockAlerts;
-        this.eventPublisher = eventPublisher;
+        this.outboxWriter = outboxWriter;
         this.entityManager = entityManager;
         this.clock = clock;
         this.tx = new TransactionTemplate(transactionManager);
@@ -257,7 +261,8 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
         invoice.setPaidAt(clock.instant());
         MedicineInvoice saved = invoiceRepository.saveAndFlush(invoice);   // kiểm tra @Version ngay trong giao dịch
 
-        eventPublisher.publishEvent(new MedicineInvoicePaidEvent(UUID.randomUUID(), clock.instant(), cashierId,
+        // Transactional Outbox: ghi cùng giao dịch trừ kho + thu tiền; OutboxRelay gửi sang RabbitMQ sau khi commit
+        outboxWriter.write(AGGREGATE_INVOICE, saved.getId(), new MedicineInvoicePaidEvent(UuidV7.generate(clock), clock.instant(), cashierId,
                 saved.getId(), saved.getInvoiceCode(), saved.getPrescription().getId(), saved.getPrescription().getVisitId(),
                 MedicineInvoiceAmounts.payable(saved.getItems(), saved.getDiscountAmount())));
         touched.forEach(medicine -> stockAlerts.publishIfLow(medicine, cashierId));
