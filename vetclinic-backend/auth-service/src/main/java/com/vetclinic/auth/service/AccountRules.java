@@ -28,8 +28,7 @@ public final class AccountRules {
         switch (user.getStatus()) {
             case ACTIVE -> {
             }
-            case LOCKED -> throw new AppException(ErrorCode.ACCOUNT_LOCKED);
-            case INACTIVE -> throw new AppException(ErrorCode.ACCOUNT_INACTIVE);
+            case LOCKED, INACTIVE -> throw new AppException(ErrorCode.ACCOUNT_DISABLED);
         }
     }
 }

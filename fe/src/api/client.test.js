@@ -79,4 +79,12 @@ describe('request', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
+
+  test('đăng nhập tài khoản bị khóa trả 401 AUTH_1107 nhưng KHÔNG kích hoạt refresh dù đang có phiên cũ', async () => {
+    fetch.mockResolvedValueOnce(fail(401, { errorCode: 'AUTH_1107', message: 'Tài khoản đã bị khóa hoặc ngừng sử dụng' }));
+    await expect(request('/api/v1/auth/login', { method: 'POST', body: {}, auth: false })).rejects.toMatchObject({ code: 'AUTH_1107', status: 401 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).not.toMatch(/\/auth\/refresh/);
+    expect(getSession()?.refreshToken).toBe('old-refresh');
+  });
 });

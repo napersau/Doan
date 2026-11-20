@@ -682,7 +682,7 @@ public class VisitServiceImpl implements VisitService {
             throw new AppException(ErrorCode.USER_NOT_FOUND);
         }
         if (doctor.role() != RoleCode.VETERINARIAN || !"ACTIVE".equals(doctor.status())) {
-            throw new AppException(ErrorCode.INVALID_DOCTOR);
+            throw new AppException(ErrorCode.DOCTOR_INACTIVE);
         }
         return doctor;
     }

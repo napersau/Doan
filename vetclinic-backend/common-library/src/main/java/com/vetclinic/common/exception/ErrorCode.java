@@ -5,8 +5,9 @@ import org.springframework.http.HttpStatus;
 
 /**
  * Danh mục mã lỗi dùng chung toàn hệ thống.
- * Nguồn chuẩn: QUY_CHUAN_THIET_KE_VA_LAP_TRINH_BACKEND_SPRINGBOOT.md v3.0, mục 5.1 (39 mã). Số trong docs được ưu tiên;
- * mã chỉ có trong code thì nằm cuối nhóm, không đánh số lại. Đã đánh số lại ngày 12/11/2026 (LO_TRINH_SUA_CODE_V3.md, bước 1.1).
+ * Nguồn chuẩn: QUY_CHUAN_THIET_KE_VA_LAP_TRINH_BACKEND_SPRINGBOOT.md v4.0, mục 5.1 (49 mã; {@code ErrorCodeCatalogTest} giữ đúng danh sách
+ * này). Số trong docs được ưu tiên; mã chỉ có trong code thì nằm cuối nhóm. Đánh số lại ngày 12/11/2026 (v3, bước 1.1) và
+ * 20/11/2026 (LO_TRINH_SUA_CODE_V4.md bước 0.4, quyết định D3: nhường AUTH_1107/1108, CLIN_1315-1318, PHARM_1412 cho docs v4.0).
  */
 @Getter
 public enum ErrorCode {
@@ -28,8 +29,9 @@ public enum ErrorCode {
     REFRESH_TOKEN_NOT_FOUND("AUTH_1104", "Không tìm thấy phiên Refresh Token", HttpStatus.UNAUTHORIZED),
     REFRESH_TOKEN_REVOKED("AUTH_1105", "Refresh Token đã bị thu hồi hoặc đã qua sử dụng (Cảnh báo bảo mật)", HttpStatus.UNAUTHORIZED),
     REFRESH_TOKEN_EXPIRED("AUTH_1106", "Refresh Token đã hết hạn, vui lòng đăng nhập lại", HttpStatus.UNAUTHORIZED),
-    ACCOUNT_LOCKED("AUTH_1107", "Tài khoản đã bị khóa, vui lòng liên hệ quản trị viên", HttpStatus.FORBIDDEN),
-    ACCOUNT_INACTIVE("AUTH_1108", "Tài khoản đã ngừng hoạt động, vui lòng liên hệ quản trị viên", HttpStatus.FORBIDDEN),
+    // v4.0: gộp ACCOUNT_LOCKED + ACCOUNT_INACTIVE (v3) thành một mã, trả 401 theo docs
+    ACCOUNT_DISABLED("AUTH_1107", "Tài khoản đã bị khóa hoặc ngừng sử dụng, vui lòng liên hệ quản trị viên", HttpStatus.UNAUTHORIZED),
+    VET_PROFILE_REQUIRED("AUTH_1108", "Tài khoản Bác sĩ phải có hồ sơ chuyên môn (số chứng chỉ hành nghề)", HttpStatus.BAD_REQUEST),
     USERNAME_ALREADY_EXISTS("AUTH_1109", "Tên đăng nhập đã tồn tại trong hệ thống", HttpStatus.CONFLICT),
     ROLE_NOT_FOUND("AUTH_1110", "Không tìm thấy vai trò", HttpStatus.NOT_FOUND),
     INVALID_CURRENT_PASSWORD("AUTH_1111", "Mật khẩu hiện tại không chính xác", HttpStatus.BAD_REQUEST),
@@ -67,10 +69,12 @@ public enum ErrorCode {
     TICKET_NOT_FOUND("CLIN_1312", "Không tìm thấy phiếu xếp hàng", HttpStatus.NOT_FOUND),
     TICKET_NOT_WAITING("CLIN_1313", "Phiếu không còn ở trạng thái chờ gọi", HttpStatus.CONFLICT),
     NO_QUEUE_TICKET("CLIN_1314", "Ca chưa có phiếu xếp hàng (khách chưa nộp phí khám / tiền dịch vụ)", HttpStatus.BAD_REQUEST),
-    SPECIES_NOT_FOUND("CLIN_1315", "Không tìm thấy loài thú cưng", HttpStatus.NOT_FOUND),
-    INVALID_DOCTOR("CLIN_1316", "Người được chọn không phải bác sĩ đang hoạt động", HttpStatus.BAD_REQUEST),
-    LAB_ITEM_NOT_FOUND("CLIN_1317", "Không tìm thấy chỉ số xét nghiệm", HttpStatus.NOT_FOUND),
-    CODE_ALREADY_EXISTS("CLIN_1318", "Mã đã tồn tại trong danh mục", HttpStatus.CONFLICT),
+    // v4.0 (CLIN_1315-1318): SERVICE_PRICE_NOT_FOUND, MEDICAL_RECORD_LOCKED, QUEUE_UNAVAILABLE chưa có nơi dùng cho tới các Phase sau
+    SERVICE_PRICE_NOT_FOUND("CLIN_1315", "Dịch vụ chưa có giá đang áp dụng", HttpStatus.CONFLICT),
+    // v4.0: gộp INVALID_DOCTOR (v3, 400) vào DOCTOR_INACTIVE (409 theo docs)
+    DOCTOR_INACTIVE("CLIN_1316", "Bác sĩ được chọn đã bị khóa hoặc ngừng làm việc", HttpStatus.CONFLICT),
+    MEDICAL_RECORD_LOCKED("CLIN_1317", "Hồ sơ khám đã khóa (đợt khám đã chốt), không thể chỉnh sửa", HttpStatus.CONFLICT),
+    QUEUE_UNAVAILABLE("CLIN_1318", "Hàng đợi tạm thời không truy cập được, vui lòng thử lại sau ít giây", HttpStatus.SERVICE_UNAVAILABLE),
     LAB_ITEM_NOT_IN_SERVICE("CLIN_1319", "Chỉ số này không thuộc dịch vụ xét nghiệm được chỉ định", HttpStatus.BAD_REQUEST),
     // Mã chỉ có trong code (không có trong Quy chuẩn §5.1): dời xuống cuối nhóm ngày 12/11/2026 để nhường số 1303-1311 cho docs
     SERVICE_NOT_FOUND("CLIN_1320", "Không tìm thấy dịch vụ kỹ thuật hoặc dịch vụ đã ngừng sử dụng", HttpStatus.NOT_FOUND),
@@ -79,6 +83,10 @@ public enum ErrorCode {
     // Dời số ngày 17/11/2026 để nhường CLIN_1313 / CLIN_1314 cho phiếu xếp hàng (mã chỉ có trong code)
     LAB_REFERENCE_NOT_FOUND("CLIN_1323", "Chưa cấu hình khoảng tham chiếu của chỉ số này cho loài của thú cưng", HttpStatus.BAD_REQUEST),
     INVALID_IMAGING_FILE("CLIN_1324", "Tệp ảnh không hợp lệ (chỉ nhận JPEG, PNG hoặc DICOM, tối đa 20MB)", HttpStatus.BAD_REQUEST),
+    // Dời số ngày 20/11/2026 (D3) để nhường CLIN_1315-1318 cho docs v4.0 (mã chỉ có trong code)
+    SPECIES_NOT_FOUND("CLIN_1325", "Không tìm thấy loài thú cưng", HttpStatus.NOT_FOUND),
+    LAB_ITEM_NOT_FOUND("CLIN_1326", "Không tìm thấy chỉ số xét nghiệm", HttpStatus.NOT_FOUND),
+    CODE_ALREADY_EXISTS("CLIN_1327", "Mã đã tồn tại trong danh mục", HttpStatus.CONFLICT),
 
     // 5. Hóa đơn & Kho dược (BILL/PHARM: 1400 - 1499) – dùng cho cả service_invoices (clinical) và medicine_invoices (billing-pharmacy)
     INVOICE_NOT_FOUND("BILL_1401", "Không tìm thấy hóa đơn", HttpStatus.NOT_FOUND),
@@ -90,9 +98,12 @@ public enum ErrorCode {
     PRESCRIPTION_ALREADY_INVOICED("PHARM_1407", "Đơn thuốc này đã được lập hóa đơn thuốc trước đó", HttpStatus.CONFLICT),
     INVOICE_ALREADY_CANCELLED("BILL_1408", "Hóa đơn này đã bị hủy", HttpStatus.CONFLICT),
     VISIT_NOT_READY_FOR_PAYMENT("BILL_1409", "Dịch vụ làm tại phòng chỉ thu khi Bác sĩ đã chốt chuyên môn", HttpStatus.BAD_REQUEST),
+    // v4.0: chưa có nơi dùng cho tới bước đặt giá theo thời điểm hiệu lực (PriceBook)
+    PRICE_EFFECTIVE_DATE_INVALID("BILL_1410", "Thời điểm hiệu lực của giá mới phải sau thời điểm bắt đầu của giá đang áp dụng", HttpStatus.BAD_REQUEST),
+    MEDICINE_PRICE_NOT_FOUND("PHARM_1412", "Thuốc chưa có giá bán đang áp dụng", HttpStatus.CONFLICT),
     PRESCRIPTION_LOCKED("PHARM_1411", "Đơn thuốc đã khóa (đợt khám đã chốt hoặc đơn đã được bán), không thể chỉnh sửa", HttpStatus.CONFLICT),
-    // Mã chỉ có trong code (không có trong Quy chuẩn §5.1), giữ nguyên số đã dùng
-    INVALID_STOCK_ADJUSTMENT("PHARM_1412", "Điều chỉnh làm tồn kho âm, không thể thực hiện", HttpStatus.BAD_REQUEST),
+    // Mã chỉ có trong code (không có trong Quy chuẩn §5.1); dời từ PHARM_1412 ngày 20/11/2026 (D3) để nhường số cho docs v4.0
+    INVALID_STOCK_ADJUSTMENT("PHARM_1415", "Điều chỉnh làm tồn kho âm, không thể thực hiện", HttpStatus.BAD_REQUEST),
     // Dời số ngày 12/11/2026 để nhường PHARM_1408/1409/1410/1411 cho docs
     PRESCRIPTION_ALREADY_EXISTS("PHARM_1413", "Đợt khám này đã có đơn thuốc, hãy cập nhật đơn hiện có", HttpStatus.CONFLICT),
     MEDICINE_CODE_ALREADY_EXISTS("PHARM_1414", "Mã thuốc đã tồn tại trong danh mục", HttpStatus.CONFLICT);

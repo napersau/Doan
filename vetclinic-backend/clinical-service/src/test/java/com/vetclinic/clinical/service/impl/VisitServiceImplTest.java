@@ -408,7 +408,7 @@ class VisitServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubDoctor(30L, RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
 
-        assertError(ErrorCode.INVALID_DOCTOR, () -> service.checkIn(new CheckInRequest(11L, null, null, false, 30L)));
+        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.checkIn(new CheckInRequest(11L, null, null, false, 30L)));
         verify(visitRepository, never()).saveAndFlush(any());
     }
 
@@ -418,8 +418,8 @@ class VisitServiceImplTest {
         stubDoctor(30L, RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
         stubDoctor(31L, RoleCode.VETERINARIAN, "LOCKED", "P03");
 
-        assertError(ErrorCode.INVALID_DOCTOR, () -> service.assignDoctor(100L, new AssignDoctorRequest(30L)));
-        assertError(ErrorCode.INVALID_DOCTOR, () -> service.assignDoctor(100L, new AssignDoctorRequest(31L)));
+        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.assignDoctor(100L, new AssignDoctorRequest(30L)));
+        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.assignDoctor(100L, new AssignDoctorRequest(31L)));
         verify(lockService, never()).runLocked(anyCollection(), any());
     }
 

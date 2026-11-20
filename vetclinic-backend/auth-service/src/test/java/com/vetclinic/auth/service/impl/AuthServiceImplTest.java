@@ -121,7 +121,7 @@ class AuthServiceImplTest {
 
         assertThatThrownBy(() -> service.login(new LoginRequest("admin", PASSWORD)))
                 .isInstanceOf(AppException.class)
-                .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_LOCKED);
+                .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_DISABLED);
     }
 
     @Test
@@ -222,7 +222,7 @@ class AuthServiceImplTest {
 
         assertThatThrownBy(() -> service.refresh("t"))
                 .isInstanceOf(AppException.class)
-                .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_LOCKED);
+                .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_DISABLED);
 
         verify(refreshTokenRepository).revokeAllUserTokens(token.getUser().getId());
         verify(refreshTokenRepository, never()).save(any());
