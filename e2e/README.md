@@ -32,11 +32,15 @@ Yêu cầu: Node 18+ (dùng `fetch`, `FormData`), Docker Compose (script đối 
 
 ## Lưu ý
 
-- Các kịch bản **tạo và để lại dữ liệu nghiệp vụ** (đợt khám, hóa đơn, lịch hẹn, thú cưng thử, kho thuốc bị trừ / điều chỉnh) và dùng ID seed cố
-  định (thú cưng #1/#2, thuốc #1 tồn 200, bác sĩ #2/#3, `Admin@123`). Muốn chạy lại phải reset CSDL (`docker compose down -v`).
+- Hàm dùng chung nằm ở `lib/api.mjs` (`call`, `login`, `check`, `step`, `finish`, `sql`…). **Không viết cứng id số**: id dữ liệu seed tra
+  qua `lib/ids.mjs` theo mã ổn định — tài khoản theo `username`, thú cưng theo `petCode`, loài / dịch vụ / thuốc theo `code`
+  (`seedIds()` trả `ID.user.bs_tien`, `ID.pet.lu`, `ID.service.LAB_CBC`, `ID.medicine.MED_AMOX`…; câu SQL đối chiếu dùng câu con theo mã).
+  Khi khóa đổi sang UUIDv7 (lộ trình v4) chỉ phải sửa `lib/ids.mjs` và vài câu SQL.
+- Các kịch bản **tạo và để lại dữ liệu nghiệp vụ** (đợt khám, hóa đơn, lịch hẹn, thú cưng thử, kho thuốc bị trừ / điều chỉnh) và dựa vào trạng
+  thái của dữ liệu seed (Lu chưa có đợt khám mở, Clavamox tồn 200, `Admin@123`). Muốn chạy lại phải reset CSDL (`docker compose down -v`).
   Thứ tự `backend` → `notification` → `giao-dien` trong `run_all.sh` đã tính tới tồn kho còn lại giữa các kịch bản.
 - `fe_smoke_v3` tự tạo 4 tài khoản nhân sự (`0990000001..4`, mật khẩu `Smoke@1234`) nếu chưa có.
 - Lịch sử thông báo của notification-service nằm trong bộ nhớ nên còn lại giữa các lần chạy.
 - Kiểm tra email cần Mailpit truy cập được (cổng 8025 chỉ mở khi dùng `docker-compose.dev.yml`); nếu không, phần email được bỏ qua.
-- `features_v3.mjs` chạy lại được khi đặt `E2E_CLEAN=1`: khi đó đầu script HỦY các đợt khám dở dang của bác sĩ #2-#4 bằng một câu SQL. **Không** đặt biến này trên CSDL đang demo thủ công (ca đang chờ sẽ bị hủy); mặc định script không dọn gì. Kiểm tra email cần Mailpit truy cập được (dùng `-f docker-compose.dev.yml`).
+- `features_v3.mjs` chạy lại được khi đặt `E2E_CLEAN=1`: khi đó đầu script HỦY các đợt khám dở dang của bác sĩ `bs_tien` / `bs_an` / `bs_mai` bằng một câu SQL. **Không** đặt biến này trên CSDL đang demo thủ công (ca đang chờ sẽ bị hủy); mặc định script không dọn gì. Kiểm tra email cần Mailpit truy cập được (dùng `-f docker-compose.dev.yml`).
 - Việc đặt lịch đồng thời dựa vào sức chứa mỗi khung = số bác sĩ ACTIVE × 2: chạy sau `auth.sh` (tạo thêm bác sĩ) sẽ làm đổi con số 6.

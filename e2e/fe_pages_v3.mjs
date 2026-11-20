@@ -3,21 +3,12 @@
 // không hiện khung lỗi và không phát sinh lỗi console / HTTP ≥ 400.
 // Chạy: node e2e/fe_pages_v3.mjs   (stack đang chạy, giao diện ở :3000 — image frontend của compose — và dữ liệu seed)
 import { launchChrome, sleep } from './fe_smoke_v3.mjs';
+import { PASSWORD, RUN, call, check, finish, login, run, step } from './lib/api.mjs';
+import { ids } from './lib/ids.mjs';
 
-const API = process.env.API_URL || 'http://localhost:8080';
 const FE = `http://localhost:${process.env.FE_PORT || 3000}`;
-const PASSWORD = 'Admin@123';
-const RUN = Date.now().toString().slice(-6);
-let passed = 0; const failures = [];
-const check = (name, ok, extra = '') => { if (ok) { passed += 1; console.log(`  PASS ${name}`); } else { failures.push(name); console.log(`  FAIL ${name} ${extra}`); } };
-const step = (title) => console.log(`\n== ${title}`);
-
-async function api(method, url, body, token) {
-  const r = await fetch(`${API}${url}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  const t = await r.text(); let j = {}; try { j = t ? JSON.parse(t) : {}; } catch { j = {}; }
-  return { status: r.status, data: j.data, code: j.errorCode };
-}
-const apiLogin = async (u) => (await api('POST', '/api/v1/auth/login', { username: u, password: PASSWORD })).data.accessToken;
+const api = (method, url, body, token) => call(method, url, { body, token });
+const apiLogin = async (u) => (await login(u)).accessToken;
 const dayOffset = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 
 // Thử một thao tác giao diện: lỗi (không thấy nút, hết thời gian...) được ghi là FAIL thay vì làm dừng cả bộ kiểm tra
@@ -28,6 +19,7 @@ async function attempt(name, fn) {
 async function main() {
   const alive = await fetch(FE).then(() => true).catch(() => false);
   if (!alive) throw new Error(`Giao diện chưa chạy ở ${FE}: dùng docker compose up -d (image frontend) hoặc node e2e/fe_smoke_v3.mjs để dựng từ fe/build.`);
+  const luPetId = await ids.pet('PET-2026-0001');   // thú cưng Lu của khach_lan (seed)
   const { browser: b, child, profile } = await launchChrome();
   const sweep = async (role, username, routes) => {
     step(`Quét trang của ${role}`);
@@ -40,7 +32,7 @@ async function main() {
     }
   };
   try {
-    await sweep('chủ nuôi', 'khach_lan', [['/portal/profile', 'Thông tin cá nhân'], ['/portal/pets', 'Thú cưng của tôi'], ['/portal/pets/1', 'Lu'], ['/portal/booking', 'Đặt lịch'], ['/portal/appointments', 'Lịch hẹn của tôi'], ['/portal/medical-history', 'Lịch sử khám bệnh'], ['/portal/notifications', 'Thông báo']]);
+    await sweep('chủ nuôi', 'khach_lan', [['/portal/profile', 'Thông tin cá nhân'], ['/portal/pets', 'Thú cưng của tôi'], [`/portal/pets/${luPetId}`, 'Lu'], ['/portal/booking', 'Đặt lịch'], ['/portal/appointments', 'Lịch hẹn của tôi'], ['/portal/medical-history', 'Lịch sử khám bệnh'], ['/portal/notifications', 'Thông báo']]);
     await sweep('lễ tân', 'letan_hoa', [['/reception/queue', 'Bảng điều phối'], ['/reception/intake', 'Tiếp nhận khách hàng'], ['/reception/appointments', 'Lịch hẹn'], ['/reception/invoices', 'Hóa đơn & thanh toán'], ['/reception/dispense', 'Bán thuốc'], ['/reception/customers', 'Thông tin khách hàng'], ['/reception/pets', 'Thông tin thú cưng'], ['/reception/history', 'Tra cứu bệnh án']]);
     await sweep('bác sĩ', 'bs_tien', [['/vet/today', 'Hàng đợi của tôi'], ['/vet/history', 'Tra cứu bệnh án'], ['/vet/medicines', 'Tra cứu thuốc']]);
     await sweep('KTV xét nghiệm', 'ktv_lab_minh', [['/lab/queue', 'Hàng đợi xét nghiệm']]);
@@ -73,7 +65,7 @@ async function main() {
 
     step('Chủ nuôi: đổi lịch và hủy lịch trên giao diện');
     const ownerToken = await apiLogin('khach_lan');
-    const petId = (await api('POST', '/api/v1/pets', { speciesId: 2, name: `UI-Lich-${RUN}` }, ownerToken)).data.id;
+    const petId = (await api('POST', '/api/v1/pets', { speciesId: await ids.species('CAT'), name: `UI-Lich-${RUN}` }, ownerToken)).data.id;
     const appt = await api('POST', '/api/v1/appointments', { petId, appointmentDate: dayOffset(7), startTime: '09:30', reason: 'Kiểm tra giao diện' }, ownerToken);
     check('chuẩn bị lịch hẹn qua API', appt.status === 201, JSON.stringify(appt).slice(0, 200));
     await b.login('khach_lan', PASSWORD);
@@ -131,8 +123,7 @@ async function main() {
     check('không có lỗi console / HTTP ≥ 400 ngoài dự kiến', unexpected.length === 0);
     child.kill(); try { (await import('node:fs')).rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome còn giữ tệp */ }
   }
-  console.log(`\n${passed} đạt, ${failures.length} lỗi${failures.length ? `: ${failures.join('; ')}` : ''}`);
-  process.exit(failures.length ? 1 : 0);
+  finish();
 }
 void sleep;
-main().catch((problem) => { console.error(problem); process.exit(2); });
+run(main);

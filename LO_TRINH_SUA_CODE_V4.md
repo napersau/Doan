@@ -10,7 +10,7 @@
 
 | Phase | Trạng thái | Ghi chú |
 |---|---|---|
-| Phase 0 Chuẩn bị (không đổi hành vi) | 🟨 0.1 xong (20/11) | Bước tiếp theo: **0.2** (e2e tra id qua mã ổn định) |
+| Phase 0 Chuẩn bị (không đổi hành vi) | 🟨 0.1, 0.2 xong (20/11) | Bước tiếp theo: **0.3** (FE không giả định id số) |
 | Phase 1 Outbox + consumer chống trùng | 🟨 1.1 xong (20/11) | 1.1 làm trước Phase 0 theo yêu cầu; 1.2 cần 0.1 xong trước (thêm bảng vào `db/schema_current.sql`) |
 | Phase 2 auth-service v4 + id người dùng UUID | ⬜ | |
 | Phase 3 Danh mục dịch vụ + bảng giá có lịch sử | ⬜ | |
@@ -47,6 +47,7 @@ cd .. && docker compose down -v && docker compose up -d --build     # 3. từ CS
 docker compose ps                                              #    11 container healthy (12 từ Phase 6 có Redis, 13 từ Phase 7)
 bash e2e/run_all.sh                                            # 4. 5 bộ e2e xanh (đã sửa theo bước)
 git add -A ':!update.md' && git commit                         # 5. commit "v4 <bước>: ..." (không commit update.md)
+git push origin develop                                        # 6. push lên GitHub sau mỗi bước (yêu cầu của người dùng 20/11)
 ```
 - Bước nào thêm nghiệp vụ mới thì thêm kiểm tra e2e cho nghiệp vụ đó (lấy kịch bản `curl` của Task tương ứng trong `docs/LICH_TRINH_XAY_DUNG_MA_NGUON_VA_HUONG_DAN_TEST.md`).
 - e2e để lại dữ liệu → muốn chạy lại phải `down -v` (bình thường, không phải lỗi).
@@ -99,7 +100,8 @@ Phase 8  Feign 2s + Circuit Breaker, khớp schema đích, seed v4, e2e EX-17…
   - Điều kiện xong (mục 2) – đây là lần đầu `down -v` lại được phép.
   - **Kết quả (20/11/2026):** tag `v3-final` = `83045e8`; `db/schema_current.sql` (628 dòng = 620 dòng `docs/schema_init.sql` v3.0 tại `v3-final` + 8 dòng ghi chú đầu file) và `db/seed_current.sql` (seed tại `v3-final` + ghi chú); `docker-compose.yml` mount `./db/...` thay `./docs/...` (chú thích đầu file cập nhật); CLAUDE.md quy tắc 4, §8.6, §11 trỏ sang `db/`. Kiểm chứng: `mvn -o clean install` 404 unit test; `npm run build` sạch + 22 test FE; `docker compose down -v && up -d --build` → 11 container `healthy`, 27 bảng, 13 tài khoản, 14 thú cưng; `bash e2e/run_all.sh` backend **72/72**, notification **28/28**, giao diện **74/74**, chức năng phụ **170/170**, quét trang **48/48** (cũng là phần e2e còn treo của bước 1.1).
 
-- [ ] **0.2 e2e không phụ thuộc id số.** Tạo `e2e/lib/api.mjs` (`call`, `login`, `check`, `step`, `sql`) và `e2e/lib/ids.mjs` tra id **qua mã ổn định**: tài khoản theo `username`, thú cưng theo `petCode`, dịch vụ theo `code`, thuốc theo `code` (gọi API danh sách, cache trong lần chạy). Sửa 5 bộ e2e dùng helper thay cho số cố định (`petId 1`, `serviceIds [5,7]`, `medicineId 1`, `doctorId 2`...). Mục đích: các Phase đổi UUID chỉ phải sửa helper và vài chỗ. e2e vẫn xanh.
+- [x] **0.2 e2e không phụ thuộc id số.** Tạo `e2e/lib/api.mjs` (`call`, `login`, `check`, `step`, `sql`) và `e2e/lib/ids.mjs` tra id **qua mã ổn định**: tài khoản theo `username`, thú cưng theo `petCode`, dịch vụ theo `code`, thuốc theo `code` (gọi API danh sách, cache trong lần chạy). Sửa 5 bộ e2e dùng helper thay cho số cố định (`petId 1`, `serviceIds [5,7]`, `medicineId 1`, `doctorId 2`...). Mục đích: các Phase đổi UUID chỉ phải sửa helper và vài chỗ. e2e vẫn xanh.
+  - **Kết quả (20/11/2026):** thêm `e2e/lib/api.mjs` (`call`, `login`, `loginRes`, `check`, `step`, `finish`, `run`, `sql`, hằng đường dẫn `CLIN/PHARM/BILL/AUTH/APPT/NOTI`) và `e2e/lib/ids.mjs` (`seedIds()` tra id theo mã ổn định: tài khoản theo `username` qua `GET /auth/users?keyword=`, thú cưng theo `petCode`, loài/dịch vụ/thuốc theo `code`, có cache; khớp tuyệt đối trên trường mã vì từ khóa là LIKE; `medicineIdSql(code)` cho câu SQL đối chiếu). `backend_v3`, `features_v3`, `notification_v3`, `fe_pages_v3` dùng helper và `ID.user.* / ID.pet.* / ID.service.* / ID.medicine.* / ID.species.*` thay cho mọi số cứng (`ownerId 8`, `doctorId 2/3/4`, `serviceIds [5,7]`, `medicineId 1/4`, `petId 1`, `speciesId 1/2`, `/users/1/status`, `WHERE medicine_id=1`...); `fe_smoke_v3` không có id số nên giữ nguyên; `e2e/README.md` ghi quy ước mới. Kiểm chứng: `mvn -o clean install` **404 unit test**; `npm run build` sạch + 22 test FE; `docker compose down -v && up -d --build` → 11 container `healthy`; `bash e2e/run_all.sh` backend **72/72**, notification **28/28**, giao diện **74/74**, chức năng phụ **170/170**, quét trang **48/48** (bằng đúng trước khi sửa). Bài học: chạy `backend_v3` lần hai trên CSDL chưa reset sẽ đỏ (khung 10:00 đã đầy, Lu còn đợt khám mở) — đó là hành vi bình thường, phải `down -v`. Đã thêm bước push `git push origin develop` vào Điều kiện xong, `/v4-next` và CLAUDE.md theo yêu cầu người dùng.
 
 - [ ] **0.3 Giao diện không phụ thuộc id số.** Rà `fe/src`: `Number(id)`, `parseInt`, `+id`, so sánh id từ `useParams()` (chuỗi) với id từ API (số) bằng `===`, `key` dựa trên phép cộng số. Chuẩn hóa bằng so sánh `String(a) === String(b)` và không ép kiểu số cho id. Build + `fe_smoke_v3` + `fe_pages_v3` xanh.
 

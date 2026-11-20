@@ -1,26 +1,12 @@
 // Kiểm thử notification-service v3.0 qua Gateway + RabbitMQ thật: 9 sự kiện → thông báo đúng người, POST /{id}/read, bỏ send-email.
 // Chạy: node e2e/notification_v3.mjs   (stack đang chạy, dữ liệu seed). Kiểm tra email chỉ chạy khi Mailpit truy cập được (MAILPIT_URL,
-// mặc định http://localhost:8025 — chỉ mở khi dùng docker-compose.dev.yml); chủ nuôi #8 phải có email (script tự đặt qua API).
-const API = process.env.API_URL || 'http://localhost:8080';
-const MAILPIT = process.env.MAILPIT_URL || 'http://localhost:8025';
-const PASSWORD = 'Admin@123';
-let passed = 0; const failures = [];
-const check = (name, ok, extra = '') => { if (ok) { passed += 1; console.log(`  PASS ${name}`); } else { failures.push(name); console.log(`  FAIL ${name} ${extra}`); } };
-const step = (title) => console.log(`\n== ${title}`);
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// mặc định http://localhost:8025 — chỉ mở khi dùng docker-compose.dev.yml); chủ nuôi khach_lan phải có email (script tự đặt qua API).
+import { BILL, CLIN, NOTI, PHARM, call, check, finish, login as loginSession, run, sleep, step } from './lib/api.mjs';
+import { seedIds } from './lib/ids.mjs';
 
-async function call(method, url, { token, body } = {}) {
-  const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(`${API}${url}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  const text = await response.text();
-  let json = {}; try { json = text ? JSON.parse(text) : {}; } catch { json = {}; }
-  return { status: response.status, code: json.errorCode, data: json.data };
-}
-const CLIN = '/api/v1/clinical'; const PHARM = '/api/v1/pharmacy'; const BILL = '/api/v1/billing'; const NOTI = '/api/v1/notifications';
+const MAILPIT = process.env.MAILPIT_URL || 'http://localhost:8025';
 const T = {};
-async function login(username) { const res = await call('POST', '/api/v1/auth/login', { body: { username, password: PASSWORD } }); if (res.status !== 200) throw new Error(`login ${username}: ${res.status}`); return res.data.accessToken; }
+const login = async (username) => (await loginSession(username)).accessToken;
 const list = async (token) => (await call('GET', `${NOTI}?limit=100`, { token })).data || [];
 // Chờ tới 15 giây cho đến khi người dùng có ≥ n thông báo thuộc type (và chứa `contains` trong JSON nếu có)
 async function expectType(name, token, type, { n = 1, contains = '' } = {}) {
@@ -35,12 +21,14 @@ async function expectType(name, token, type, { n = 1, contains = '' } = {}) {
 
 async function main() {
   for (const [key, user] of Object.entries({ admin: 'admin', doc: 'bs_tien', rec: 'letan_hoa', lab: 'ktv_lab_minh', owner: 'khach_lan' })) T[key] = await login(user);
+  const ID = await seedIds();
+  const AMOX = ID.medicine.MED_AMOX;
   // chủ nuôi cần email để nhận thư
   await call('PUT', '/api/v1/auth/me', { token: T.owner, body: { fullName: 'Hoàng Thị Lan', email: 'lan.e2e@example.com' } });
 
   step('Gọi số / gọi lại / có kết quả / hoàn tất / bán thuốc / tồn kho thấp');
-  const pet = (await call('POST', '/api/v1/pets', { token: T.rec, body: { ownerId: 8, speciesId: 2, name: `Noti-${Date.now() % 100000}` } })).data.id;
-  const visit = (await call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId: pet, doctorId: 2, isEmergency: false } })).data.id;
+  const pet = (await call('POST', '/api/v1/pets', { token: T.rec, body: { ownerId: ID.user.khach_lan, speciesId: ID.species.CAT, name: `Noti-${Date.now() % 100000}` } })).data.id;
+  const visit = (await call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId: pet, doctorId: ID.user.bs_tien, isEmergency: false } })).data.id;
   await expectType('chủ nuôi nhận VISIT_CHECKED_IN', T.owner, 'VISIT_CHECKED_IN');
   await expectType('bác sĩ được làm mới hàng đợi riêng (VISIT_CHECKED_IN)', T.doc, 'VISIT_CHECKED_IN');
   await expectType('lễ tân nhận VISIT_CHECKED_IN (kênh vai trò)', T.rec, 'VISIT_CHECKED_IN');
@@ -54,7 +42,7 @@ async function main() {
   await call('POST', `${CLIN}/queue-tickets/${ticketId}/call`, { token: T.doc });
   await expectType('gọi lại một phiếu theo id → chủ nuôi nhận PATIENT_CALLED (CALLED)', T.owner, 'PATIENT_CALLED', { contains: '"CALLED"' });
   await call('POST', `${CLIN}/pet-visits/${visit}/start-exam`, { token: T.doc, body: { weightAtVisit: 4, temperature: 38.5 } });
-  await call('POST', `${CLIN}/pet-visits/${visit}/paraclinical-orders`, { token: T.doc, body: { serviceIds: [5] } });
+  await call('POST', `${CLIN}/pet-visits/${visit}/paraclinical-orders`, { token: T.doc, body: { serviceIds: [ID.service.LAB_CBC] } });
   const clsInv = (await call('GET', `${CLIN}/pet-visits/${visit}/service-invoices`, { token: T.rec })).data.invoices.filter((i) => i.category === 'LABORATORY').map((i) => i.id);
   await call('POST', `${CLIN}/pet-visits/${visit}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: clsInv } });
   await expectType('nộp tiền XN → KTV Lab nhận phiếu mới (TICKET_ISSUED)', T.lab, 'TICKET_ISSUED', { contains: '"LABORATORY"' });
@@ -66,11 +54,11 @@ async function main() {
   await expectType('hết CLS → bác sĩ nhận RESULTS_READY', T.doc, 'RESULTS_READY');
   await expectType('chủ nuôi nhận RESULTS_READY', T.owner, 'RESULTS_READY');
   await call('POST', `${CLIN}/queue-tickets/call-next?queueType=DOCTOR`, { token: T.doc }); await call('POST', `${CLIN}/pet-visits/${visit}/start-phase2`, { token: T.doc });
-  const rx = (await call('POST', `${PHARM}/prescriptions`, { token: T.doc, body: { visitId: visit, items: [{ medicineId: 1, quantity: 10, dosage: '1', frequency: '2', durationDays: 5 }] } })).data;
+  const rx = (await call('POST', `${PHARM}/prescriptions`, { token: T.doc, body: { visitId: visit, items: [{ medicineId: AMOX, quantity: 10, dosage: '1', frequency: '2', durationDays: 5 }] } })).data;
   await call('POST', `${CLIN}/pet-visits/${visit}/close-visit`, { token: T.doc, body: { diagnosis: 'Viêm da' } });
-  const stock = (await call('GET', `${PHARM}/medicines/1`, { token: T.admin })).data;
+  const stock = (await call('GET', `${PHARM}/medicines/${AMOX}`, { token: T.admin })).data;
   // đưa tồn về ngưỡng + 10 để lần bán này làm chạm ngưỡng cảnh báo
-  await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: 1, delta: -(stock.stockQuantity - stock.minStockAlert - 5), reason: 'e2e đưa tồn gần ngưỡng' } });
+  await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: AMOX, delta: -(stock.stockQuantity - stock.minStockAlert - 5), reason: 'e2e đưa tồn gần ngưỡng' } });
   const invoice = (await call('POST', `${PHARM}/prescriptions/${rx.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx.items[0].id, quantity: 10 }] } })).data;
   await call('POST', `${BILL}/medicine-invoices/${invoice.id}/confirm-payment`, { token: T.rec });
   await expectType('thu thuốc → chủ nuôi nhận MEDICINE_INVOICE_PAID (có số tiền)', T.owner, 'MEDICINE_INVOICE_PAID', { contains: '157500' });
@@ -82,7 +70,7 @@ async function main() {
 
   step('Lịch hẹn: đặt → duyệt → vắng mặt (chỉ một thông báo mỗi lần)');
   const day = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
-  const booked = await call('POST', '/api/v1/appointments', { token: T.owner, body: { petId: 1, appointmentDate: day, startTime: '14:00', reason: 'e2e thông báo' } });
+  const booked = await call('POST', '/api/v1/appointments', { token: T.owner, body: { petId: ID.pet.lu, appointmentDate: day, startTime: '14:00', reason: 'e2e thông báo' } });
   await expectType('đặt lịch → chủ nuôi nhận APPOINTMENT_BOOKED', T.owner, 'APPOINTMENT_BOOKED');
   await expectType('lịch PENDING → lễ tân nhận APPOINTMENT_BOOKED', T.rec, 'APPOINTMENT_BOOKED');
   await call('POST', `/api/v1/appointments/${booked.data.id}/confirm`, { token: T.rec });
@@ -114,7 +102,6 @@ async function main() {
     void subjects;
   }
 
-  console.log(`\n${passed} đạt, ${failures.length} lỗi${failures.length ? `: ${failures.join('; ')}` : ''}`);
-  process.exit(failures.length ? 1 : 0);
+  finish();
 }
-main().catch((problem) => { console.error(problem); process.exit(2); });
+run(main);
