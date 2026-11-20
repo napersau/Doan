@@ -19,6 +19,8 @@ import com.vetclinic.appointment.repository.AppointmentStatusHistoryRepository;
 import com.vetclinic.appointment.service.AppointmentFilter;
 import com.vetclinic.appointment.service.SlotLockService;
 import com.vetclinic.appointment.service.SlotPolicy;
+import com.vetclinic.common.event.DomainEvent;
+import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.AppointmentBookedEvent;
 import com.vetclinic.common.event.AppointmentNoShowEvent;
@@ -39,7 +41,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -62,6 +63,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -94,7 +96,7 @@ class AppointmentServiceImplTest {
     @Mock
     private SlotLockService slotLockService;
     @Mock
-    private ApplicationEventPublisher eventPublisher;
+    private OutboxWriter outboxWriter;
 
     private AppointmentServiceImpl service;
 
@@ -116,13 +118,24 @@ class AppointmentServiceImplTest {
         SecurityContextHolder.clearContext();
     }
 
+    /** Mọi sự kiện đã được ghi vào outbox trong test (theo thứ tự ghi). */
+    private List<DomainEvent> writtenEvents() {
+        ArgumentCaptor<DomainEvent> captor = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter, Mockito.atLeastOnce()).write(eq("APPOINTMENT"), any(), captor.capture());
+        return captor.getAllValues();
+    }
+
+    private void verifyNoOutbox() {
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
+    }
+
     private AppointmentServiceImpl newService(boolean verifyPet) {
         BookingProperties properties = new BookingProperties("Asia/Ho_Chi_Minh", 30,
                 STANDARD_SLOTS, 30, 2, 60, verifyPet, 5);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         return new AppointmentServiceImpl(appointmentRepository, historyRepository, authClient, petClient,
-                new SlotPolicy(properties, CLOCK, authClient), slotLockService, transactionManager, eventPublisher,
+                new SlotPolicy(properties, CLOCK, authClient), slotLockService, transactionManager, outboxWriter,
                 new AppointmentMapperImpl(), properties, CLOCK);
     }
 
@@ -154,8 +167,8 @@ class AppointmentServiceImplTest {
         assertThat(history.getToStatus()).isEqualTo(AppointmentStatus.PENDING);
         assertThat(history.getChangedByUserId()).isEqualTo(OWNER);
 
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, Mockito.times(1)).publishEvent(event.capture());   // chỉ appointment.booked (v3.0)
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter, Mockito.times(1)).write(eq("APPOINTMENT"), any(), event.capture());   // chỉ appointment.booked (v3.0)
         AppointmentBookedEvent booked = (AppointmentBookedEvent) event.getValue();
         assertThat(booked.routingKey()).isEqualTo("appointment.booked");
         assertThat(booked.appointmentId()).isEqualTo(100L);
@@ -192,7 +205,7 @@ class AppointmentServiceImplTest {
                 .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.SLOT_CAPACITY_EXCEEDED);
 
         verify(appointmentRepository, never()).saveAndFlush(any());
-        verify(eventPublisher, never()).publishEvent(any(Object.class));
+        verifyNoOutbox();
     }
 
     @Test
@@ -440,9 +453,7 @@ class AppointmentServiceImplTest {
     }
 
     private AppointmentStatusChangedEvent publishedStatusEvent() {
-        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, Mockito.atLeastOnce()).publishEvent(captor.capture());
-        return captor.getAllValues().stream()
+        return writtenEvents().stream()
                 .filter(AppointmentStatusChangedEvent.class::isInstance)
                 .map(AppointmentStatusChangedEvent.class::cast)
                 .findFirst().orElseThrow();
@@ -476,14 +487,14 @@ class AppointmentServiceImplTest {
         assertThat(event.status()).isEqualTo("CANCELLED");
         assertThat(event.reason()).isEqualTo("Phòng khám bảo trì thiết bị");
 
-        Mockito.clearInvocations(eventPublisher);
+        Mockito.clearInvocations(outboxWriter);
         loginAs(OWNER, RoleCode.PET_OWNER);
         Appointment own = appointment(2L, OWNER, AppointmentStatus.CONFIRMED, TOMORROW, LocalTime.of(10, 0));
         lenient().when(appointmentRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(own));
         lenient().when(appointmentRepository.findById(2L)).thenReturn(Optional.of(own));
         service.cancel(2L, new CancelAppointmentRequest("Bận việc đột xuất"));
 
-        verify(eventPublisher, never()).publishEvent(any(Object.class));   // chủ nuôi tự hủy: đã thấy kết quả trên màn hình
+        verifyNoOutbox();   // chủ nuôi tự hủy: đã thấy kết quả trên màn hình
     }
 
     @Test
@@ -494,9 +505,9 @@ class AppointmentServiceImplTest {
 
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
-        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, Mockito.times(1)).publishEvent(captor.capture());   // không để chủ nuôi nhận hai thông báo
-        var event = (AppointmentNoShowEvent) captor.getValue();
+        var written = writtenEvents();
+        assertThat(written).hasSize(1);   // không để chủ nuôi nhận hai thông báo
+        var event = (AppointmentNoShowEvent) written.get(0);
         assertThat(event.actorUserId()).isNull();
     }
 
@@ -659,9 +670,7 @@ class AppointmentServiceImplTest {
 
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
-        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, Mockito.atLeastOnce()).publishEvent(captor.capture());
-        var noShow = captor.getAllValues().stream()
+        var noShow = writtenEvents().stream()
                 .filter(AppointmentNoShowEvent.class::isInstance)
                 .map(AppointmentNoShowEvent.class::cast)
                 .findFirst().orElseThrow();
@@ -682,7 +691,7 @@ class AppointmentServiceImplTest {
         assertThat(service.markNoShowBySystem(1L)).isTrue();
 
         assertThat(a.getStatus()).isEqualTo(AppointmentStatus.NO_SHOW);
-        verify(eventPublisher, never()).publishEvent(any(Object.class));
+        verifyNoOutbox();
     }
 
     @Test

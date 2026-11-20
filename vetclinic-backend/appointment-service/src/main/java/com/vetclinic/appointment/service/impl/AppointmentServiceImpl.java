@@ -22,6 +22,8 @@ import com.vetclinic.appointment.service.AppointmentFilter;
 import com.vetclinic.appointment.service.AppointmentService;
 import com.vetclinic.appointment.service.SlotLockService;
 import com.vetclinic.appointment.service.SlotPolicy;
+import com.vetclinic.common.event.outbox.OutboxWriter;
+import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.event.AppointmentBookedEvent;
@@ -32,7 +34,6 @@ import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
 import com.vetclinic.common.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -63,7 +64,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     private final SlotPolicy slotPolicy;
     private final SlotLockService slotLockService;
     private final TransactionTemplate transactionTemplate;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxWriter outboxWriter;
     private final AppointmentMapper mapper;
     private final BookingProperties properties;
     private final Clock clock;
@@ -75,7 +76,7 @@ public class AppointmentServiceImpl implements AppointmentService {
                                   SlotPolicy slotPolicy,
                                   SlotLockService slotLockService,
                                   PlatformTransactionManager transactionManager,
-                                  ApplicationEventPublisher eventPublisher,
+                                  OutboxWriter outboxWriter,
                                   AppointmentMapper mapper,
                                   BookingProperties properties,
                                   Clock clock) {
@@ -86,11 +87,14 @@ public class AppointmentServiceImpl implements AppointmentService {
         this.slotPolicy = slotPolicy;
         this.slotLockService = slotLockService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
-        this.eventPublisher = eventPublisher;
+        this.outboxWriter = outboxWriter;
         this.mapper = mapper;
         this.properties = properties;
         this.clock = clock;
     }
+
+    /** aggregate_type của các dòng outbox do service này ghi. */
+    private static final String AGGREGATE = "APPOINTMENT";
 
     private record Actor(Long id, RoleCode role) {
     }
@@ -182,9 +186,8 @@ public class AppointmentServiceImpl implements AppointmentService {
                 confirmed ? "Lễ tân tạo lịch hẹn qua kênh " + booking.channel()
                         : "Chủ nuôi gửi yêu cầu đặt lịch qua cổng trực tuyến");
 
-        // Chỉ được gửi sang RabbitMQ SAU KHI commit (DomainEventRabbitPublisher)
-        // Danh mục sự kiện v3.0: appointment.booked (thay appointment.created, đã ngừng phát từ Phase 5)
-        eventPublisher.publishEvent(new AppointmentBookedEvent(UUID.randomUUID(), now, actor.id(),
+        // Transactional Outbox: ghi sự kiện cùng giao dịch; OutboxRelay gửi sang RabbitMQ sau khi commit (RabbitMQ tắt thì vẫn không mất)
+        outboxWriter.write(AGGREGATE, appointment.getId(), new AppointmentBookedEvent(UuidV7.generate(clock), now, actor.id(),
                 appointment.getId(), appointment.getAppointmentCode(), booking.ownerId(),
                 appointment.getPetId(), date, start, appointment.getStatus().name()));
         return appointment;
@@ -511,13 +514,13 @@ public class AppointmentServiceImpl implements AppointmentService {
         if (ownerId == null) {
             return;   // đã cảnh báo trong notifyOwner
         }
-        eventPublisher.publishEvent(new AppointmentNoShowEvent(UUID.randomUUID(), clock.instant(), actorId,
+        outboxWriter.write(AGGREGATE, appointment.getId(), new AppointmentNoShowEvent(UuidV7.generate(clock), clock.instant(), actorId,
                 appointment.getId(), appointment.getAppointmentCode(), ownerId, appointment.getPetId(),
                 appointment.getAppointmentDate(), appointment.getStartTime()));
     }
 
     /**
-     * Phát sự kiện báo chủ nuôi; chỉ được gửi sang RabbitMQ SAU KHI transaction commit (DomainEventRabbitPublisher).
+     * Ghi sự kiện báo chủ nuôi vào outbox (cùng giao dịch); OutboxRelay gửi sang RabbitMQ sau khi commit.
      * Không tra được chủ nuôi (clinical-service tạm sập) thì bỏ qua thông báo chứ không làm hỏng nghiệp vụ (CLAUDE.md §10 #3).
      */
     private void notifyOwner(Appointment appointment, Long ownerId, Long actorId, boolean rescheduled, String reason) {
@@ -525,7 +528,7 @@ public class AppointmentServiceImpl implements AppointmentService {
             log.warn("Không tra được chủ nuôi của lịch hẹn {} (thú cưng {}), bỏ qua thông báo", appointment.getId(), appointment.getPetId());
             return;
         }
-        eventPublisher.publishEvent(new AppointmentStatusChangedEvent(UUID.randomUUID(), clock.instant(), actorId,
+        outboxWriter.write(AGGREGATE, appointment.getId(), new AppointmentStatusChangedEvent(UuidV7.generate(clock), clock.instant(), actorId,
                 appointment.getId(), appointment.getAppointmentCode(), ownerId, appointment.getPetId(),
                 appointment.getAppointmentDate(), appointment.getStartTime(), appointment.getStatus().name(), rescheduled, reason));
     }

@@ -151,6 +151,35 @@ CREATE TABLE IF NOT EXISTS appointment_status_histories (
 CREATE INDEX idx_ash_appointment ON appointment_status_histories(appointment_id);
 CREATE INDEX idx_ash_user ON appointment_status_histories(changed_by_user_id);
 
+-- 6. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 12): sự kiện được ghi cùng giao dịch với nghiệp vụ, OutboxRelay gửi sang RabbitMQ.
+-- appointment phát: AppointmentBookedEvent, AppointmentStatusChangedEvent, AppointmentNoShowEvent.
+-- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
+CREATE TABLE IF NOT EXISTS outbox_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_id BINARY(16) NOT NULL UNIQUE,
+    aggregate_type VARCHAR(50) NOT NULL,
+    aggregate_id VARCHAR(36) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    routing_key VARCHAR(100) NOT NULL,
+    payload JSON NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_at TIMESTAMP NULL
+);
+CREATE INDEX idx_outbox_pending ON outbox_events(status, next_attempt_at, id);
+
+-- 7. PROCESSED_EVENTS (chống xử lý trùng ở bên nhận, docs v4.0 mục 13): INSERT cùng giao dịch với thay đổi do sự kiện gây ra.
+-- appointment nhận: VisitCheckedInEvent (listener "appointment.visit-checked-in").
+CREATE TABLE IF NOT EXISTS processed_events (
+    event_id BINARY(16) NOT NULL,
+    consumer VARCHAR(100) NOT NULL,
+    processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_id, consumer)
+);
+
 
 -- ==============================================================================
 -- PHẦN 3: PET_CLINIC_CLINICAL_DB (CLINICAL-SERVICE :8083)
