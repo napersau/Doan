@@ -11,7 +11,7 @@ Nhóm: Lưu Minh Hiển (trưởng nhóm, BE), Nguyễn Đức Khởi (BE + DevO
 1. Mở `LO_TRINH_SUA_CODE_V4.md` → mục "▶ TRẠNG THÁI HIỆN TẠI" → làm **đúng một bước** chưa xong đầu tiên (`[ ]`). Không gộp nhiều bước, không nhảy bước. Lệnh tắt: `/v4-next` (file `.claude/commands/v4-next.md`).
 2. Trước khi code bước đó: đọc phần docs v4.0 bước đó trỏ tới (bảng trong `docs/schema_init.sql`, Task trong `docs/LICH_TRINH_XAY_DUNG_MA_NGUON_VA_HUONG_DAN_TEST.md`, mục Quy chuẩn/Kiến trúc/SM/EX liên quan) và mục 4 "Quyết định đã chốt" của lộ trình.
 3. Kết thúc bước bằng đủ **"Điều kiện xong"** (mục 2 của lộ trình): `mvn -o clean install` xanh → `npm run build` + test FE xanh → `docker compose down -v && up -d --build` → mọi container `healthy` → `bash e2e/run_all.sh` xanh → 1 commit `v4 <bước>: ...` (không commit `update.md`). Rồi đánh `[x]`, ghi "Kết quả:" và cập nhật bảng trạng thái trong lộ trình (và dòng "Bước tiếp theo").
-4. **Lược đồ:** từ bước 0.1, Docker đọc `db/schema_current.sql` + `db/seed_current.sql` (lược đồ trung gian tiến dần về `docs/schema_init.sql`); **trước khi bước 0.1 xong, cấm `docker compose down -v`** (compose còn mount thẳng `docs/schema_init.sql` v4.0 và `docs/seed_demo_data.sql` kiểu cũ → MySQL init lỗi, service không khởi động). Không sửa `docs/` trừ khi lộ trình ghi rõ hoặc người dùng yêu cầu.
+4. **Lược đồ:** từ bước 0.1 (đã xong 20/11), Docker đọc `db/schema_current.sql` + `db/seed_current.sql` (lược đồ trung gian, xuất phát từ v3.0 tag `v3-final`, tiến dần về `docs/schema_init.sql` v4.0); `docker compose down -v` dùng bình thường để reset. Bước nào đổi bảng thì chép đúng phần bảng đó từ `docs/schema_init.sql` vào `db/schema_current.sql` (sửa dữ liệu demo ở `db/seed_current.sql`). Không sửa `docs/` trừ khi lộ trình ghi rõ hoặc người dùng yêu cầu.
 5. Gặp chỗ docs mâu thuẫn mới hoặc bước không thể giữ hệ thống chạy được: dừng, ghi vào mục 4 của lộ trình (hoặc `[~]` kèm lý do) và báo người dùng.
 
 Các mục §1–§13 bên dưới mô tả **mã nguồn hiện tại (v3.0)** – vẫn đúng cho phần chưa chuyển; phần nào đã chuyển sang v4.0 thì `LO_TRINH_SUA_CODE_V4.md` + `docs/` v4.0 là chuẩn. Bước 8.4 sẽ viết lại file này theo v4.0.
@@ -262,7 +262,7 @@ Gateway (WebFlux) và Eureka không được nạp bean servlet. Bean servlet (`
 - Gateway khởi động **sau cùng** (`depends_on` mọi service nghiệp vụ `service_healthy`); Eureka tắt `use-read-only-response-cache`. Đừng bỏ hai cấu hình này (nếu không request đầu sau `up` trả 503).
 - `depends_on` với `condition: service_healthy`; healthcheck cho mysql/rabbitmq/eureka/service (`/actuator/health`). 7 JVM chung một máy: `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`, `mem_limit` 384–512m mỗi service. Eureka `prefer-ip-address=true`; đừng chạy lẫn service trong IDE với service trong Docker khi chưa cấu hình hostname.
 - Ảnh CĐHA ở volume `imaging-uploads` → `/app/uploads/imaging/`; `spring.servlet.multipart.max-file-size` 20MB.
-- `schema_init.sql` không idempotent (MySQL 8 không có `CREATE INDEX IF NOT EXISTS`); chỉ mount vào `/docker-entrypoint-initdb.d/`; sửa schema thì `docker compose down -v`.
+- `schema_init.sql` không idempotent (MySQL 8 không có `CREATE INDEX IF NOT EXISTS`); chỉ mount vào `/docker-entrypoint-initdb.d/`; sửa schema thì `docker compose down -v`. Trong lộ trình v4, file được mount là `db/schema_current.sql` (+ `db/seed_current.sql`), không phải `docs/schema_init.sql`.
 
 ---
 
@@ -341,7 +341,7 @@ Hai file ở gốc repo không thuộc `docs/`: `docker-compose.db.yml` (overrid
 ```bash
 docker compose up -d --build               # Chạy toàn bộ hệ thống (NFR-08: 1 lệnh), lần đầu ~10 phút. Chỉ public :8080 (API) và :3000 (giao diện)
 docker compose ps                          # Mọi service phải "healthy"
-docker compose down -v                     # RESET DB: bắt buộc mỗi khi sửa schema_init.sql
+docker compose down -v                     # RESET DB: bắt buộc mỗi khi sửa db/schema_current.sql / db/seed_current.sql (lộ trình v4)
 
 # Dev: hạ tầng trong Docker (mở 3306/5672/15672/8761/8025), service đang code chạy trong IDE
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mysql-server rabbitmq-broker mailpit service-registry

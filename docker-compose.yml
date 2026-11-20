@@ -2,8 +2,10 @@
 #   docker compose up -d --build
 # Chế độ dev (mở port MySQL/RabbitMQ/Eureka/Mailpit để chạy service trong IDE):
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-# Reset CSDL (bắt buộc sau khi sửa docs/schema_init.sql):
+# Reset CSDL (bắt buộc sau khi sửa db/schema_current.sql hoặc db/seed_current.sql):
 #   docker compose down -v
+# Lộ trình v4 (LO_TRINH_SUA_CODE_V4.md): MySQL nạp lược đồ TRUNG GIAN db/schema_current.sql + db/seed_current.sql,
+# tiến dần về đích docs/schema_init.sql v4.0; bước 8.2 mới quay lại đọc docs/.
 #
 # Chỉ api-gateway public port ra ngoài: service con tin header X-User-* do Gateway gắn,
 # nên mở port của chúng = cho phép giả mạo quyền.
@@ -57,9 +59,10 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       # Script chỉ chạy khi volume còn trống -> sửa schema thì phải `docker compose down -v`
-      - ./docs/schema_init.sql:/docker-entrypoint-initdb.d/01-schema_init.sql:ro
-      # Dữ liệu demo cố định (id 2-8, thú cưng #1 #2) cho mọi curl trong Lộ trình; chạy sau schema_init.sql
-      - ./docs/seed_demo_data.sql:/docker-entrypoint-initdb.d/02-seed_demo_data.sql:ro
+      # Lộ trình v4: lược đồ trung gian (bước 0.1); docs/schema_init.sql là đích v4.0, chưa nạp trực tiếp
+      - ./db/schema_current.sql:/docker-entrypoint-initdb.d/01-schema_init.sql:ro
+      # Dữ liệu demo cố định cho mọi kiểm thử; chạy sau 01-schema_init.sql
+      - ./db/seed_current.sql:/docker-entrypoint-initdb.d/02-seed_demo_data.sql:ro
     healthcheck:
       # Ping qua TCP (127.0.0.1) và kiểm tra dữ liệu của script cuối cùng (02-seed_demo_data.sql: bảng pets có >= 2 dòng):
       # trong lúc init, MySQL chỉ mở socket, nên `mysqladmin ping` sẽ báo healthy quá sớm khi schema/seed chưa nạp xong.

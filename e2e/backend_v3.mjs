@@ -1,6 +1,6 @@
 // Kiểm thử backend v3.0 qua Gateway (HTTP thật): luồng chuẩn Task 5.4 + các luồng dễ lỗi của CLAUDE.md §13.
 // Chạy: node e2e/backend_v3.mjs   (cần: stack đang chạy — `docker compose up -d --build` hoặc 6 service + hạ tầng ở dev — và dữ liệu seed
-//   `docs/seed_demo_data.sql` mới nạp, vì luồng chuẩn dùng ID cố định: thú cưng #1/#2, thuốc #1 tồn 200)
+//   `db/seed_current.sql` mới nạp (lộ trình v4), vì luồng chuẩn dùng ID cố định: thú cưng #1/#2, thuốc #1 tồn 200)
 // CẢNH BÁO: tạo dữ liệu thật (đợt khám, hóa đơn, lịch hẹn). Chỉ chạy trên môi trường thử nghiệm; muốn chạy lại hãy `docker compose down -v`.
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
