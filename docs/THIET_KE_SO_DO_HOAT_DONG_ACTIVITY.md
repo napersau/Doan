@@ -2,8 +2,8 @@
 ## HỆ THỐNG QUẢN LÝ PHÒNG KHÁM THÚ Y
 
 > **Tài liệu chuẩn UML 2.5 / RUP phục vụ Thuyết minh & Bảo vệ Đồ án tốt nghiệp**  
-> **Phiên bản:** 3.0 (đồng bộ với lược đồ CSDL v3.0 và `THIET_KE_SO_DO_TRANG_THAI_STATE_MACHINE.md` v3.0)  
-> **Cập nhật 17/11/2026:** tách quy trình thanh toán khỏi quy trình khám: khách **nộp phí khám xong mới được phát phiếu vào hàng đợi Bác sĩ**, **nộp tiền XN / CĐHA xong mới được phát phiếu vào hàng đợi phòng**; dịch vụ làm tại phòng thu khi chốt ca. Hàng đợi là phiếu xếp hàng `queue_tickets` (SM-07).  
+> **Phiên bản:** 4.0 (18/11/2026 – đồng bộ lược đồ CSDL v4.0 và `THIET_KE_SO_DO_TRANG_THAI_STATE_MACHINE.md` v4.0: phiếu trên Redis phát qua sự kiện thanh toán, sinh hiệu / hồ sơ khám tách khỏi đợt khám, đơn thuốc ở clinical, hóa đơn thuốc nháp tự tạo khi chốt ca)  
+> **Cập nhật 17/11/2026:** tách quy trình thanh toán khỏi quy trình khám: khách **nộp phí khám xong mới được phát phiếu vào hàng đợi Bác sĩ**, **nộp tiền XN / CĐHA xong mới được phát phiếu vào hàng đợi phòng**; dịch vụ làm tại phòng thu khi chốt ca. Hàng đợi là phiếu xếp hàng (SM-07; v4.0 lưu trên Redis).  
 > **Mục tiêu:** Mô tả chi tiết các luồng công việc (Workflows), sự phân làn trách nhiệm đa tác nhân (Swimlanes / Partitions), các điểm phân tách và đồng bộ song song (Fork & Join Nodes), các điều kiện rẽ nhánh (Decision Nodes) và cơ chế xử lý ngoại lệ trong hệ thống quản lý phòng khám thú y ngoại trú.
 
 ---
@@ -51,9 +51,10 @@ Hệ thống được thiết kế theo mô hình phân quyền của CSDL (`rol
 ### 1.3. Quy ước dữ liệu xuyên suốt các sơ đồ
 - **Mọi lần đổi trạng thái** của lịch hẹn, đợt khám, chỉ định dịch vụ đều ghi 1 dòng lịch sử tương ứng (`*_status_histories`, `visit_service_detail_histories`). Sơ đồ không vẽ lại bước này ở từng nút.
 - **Mỗi dịch vụ được chỉ định có 1 hóa đơn dịch vụ riêng** (`service_invoices`), tạo cùng lúc với chỉ định. Phí khám cũng là một dịch vụ, được tạo tự động **lúc check-in**.
-- **Thu trước – xếp hàng sau** (`services.requires_prepayment`): phí khám, XN, CĐHA nộp xong mới phát phiếu (`queue_tickets`); dịch vụ làm tại phòng (tiêm, tẩy giun, thủ thuật…) thu khi chốt ca. Ca cấp cứu khám trước thu sau (phiếu `priority = 2`); ca có kết quả CLS nhận phiếu `priority = 1` không thu tiền. Phí khám đã nộp không hoàn.
+- **Thu trước – xếp hàng sau** (nhóm dịch vụ `service_categories.requires_prepayment`): phí khám, XN, CĐHA nộp xong mới phát phiếu (hóa đơn `PAID` → outbox `ServiceInvoicePaidEvent` → phiếu trên Redis, thường < 1 giây); dịch vụ làm tại phòng (tiêm, tẩy giun, thủ thuật…) thu khi chốt ca. Ca cấp cứu khám trước thu sau (phiếu `priority = 2`); ca có kết quả CLS nhận phiếu `priority = 1` không thu tiền. Phí khám đã nộp không hoàn.
 - Quy tắc hàng đợi `Q1`–`Q6` tham chiếu mục 2.4, vòng đời phiếu tham chiếu SM-07 trong tài liệu State Machine.
-- **Đơn thuốc không có trạng thái và không có giá.** Giá thuốc chỉ được chốt khi khách mua tại phòng khám (`medicine_invoice_items`).
+- **Đơn thuốc không có trạng thái và không có giá** (thuộc `clinical-service`). Khi chốt ca, `PrescriptionCreatedEvent` làm quầy thuốc tự tạo **hóa đơn thuốc nháp**; giá thuốc chốt khi khách mua (`medicine_invoice_items`).
+- Nút ghi "@Transactional … + outbox" nghĩa là sự kiện được ghi cùng giao dịch, gửi đi sau commit; nút "Redis" là thao tác Lua script trên phiếu.
 - Mã chuyển trạng thái `T01`–`T14` tham chiếu bảng SM-01 trong tài liệu State Machine.
 
 ---
@@ -94,7 +95,7 @@ flowchart TD
         REC_FEE["Thu phí khám, bấm 'Xác nhận thanh toán'"]
         REC_CLS_FEE["Thu tiền các dịch vụ XN / CĐHA"]
         REC_BILLING["Mở danh sách hóa đơn còn PENDING của ca,\nnhập giảm giá (nếu có), xác nhận thu tiền"]
-        REC_SELL["Lập hóa đơn thuốc theo đơn,\nlấy thuốc, kiểm tra hạn dùng, dán nhãn"]
+        REC_SELL["Mở hóa đơn thuốc nháp, sửa số lượng theo khách,\nlấy thuốc, kiểm tra hạn dùng, dán nhãn"]
     end
 
     subgraph LANE_DOCTOR["BÁC SĨ KHÁM CHÍNH (Veterinarian)"]
@@ -122,17 +123,17 @@ flowchart TD
 
     subgraph LANE_SYSTEM["HỆ THỐNG PHẦN MỀM (Automated System)"]
         SYS_ENQUEUE["pet_visits: WAITING (T01)\nTạo dịch vụ khám + hóa đơn phí khám PENDING"]
-        SYS_TICKET_1["@Transactional: hóa đơn khám PAID\nPhát phiếu hàng đợi Bác sĩ (in số thứ tự)\nCấp cứu: phát ngay, priority 2, thu sau"]
-        SYS_BUSY_1["pet_visits: IN_PROGRESS (T02)\nPhiếu IN_SERVICE, dịch vụ khám IN_PROGRESS"]
+        SYS_TICKET_1["@Transactional: hóa đơn khám PAID + outbox\nListener phát phiếu Bác sĩ trên Redis (hiện số thứ tự)\nCấp cứu: phát ngay, priority 2, thu sau"]
+        SYS_BUSY_1["pet_visits: IN_PROGRESS (T02), tạo medical_records\nDịch vụ khám IN_PROGRESS; sau commit phiếu IN_SERVICE"]
         SYS_FREE_DOC["Tạo visit_service_details + service_invoices (PENDING)\npet_visits: WAITING_RESULTS (T04)\nPhiếu Bác sĩ DONE, giải phóng Bác sĩ"]
-        SYS_TICKET_CLS["@Transactional: hóa đơn XN / CĐHA PAID\nPhát phiếu từng phòng (dịch vụ cùng phòng gộp 1 phiếu)"]
+        SYS_TICKET_CLS["@Transactional: hóa đơn XN / CĐHA PAID + outbox\nListener phát phiếu từng phòng trên Redis (cùng phòng gộp 1 phiếu)"]
         SYS_FORK_CLS[["FORK: Phân tách theo phòng có dịch vụ"]]
         SYS_JOIN_CLS[["JOIN: Mọi dịch vụ CLS đã xong hoặc hủy"]]
         SYS_READY["pet_visits: RESULTS_READY (T06)\nPhát phiếu Bác sĩ priority 1 (không thu tiền)"]
         SYS_BUSY_2["pet_visits: IN_PROGRESS GĐ 2 (T07)\nMở bệnh án tổng hợp"]
-        SYS_LOCK_PAY["Lưu đơn thuốc (nếu có), khóa bệnh án, phiếu DONE\npet_visits: WAITING_PAYMENT (T05 / T09)"]
+        SYS_LOCK_PAY["Khóa hồ sơ khám & đơn thuốc, phiếu DONE (ghi lịch sử)\npet_visits: WAITING_PAYMENT (T05 / T09)\nOutbox PrescriptionCreatedEvent → hóa đơn thuốc nháp"]
         SYS_PAID["@Transactional: service_invoices PAID\nĐủ hóa đơn PAID / CANCELLED / REFUNDED\n→ pet_visits: COMPLETED (T10)"]
-        SYS_TX_SELL["@Transactional: trừ kho có điều kiện,\nghi inventory_transactions (EXPORT_SALE),\nmedicine_invoices: PAID"]
+        SYS_TX_SELL["@Transactional: trừ medicine_stocks có điều kiện,\nghi inventory_transactions (EXPORT_SALE),\nmedicine_invoices: PAID + outbox"]
     end
 
     CL_START --> CL_BRING --> REC_CHECKIN --> SYS_ENQUEUE
@@ -207,12 +208,12 @@ flowchart TD
     subgraph LANE_SYSTEM["HỆ THỐNG PHẦN MỀM"]
         S_CHECK_OPEN{"Thú cưng đang có\nđợt khám chưa kết thúc?"}
         S_OPEN_ERR["CẢNH BÁO: 'Thú cưng đang có đợt khám mở,\nkhông tạo đợt khám mới'"]
-        S_CREATE_VISIT["Tạo pet_visits: WAITING (T01)\n+ dịch vụ khám & hóa đơn phí khám PENDING\nNếu có hẹn: phát VisitCheckedInEvent"]
+        S_CREATE_VISIT["Tạo pet_visits: WAITING (T01)\n+ dịch vụ khám & hóa đơn phí khám PENDING (giá từ service_prices)\nOutbox VisitCheckedInEvent"]
         S_SUGGEST["Hiển thị số phiếu đang chờ của từng Bác sĩ,\ngợi ý Bác sĩ ít người chờ nhất"]
-        S_ASSIGN["Gán pet_visits.doctor_id (ca vẫn WAITING)\nCa hiện ở mục 'Chờ thu phí khám' của Thu ngân"]
-        S_TICKET["@Transactional: hóa đơn phí khám PAID\nPhát phiếu DOCTOR (doctor_id, priority 0, ticket_no tiếp theo)\nIn phiếu số phòng + số thứ tự"]
-        S_TICKET_EMG["[EX-04] Phát phiếu DOCTOR ngay, priority 2\nPhí khám giữ PENDING, thu khi chốt ca"]
-        S_PICK_HEAD["Phiếu được chọn (mặc định: đầu hàng đợi\nORDER BY priority DESC, issued_at)\nCập nhật last_called_at, phát PatientCalledEvent\nKhông đổi trạng thái và thứ tự"]
+        S_ASSIGN["Kiểm tra Bác sĩ ACTIVE (auth), gán pet_visits.doctor_id\n+ doctor_name_snapshot (ca vẫn WAITING)\nCa hiện ở mục 'Chờ thu phí khám' của Thu ngân"]
+        S_TICKET["@Transactional: hóa đơn phí khám PAID + outbox\nListener: issue_ticket.lua phát phiếu DOCTOR trên Redis\n(priority 0, số phiếu INCR) – hiện số phòng + số thứ tự"]
+        S_TICKET_EMG["[EX-04] Listener nhận VisitCheckedInEvent: phát phiếu DOCTOR\nngay, priority 2; phí khám giữ PENDING, thu khi chốt ca"]
+        S_PICK_HEAD["Phiếu được chọn (mặc định: đầu Sorted Set)\nTăng calledCount, ghi lastCalledAt (Redis),\nphát PatientCalledEvent\nKhông đổi trạng thái và thứ tự"]
         S_SKIP["Phiếu vắng giữ nguyên vị trí (không đổi thứ tự,\nkhông đếm lần vắng); phiếu cấp cứu giữ ưu tiên.\nKhách quay lại: Bác sĩ bấm 'Gọi lại'"]
     end
 
@@ -253,8 +254,8 @@ Mỗi dịch vụ được chỉ định đều sinh **1 hóa đơn dịch vụ 
 flowchart TD
     subgraph LANE_DOCTOR["BÁC SĨ THÚ Y (Veterinarian)"]
         D_CLICK_START["Nhấn nút 'Bắt đầu khám' trên giao diện"]
-        D_EXAM["Thăm khám lâm sàng & đo sinh hiệu:\n- Cân nặng (weight_at_visit), thân nhiệt (temperature)\n- Nghe tim phổi, kiểm tra niêm mạc, hạch\n- Đọc lại lịch sử bệnh án cũ"]
-        D_INPUT_NOTES["Nhập ghi chú lâm sàng & chẩn đoán sơ bộ"]
+        D_EXAM["Thăm khám lâm sàng & đo sinh hiệu:\n- Ghi lần đo vital_signs (cân nặng, thân nhiệt,\n  nhịp tim, nhịp thở, BCS, niêm mạc)\n- Nghe tim phổi, kiểm tra hạch\n- Đọc lại lịch sử bệnh án cũ"]
+        D_INPUT_NOTES["Ghi medical_records: bệnh sử, kết quả khám,\nchẩn đoán sơ bộ"]
         D_BRANCH{"Đánh giá tình trạng thú cưng?"}
 
         D_ROUTINE_DIAG["Xác định chẩn đoán bệnh thông thường / lịch tiêm phòng"]
@@ -276,15 +277,15 @@ flowchart TD
     end
 
     subgraph LANE_SYSTEM["HỆ THỐNG PHẦN MỀM"]
-        S_START_VISIT["pet_visits: IN_PROGRESS (T02), Bác sĩ: BUSY\nPhiếu Bác sĩ: IN_SERVICE\nDịch vụ khám (phí đã nộp): IN_PROGRESS"]
+        S_START_VISIT["pet_visits: IN_PROGRESS (T02), Bác sĩ: BUSY\nTạo medical_records; dịch vụ khám IN_PROGRESS\nSau commit: phiếu Bác sĩ IN_SERVICE (Redis)"]
         S_INROOM_ORDER["Tạo visit_service_details (PENDING)\n+ service_invoices (PENDING, thu khi chốt ca)\ncho dịch vụ tại phòng"]
         S_INROOM_DONE["Dịch vụ tại phòng: COMPLETED"]
-        S_STOCK_WARN["Lưu prescriptions + prescription_items\n(không giá, không trạng thái)\n[EX-13] Chỉ cảnh báo nếu tồn kho không đủ"]
-        S_CHECK_DIAG{"Đã nhập chẩn đoán,\ncân nặng, thân nhiệt?"}
+        S_STOCK_WARN["Lưu prescriptions + prescription_items (clinical,\nchụp tên thuốc, không giá, không trạng thái)\n[EX-13] Chỉ cảnh báo nếu tồn kho không đủ"]
+        S_CHECK_DIAG{"Đã nhập chẩn đoán và\ncó lần đo cân nặng, thân nhiệt?"}
         S_DIAG_ERR["[EX-12] Yêu cầu nhập đủ thông tin\ntrước khi chốt ca"]
         S_CLS_ORDER["Tạo visit_service_details (PENDING)\n+ service_invoices (PENDING) cho từng dịch vụ CLS\n(chờ khách nộp tiền)"]
-        S_RELEASE_DOC["Dịch vụ khám: COMPLETED, phiếu Bác sĩ: DONE\npet_visits: WAITING_RESULTS (T04)\nBác sĩ về AVAILABLE, gọi số tiếp theo\nKhách ra quầy nộp tiền XN / CĐHA (AD-04)"]
-        S_TO_PAYMENT["Dịch vụ khám: COMPLETED, phiếu Bác sĩ: DONE\nKhóa hồ sơ chuyên môn\npet_visits: WAITING_PAYMENT (T05)\nGiải phóng Bác sĩ"]
+        S_RELEASE_DOC["Dịch vụ khám: COMPLETED, phiếu Bác sĩ: DONE\n(ghi queue_ticket_histories, xóa khỏi Redis)\npet_visits: WAITING_RESULTS (T04)\nBác sĩ về AVAILABLE, gọi số tiếp theo\nKhách ra quầy nộp tiền XN / CĐHA (AD-04)"]
+        S_TO_PAYMENT["Dịch vụ khám: COMPLETED, phiếu Bác sĩ: DONE\nKhóa medical_records & đơn thuốc\npet_visits: WAITING_PAYMENT (T05)\nOutbox PrescriptionCreatedEvent (nếu có đơn)\nGiải phóng Bác sĩ"]
         S_CANCEL_VISIT["Mọi dịch vụ của ca → CANCELLED\nHóa đơn chưa thu → CANCELLED (phí khám đã nộp: giữ PAID)\nPhiếu → CANCELLED, pet_visits: CANCELLED\nGiải phóng Bác sĩ"]
     end
 
@@ -359,7 +360,7 @@ flowchart TD
     end
 
     subgraph LANE_SYSTEM["HỆ THỐNG PHẦN MỀM"]
-        S_ISSUE["@Transactional: hóa đơn XN / CĐHA PAID\nPhát phiếu LABORATORY / IMAGING + queue_ticket_items\n(cấp cứu: priority 2, chưa thu)"]
+        S_ISSUE["@Transactional: hóa đơn XN / CĐHA PAID + outbox\nListener phát phiếu LABORATORY / IMAGING trên Redis\n(danh sách dịch vụ của phiếu; cấp cứu: priority 2, chưa thu)"]
         S_BADGE["Hiện huy hiệu '[Đang lấy máu bên phòng Lab]'\n(Lab IN_PROGRESS và action mới nhất = START_PROCESSING)"]
         S_SAVE_LAB["Lưu lab_test_results\n(snapshot min/max theo loài từ lab_test_reference_ranges)\nvisit_service_details: COMPLETED, phiếu: DONE\nMàu LOW / NORMAL / HIGH tính khi hiển thị, không lưu"]
         S_SAVE_IMG["Lưu imaging_results & imaging_attachments\nvisit_service_details: COMPLETED, phiếu: DONE"]
@@ -399,7 +400,7 @@ flowchart TD
 Mô tả quy trình Bác sĩ đón lại bệnh nhân sau khi có kết quả cận lâm sàng (UC-30, UC-31, UC-33). Ca có kết quả đã được phát phiếu `priority = 1` (không thu tiền), đứng đầu hàng đợi của Bác sĩ (T06). Bác sĩ hội chẩn, chẩn đoán xác định, có thể thực hiện thêm dịch vụ tại phòng, kê đơn thuốc điện tử và khóa bệnh án.
 
 Hai điểm cần lưu ý:
-- **Gọi số trước, đổi trạng thái sau (EX-10):** "Gọi" (hoặc "Gọi số tiếp theo") chỉ cập nhật `last_called_at` của phiếu và phát thông báo, ca vẫn `RESULTS_READY` và thứ tự không đổi; thú cưng vào phòng thì Bác sĩ mới bấm "Bắt đầu Giai đoạn 2" (T07, phiếu `IN_SERVICE`). Gọi 2–3 lần không vào thì Bác sĩ bấm "Gọi" phiếu khác: phiếu vắng giữ nguyên vị trí (vẫn đứng đầu hàng đợi), khách quay lại thì "Gọi lại".
+- **Gọi số trước, đổi trạng thái sau (EX-10):** "Gọi" (hoặc "Gọi số tiếp theo") chỉ tăng số lần gọi / ghi giờ gọi trên phiếu (Redis) và phát thông báo, ca vẫn `RESULTS_READY` và thứ tự không đổi; thú cưng vào phòng thì Bác sĩ mới bấm "Bắt đầu Giai đoạn 2" (T07, phiếu `IN_SERVICE`). Gọi 2–3 lần không vào thì Bác sĩ bấm "Gọi" phiếu khác: phiếu vắng giữ nguyên vị trí (vẫn đứng đầu hàng đợi), khách quay lại thì "Gọi lại".
 - **Kê đơn không bị chặn bởi tồn kho (EX-13):** vì khách được mua thuốc ngoài, hệ thống chỉ cảnh báo khi số lượng kê vượt tồn kho; Bác sĩ quyết định giữ nguyên hay đổi thuốc.
 
 ### 6.2. Sơ đồ Hoạt động Phân làn
@@ -436,12 +437,12 @@ flowchart TD
         S_RELEASE_EX10["Ca giữ RESULTS_READY, phiếu giữ WAITING\nvà giữ nguyên vị trí; Bác sĩ gọi phiếu khác"]
         S_CHECK_BACK{"Khách quay lại?"}
         S_CLOSE_DEBT["pet_visits: COMPLETED (T08, khóa), phiếu CANCELLED\nKhông tạo hóa đơn mới, không hoàn tiền;\nhóa đơn đã làm mà chưa thu giữ PENDING (công nợ)\nKết quả CLS lưu vĩnh viễn vào bệnh án"]
-        S_CHECK_STOCK{"Số lượng kê <=\nmedicines.stock_quantity?"}
+        S_CHECK_STOCK{"Số lượng kê <= tồn kho?\n(đọc medicine_stocks qua API nội bộ)"}
         S_STOCK_WARN["[EX-13] Cảnh báo: 'Kho hiện không đủ,\nkhách có thể phải mua ngoài'"]
-        S_SAVE_RX["Tạo prescriptions + prescription_items\n(không giá, không trạng thái)"]
+        S_SAVE_RX["Tạo prescriptions + prescription_items (clinical)\n(chụp tên thuốc, đơn vị; không giá, không trạng thái)"]
         S_CHECK_DIAG{"Đã nhập chẩn đoán và\nhoàn tất dịch vụ tại phòng?"}
         S_DIAG_ERR["[EX-12] Yêu cầu nhập chẩn đoán /\nhoàn tất hoặc hủy dịch vụ tại phòng"]
-        S_FINAL_LOCK["1. Khóa toàn bộ hồ sơ bệnh án chuyên môn\n2. pet_visits: WAITING_PAYMENT (T09), phiếu DONE\n   (ghi pet_visit_status_histories)\n3. Bác sĩ về AVAILABLE, gọi số tiếp theo\n4. Đẩy sang màn hình Thu ngân"]
+        S_FINAL_LOCK["1. Khóa medical_records & đơn thuốc\n2. pet_visits: WAITING_PAYMENT (T09), phiếu DONE\n   (ghi lịch sử trạng thái + lịch sử phiếu)\n3. Outbox PrescriptionCreatedEvent → hóa đơn thuốc nháp\n4. Bác sĩ về AVAILABLE; ca sang màn hình Thu ngân"]
     end
 
     D_FINISH_PREV --> D_SEE_POPUP --> S_CALL_SPEAKER --> D_DECIDE_PATIENT
@@ -472,8 +473,8 @@ Mô tả quy trình tài chính và bán thuốc tại quầy (UC-34, UC-35, UC-
 
 | Thời điểm | Hóa đơn thu | Kết quả trong cùng giao dịch | Sơ đồ |
 | :--- | :--- | :--- | :--- |
-| (1) Ngay sau check-in | Phí khám (`EXAMINATION`) | Phát phiếu hàng đợi Bác sĩ | AD-02 |
-| (2) Sau khi Bác sĩ chỉ định CLS | Dịch vụ XN / CĐHA | Phát phiếu hàng đợi phòng XN / CĐHA | AD-04 |
+| (1) Ngay sau check-in | Phí khám (`EXAMINATION`) | Hóa đơn `PAID` + outbox; ngay sau đó phát phiếu hàng đợi Bác sĩ | AD-02 |
+| (2) Sau khi Bác sĩ chỉ định CLS | Dịch vụ XN / CĐHA | Hóa đơn `PAID` + outbox; ngay sau đó phát phiếu phòng XN / CĐHA | AD-04 |
 | (3) Sau khi Bác sĩ chốt ca | Dịch vụ làm tại phòng; các khoản của ca cấp cứu (khám trước thu sau) | Đủ hóa đơn → đợt khám `COMPLETED` (T10) | Sơ đồ dưới đây |
 
 Quy trình cuối ca chia làm **2 phần độc lập**:
@@ -481,9 +482,9 @@ Quy trình cuối ca chia làm **2 phần độc lập**:
 | Phần | Thực thể | Service | Kết quả |
 | :--- | :--- | :--- | :--- |
 | **A. Thu tiền hóa đơn dịch vụ** (bắt buộc) | `service_invoices` | `clinical-service` | Hóa đơn cuối cùng `PAID` thì đợt khám `COMPLETED` **trong cùng giao dịch cục bộ** (T10). |
-| **B. Bán thuốc theo đơn** (tùy chọn) | `medicine_invoices`, `medicine_invoice_items`, `inventory_transactions` | `billing-pharmacy-service` | Chuyển `PAID` và trừ kho trong **cùng một giao dịch**; không ảnh hưởng trạng thái đợt khám. |
+| **B. Bán thuốc theo đơn** (tùy chọn) | `medicine_invoices` (nháp tự tạo khi chốt ca), `medicine_invoice_items`, `medicine_stocks`, `inventory_transactions` | `billing-pharmacy-service` | Chuyển `PAID` và trừ kho trong **cùng một giao dịch**; không ảnh hưởng trạng thái đợt khám. |
 
-Phần B chỉ diễn ra khi Bác sĩ có kê đơn **và** khách chọn mua tại phòng khám. Khách có thể mua một phần đơn. Số tiền của mỗi hóa đơn không lưu thành cột mà tính từ VIEW `v_service_invoice_amounts` / `v_medicine_invoice_amounts`.
+Phần B chỉ diễn ra khi Bác sĩ có kê đơn: hóa đơn thuốc nháp đã sẵn sàng; khách mua tại phòng khám thì thu, mua ngoài thì hủy nháp. Khách được mua nhiều hơn / ít hơn số kê (không quá tồn kho). Số tiền của mỗi hóa đơn không lưu thành cột mà tính từ VIEW `v_service_invoice_amounts` / `v_medicine_invoice_amounts`.
 
 ### 7.2. Sơ đồ Hoạt động Phân làn
 
@@ -494,7 +495,7 @@ flowchart TD
         C_CHECK_BILL["Kiểm tra bảng kê các hóa đơn dịch vụ"]
         C_MAKE_PAYMENT["Thanh toán bên ngoài quầy\n(tiền mặt hoặc chuyển khoản)"]
         C_DECIDE_BUY{"Mua thuốc tại\nphòng khám?"}
-        C_CHOOSE_ITEMS["Chọn thuốc & số lượng muốn mua\n(nhiều / ít / bằng số kê, không quá tồn kho)"]
+        C_CHOOSE_ITEMS["Cho biết số lượng muốn mua mỗi thuốc\n(nhiều / ít / bằng số kê, không quá tồn kho)"]
         C_PAY_MED["Thanh toán tiền thuốc"]
         C_RECEIVE["Nhận thuốc, phiếu hướng dẫn & ra về"]
         C_OUTSIDE["Nhận đơn thuốc in, ra về mua ngoài"]
@@ -507,11 +508,11 @@ flowchart TD
         R_VERIFY_PAY["Kiểm tra đã nhận đủ tiền"]
         R_CONFIRM_PAY["Bấm 'Xác nhận thanh toán' các hóa đơn dịch vụ (UC-35)"]
         R_HAS_RX{"Ca có đơn thuốc?"}
-        R_CREATE_MINV["Bấm 'Bán thuốc theo đơn', nhập thuốc & số lượng"]
+        R_CREATE_MINV["Mở hóa đơn thuốc nháp của ca,\nsửa số lượng / bỏ dòng theo khách"]
         R_MED_DISCOUNT["Nhập giảm giá hóa đơn thuốc (nếu có)"]
         R_FETCH_MED["Mở tủ thuốc, lấy đúng loại & số lượng,\nkiểm tra hạn dùng, dán nhãn liều dùng"]
         R_CONFIRM_SALE["Bấm 'Xác nhận thanh toán & xuất thuốc' (UC-36)"]
-        R_CANCEL_MINV["Hủy hóa đơn thuốc (khách mua ngoài,\nhủy là kết thúc)"]
+        R_CANCEL_MINV["Hủy hóa đơn thuốc nháp (khách mua ngoài,\nhủy là kết thúc)"]
         R_EDIT_MINV["Sửa hóa đơn thuốc đang PENDING:\ngiảm số lượng / bỏ thuốc thiếu"]
     end
 
@@ -519,14 +520,14 @@ flowchart TD
         S_LIST_INV["Liệt kê service_invoices còn PENDING của ca\n(dịch vụ làm tại phòng, khoản của ca cấp cứu)\nkèm số tiền từ v_service_invoice_amounts"]
         S_CHECK_DISCOUNT{"discount_amount <=\nquantity × unit_price × (1 + vat_rate)?"}
         S_DISCOUNT_ERR["[EX-14] CẢNH BÁO: 'Tiền giảm giá không được\nvượt quá số tiền của hóa đơn'"]
-        S_PAID_SVC["@Transactional (clinical-service):\n1. service_invoices: PAID, paid_at, cashier_id\n2. Mọi hóa đơn dịch vụ đã PAID / CANCELLED / REFUNDED\n   → pet_visits: COMPLETED (T10) + ghi lịch sử\n3. COMMIT"]
+        S_PAID_SVC["@Transactional (clinical-service):\n1. service_invoices: PAID, paid_at, cashier_id\n2. Mọi hóa đơn dịch vụ đã PAID / CANCELLED / REFUNDED\n   → pet_visits: COMPLETED (T10) + ghi lịch sử\n3. Outbox ServiceInvoicePaidEvent, VisitCompletedEvent\n4. COMMIT"]
         S_PRINT_SVC["In phiếu thu dịch vụ"]
-        S_NEW_MINV["Kiểm tra prescription_id chưa có hóa đơn thuốc (EX-16)\nTạo medicine_invoices (PENDING)\n+ medicine_invoice_items (quantity <= số lượng kê,\nsnapshot unit_price, vat_rate)"]
+        S_NEW_MINV["Hóa đơn nháp (tạo sẵn từ PrescriptionCreatedEvent,\nprescription_id UNIQUE – EX-16): cập nhật dòng\n(quantity ≤ tồn kho, có thể khác số kê)"]
         S_CHECK_MED_DISCOUNT{"discount_amount <=\ntổng tiền thuốc?"}
         S_TRANSACTION_START["Bắt đầu giao dịch @Transactional\n(billing-pharmacy-service)"]
-        S_CHECK_REAL_STOCK{"Mọi câu UPDATE ... WHERE\nstock_quantity >= qty đều thành công?"}
+        S_CHECK_REAL_STOCK{"Mọi câu UPDATE medicine_stocks ... WHERE\nquantity_on_hand >= qty đều thành công?"}
         S_ROLLBACK["[EX-15] ROLLBACK GIAO DỊCH!\nKhông trừ kho, hóa đơn thuốc giữ PENDING\nCảnh báo: 'Thuốc [Tên] vừa không đủ tồn kho'"]
-        S_COMMIT["1. Trừ medicines.stock_quantity\n2. Ghi inventory_transactions (EXPORT_SALE, quantity âm)\n3. medicine_invoices: PAID, paid_at, cashier_id\n4. COMMIT"]
+        S_COMMIT["1. Trừ medicine_stocks.quantity_on_hand\n2. Ghi inventory_transactions (EXPORT_SALE, quantity âm)\n3. medicine_invoices: PAID, paid_at, cashier_id\n4. Outbox MedicineInvoicePaidEvent\n5. COMMIT"]
         S_PRINT_MED["In hóa đơn thuốc & phiếu hướng dẫn dùng thuốc"]
         S_MINV_CANCELLED["medicine_invoices: CANCELLED\nTồn kho không biến động"]
     end
@@ -553,7 +554,7 @@ flowchart TD
     S_CHECK_REAL_STOCK -- "[Đủ kho]" --> S_COMMIT --> S_PRINT_MED --> C_RECEIVE --> CLIENT_END(((Hoàn tất mua thuốc)))
 ```
 
-> **Sửa hóa đơn thuốc thay vì lập lại:** mỗi đơn thuốc chỉ có một hóa đơn thuốc (`prescription_id UNIQUE`), nên sau EX-15 Thu ngân sửa chính hóa đơn đang `PENDING` (`PUT /api/v1/billing/medicine-invoices/{id}/items`), các dòng còn lại giữ nguyên snapshot giá. Hóa đơn đã hủy không lập lại được: khách mua ngoài theo đơn in.
+> **Hóa đơn nháp, sửa thay vì lập lại:** mỗi đơn thuốc chỉ có một hóa đơn thuốc (`prescription_id UNIQUE`), tạo sẵn khi chốt ca. Sau EX-15 Thu ngân sửa chính hóa đơn đang `PENDING` (`PUT /api/v1/billing/medicine-invoices/{id}/items`); khi xác nhận thu, giá được cập nhật theo bảng giá hiện hành. Hóa đơn đã hủy không lập lại được: khách mua ngoài theo đơn in.
 
 > **Vì sao EX-15 không còn gây rắc rối hoàn tiền:** tiền thuốc và tiền dịch vụ nằm ở hai hóa đơn tách biệt. Khi giao dịch bán thuốc rollback, chưa có hóa đơn thuốc nào ở trạng thái `PAID`, nên hệ thống không ghi nhận khoản thu nào cần hoàn; Thu ngân chỉ trả lại khách số tiền thuốc vừa nhận (hoặc thu theo số lượng mới). Đợt khám đã `COMPLETED` từ Phần A và không bị ảnh hưởng.
 
@@ -567,19 +568,20 @@ Ma trận dưới đây thể hiện sự liên kết giữa các Sơ đồ Ho�
 
 | Mã Activity Diagram | Tên Quy trình nghiệp vụ | Use Case liên quan | State Machine & Thực thể CSDL | Mã Ngoại lệ xử lý |
 | :---: | :--- | :---: | :---: | :---: |
-| **AD-01** | Chu trình Khám Ngoại trú Hai pha Tổng thể | UC-19, 22, 23, 25, 26, 30, 31, 34, 35, 36 | `pet_visits` (SM-01)<br>`doctor_serving_status` (SM-02)<br>`service_invoices` (SM-05)<br>`medicine_invoices` (SM-06) | EX-03, EX-06, EX-08, EX-10, EX-15 |
-| **AD-02** | Tiếp đón, Thu phí khám, Phát phiếu hàng đợi Bác sĩ & Gọi số | UC-14, 16, 17, 18, 19, 20, 21, 34_35 | `appointments` (SM-04)<br>`pet_visits` (T01)<br>`service_invoices` (SM-05)<br>`queue_tickets` (SM-07)<br>`doctor_serving_status` (SM-02) | EX-01, EX-02, EX-03, EX-04, EX-05, EX-10 |
+| **AD-01** | Chu trình Khám Ngoại trú Hai pha Tổng thể | UC-19, 22, 23, 25, 26, 30, 31, 34, 35, 36 | `pet_visits` (SM-01)<br>`doctor_serving_status` (SM-02)<br>`service_invoices` (SM-05)<br>`medicine_invoices` nháp (SM-06) | EX-03, EX-06, EX-08, EX-10, EX-15 |
+| **AD-02** | Tiếp đón, Thu phí khám, Phát phiếu hàng đợi Bác sĩ & Gọi số | UC-14, 16, 17, 18, 19, 20, 21, 34_35 | `appointments` (SM-04)<br>`pet_visits` (T01)<br>`service_invoices` (SM-05)<br>Phiếu Redis + `queue_ticket_histories` (SM-07)<br>`doctor_serving_status` (SM-02) | EX-01, EX-02, EX-03, EX-04, EX-05, EX-10 |
 | **AD-03** | Khám Lâm sàng Sơ bộ & Chỉ định Dịch vụ Giai đoạn 1 | UC-22, UC-23 | `pet_visits` (T02, T04, T05, T11)<br>`visit_service_details` (SM-03)<br>`service_invoices` (SM-05)<br>`prescriptions` | EX-12, EX-13 |
-| **AD-04** | Thu tiền CLS, Thực hiện Cận lâm sàng Song song & Hàng đợi | UC-25, UC-26, UC-34_35 | `visit_service_details` (SM-03)<br>`service_invoices` (SM-05)<br>`queue_tickets` (SM-07)<br>`pet_visits` (T06, T12) | EX-06, EX-07, EX-08, EX-09, EX-11 |
+| **AD-04** | Thu tiền CLS, Thực hiện Cận lâm sàng Song song & Hàng đợi | UC-25, UC-26, UC-34_35 | `visit_service_details` (SM-03)<br>`service_invoices` (SM-05)<br>Phiếu Redis + `queue_ticket_histories` (SM-07)<br>`pet_visits` (T06, T12) | EX-06, EX-07, EX-08, EX-09, EX-11 |
 | **AD-05** | Hội chẩn Kết quả, Chẩn đoán & Kê đơn Giai đoạn 2 | UC-30, UC-31, UC-33 | `pet_visits` (T07, T08, T09)<br>`doctor_serving_status` (SM-02)<br>`prescriptions` | EX-10, EX-11, EX-12, EX-13 |
-| **AD-06** | Thu tiền Hóa đơn Dịch vụ & Bán thuốc theo Đơn | UC-34, UC-35, UC-36 | `service_invoices` (SM-05)<br>`pet_visits` (T10)<br>`medicine_invoices` (SM-06)<br>`inventory_transactions` | EX-11, EX-14, EX-15, EX-16 |
+| **AD-06** | Thu tiền Hóa đơn Dịch vụ & Bán thuốc theo Đơn | UC-34, UC-35, UC-36 | `service_invoices` (SM-05)<br>`pet_visits` (T10)<br>`medicine_invoices` nháp (SM-06)<br>`inventory_transactions` | EX-11, EX-14, EX-15, EX-16 |
 
 ---
 
 ## PHỤ LỤC: THAY ĐỔI SO VỚI PHIÊN BẢN 2.0
 
-| Vị trí | Bản 2.0 | Bản 3.0 | Lý do |
+| Vị trí | Bản cũ | Bản mới | Lý do |
 | :--- | :--- | :--- | :--- |
+| Quy ước, AD-01 → AD-06, ma trận (**v4.0, 18/11/2026**) | Phát phiếu trong cùng giao dịch thu tiền, `ticket_no` tiếp theo, `last_called_at`; sinh hiệu ghi `weight_at_visit`, `temperature`; đơn thuốc ở billing; Thu ngân lập hóa đơn thuốc khi khách đồng ý mua; trừ `medicines.stock_quantity` | Thu tiền ghi outbox, listener phát phiếu trên Redis (Lua, `INCR`), gọi số tăng `calledCount`; `vital_signs`, `medical_records`; đơn thuốc ở clinical, chốt ca phát `PrescriptionCreatedEvent` → hóa đơn thuốc nháp; trừ `medicine_stocks`; phân công kiểm tra Bác sĩ `ACTIVE` | Nhận xét chi tiết của GVHD |
 | AD-01 phần cuối | Thu viện phí → `PAID` mở khóa xuất thuốc → trừ kho → `COMPLETED` | Thu hóa đơn dịch vụ → `COMPLETED`; mua thuốc là nhánh tùy chọn, thu tiền thuốc và trừ kho là cùng một bước | Mỗi dịch vụ có hóa đơn riêng; khách được mua thuốc ngoài |
 | AD-01, AD-03 | Không có dịch vụ tại phòng | Thêm nhánh dịch vụ thực hiện tại phòng (tiêm, tẩy giun, thủ thuật) | Bản cũ chỉ có Lab / CĐHA |
 | AD-02 | Phân công xong vẫn tính Bác sĩ `AVAILABLE` | Gán `doctor_id` → Bác sĩ `BUSY` ngay; thêm kiểm tra thú cưng đang có đợt khám mở | Chống phân công trùng |

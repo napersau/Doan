@@ -1,8 +1,9 @@
 # TÀI LIỆU MÔ TẢ NGHIỆP VỤ HỆ THỐNG QUẢN LÝ PHÒNG KHÁM THÚ Y
 
 > **Tài liệu nền tảng phục vụ xây dựng biểu đồ Use Case, Đặc tả Use Case và Thiết kế CSDL (ERD).**  
-> **Phiên bản:** 3.0 (đồng bộ lược đồ CSDL v3.0: mỗi dịch vụ có hóa đơn riêng, mua thuốc tại phòng khám là tùy chọn; khớp State Machine, Activity, Use Case, Ngoại lệ và FR/NFR v3.0). Danh sách thay đổi ở Phụ lục cuối tài liệu.  
-> **Cập nhật 17/11/2026 (góp ý GVHD lần 2):** tách quy trình thanh toán khỏi quy trình khám; khách **nộp tiền trước rồi mới được phát phiếu vào hàng đợi** (phí khám, Xét nghiệm, CĐHA); dịch vụ làm tại phòng thu khi chốt ca; hàng đợi lưu ở bảng **phiếu xếp hàng** riêng, tách khỏi hồ sơ khám.
+> **Phiên bản:** 4.0 (đồng bộ lược đồ CSDL v4.0; khớp State Machine, Activity, Use Case, Ngoại lệ và FR/NFR v4.0). Nền tảng v3.0: mỗi dịch vụ có hóa đơn riêng, mua thuốc tại phòng khám là tùy chọn. Danh sách thay đổi ở Phụ lục cuối tài liệu.  
+> **Cập nhật 17/11/2026 (góp ý GVHD lần 2):** tách quy trình thanh toán khỏi quy trình khám; khách **nộp tiền trước rồi mới được phát phiếu vào hàng đợi** (phí khám, Xét nghiệm, CĐHA); dịch vụ làm tại phòng thu khi chốt ca.  
+> **Cập nhật 18/11/2026 (v4.0 – nhận xét chi tiết của GVHD):** hồ sơ người dùng tách theo loại (nhân sự, Bác sĩ có chứng chỉ hành nghề, khách hàng); **giá dịch vụ và giá thuốc có lịch sử**; thông tin thuốc gồm thành phần, quy cách; đợt khám tách thành **thông tin tiếp đón – sinh hiệu – hồ sơ khám chuyên môn**; **hàng đợi chạy trên Redis** (MySQL chỉ lưu lịch sử phiếu); **đơn thuốc thuộc phân hệ khám**, chốt ca thì quầy thuốc tự có **hóa đơn thuốc nháp**; báo cáo lấy từ phân hệ báo cáo riêng. Chi tiết ở mục 44 và Phụ lục.
 
 ---
 
@@ -12,10 +13,11 @@
 - **Tiếp đón:** Khi khách đến phòng khám, lịch hẹn chuyển trạng thái thành `CHECKED_IN` và chuyển tiếp thành Đợt khám (`Pet Visit`).
 - **Phân công ca khám:** **Mỗi bác sĩ có một hàng đợi riêng.** Lễ tân chọn bác sĩ ngay khi tiếp nhận, dựa trên số người đang chờ của từng bác sĩ (hệ thống gợi ý bác sĩ ít người chờ nhất), không phải chờ bác sĩ rảnh. Bác sĩ tự gọi bệnh nhân trong hàng đợi của mình (bấm "Gọi" ở ca bất kỳ hoặc "Gọi số tiếp theo"). Hệ thống giả định tất cả bác sĩ đều đi làm đầy đủ, không quản lý ca kíp và không quản lý nghỉ phép.
 - **Thu tiền trước – xếp hàng sau (cập nhật 17/11/2026):** giống bệnh viện, quy trình thanh toán tách khỏi quy trình khám. Khách check-in xong **nộp phí khám lâm sàng** tại quầy thì mới được phát **phiếu số thứ tự** vào hàng đợi bác sĩ. Khi bác sĩ chỉ định, có 3 nhóm dịch vụ: **làm tại phòng** (tiêm vắc-xin, tẩy giun, tiêm thuốc, thủ thuật…) làm ngay, không cần thu trước (thu khi chốt ca); **Xét nghiệm** và **CĐHA** phải nộp tiền trước mới được phát phiếu vào hàng đợi 2 phòng này. Ca cấp cứu khám trước, thu sau. Phí khám đã nộp không hoàn.
-- **Tách dữ liệu hay thay đổi khỏi dữ liệu ít thay đổi:** hồ sơ khám (`pet_visits`, `visit_service_details`) chỉ giữ thông tin chuyên môn ổn định; mọi thông tin xếp hàng (số phiếu, thứ tự, giờ gọi, ai đang được phục vụ) nằm ở bảng phiếu xếp hàng (`queue_tickets`, `queue_ticket_items`).
-- **Phòng khám:** Mỗi bác sĩ được gán một **số phòng khám cố định** (quản lý trực tiếp qua thuộc tính `room_number` trong thông tin tài khoản bác sĩ, không tạo bảng phòng khám riêng).
+- **Tách dữ liệu hay thay đổi khỏi dữ liệu ít thay đổi:** hồ sơ khám chỉ giữ thông tin ổn định; mọi thông tin xếp hàng (số phiếu, thứ tự, số lần gọi, ai đang được phục vụ) là **phiếu xếp hàng trên Redis**, thay đổi tức thời không khóa CSDL; phiếu kết thúc mới được ghi vào lịch sử (`queue_ticket_histories`).
+- **Tách đợt khám theo người nhập (v4.0):** Lễ tân nhập thông tin tiếp đón (`pet_visits`); sinh hiệu đo bao nhiêu lần ghi bấy nhiêu dòng (`vital_signs`); Bác sĩ ghi bệnh sử, khám lâm sàng, chẩn đoán sơ bộ / xác định, phác đồ, lời dặn ở hồ sơ khám (`medical_records`).
+- **Phòng khám:** Mỗi bác sĩ được gán một **số phòng khám cố định** (thuộc tính `room_number` trong **hồ sơ nhân sự** `staff_profiles`, không tạo bảng phòng khám riêng).
 - **Vai trò chuyên môn:** Phân định rõ ràng giữa Bác sĩ khám lâm sàng chính (`VETERINARIAN`), Kỹ thuật viên/Bác sĩ xét nghiệm (`LAB_TECHNICIAN`), và Kỹ thuật viên/Bác sĩ chẩn đoán hình ảnh (`IMAGING_TECHNICIAN`), giúp chuẩn hóa chuyên môn và quản lý phòng ban hiệu quả.
-- **Mô hình tài khoản CSDL:** Sử dụng mô hình tập trung **`users` + `roles`**, không phân mảnh thành các bảng tài khoản riêng lẻ (`veterinarians`, `receptionists`, ...).
+- **Mô hình tài khoản CSDL (v4.0):** một bảng tài khoản đăng nhập dùng chung **`users`** (một tài khoản có thể nhiều vai trò qua `user_roles`, vai trò là bảng danh mục `roles`); thông tin cá nhân chung ở `user_profiles`; mỗi loại người dùng có **bảng hồ sơ riêng**: `staff_profiles` (mã nhân viên, CCCD, chức danh, bộ phận, phòng, ngày vào làm), `veterinarian_profiles` (số chứng chỉ hành nghề, nơi cấp, học vị, chuyên khoa, năm hành nghề), `pet_owner_profiles` (mã khách hàng, kênh đăng ký, kênh liên hệ).
 
 ---
 
@@ -128,10 +130,10 @@ Mỗi người dùng trong hệ thống được gán **duy nhất một vai tr�
 Quản trị viên chịu trách nhiệm quản lý toàn diện cấu hình và hoạt động vận hành của hệ thống phòng khám.
 
 **Nhiệm vụ và quyền hạn:**
-- **Quản lý tài khoản & nhân sự:** Tạo, kích hoạt, khóa tài khoản nhân viên (Bác sĩ, Lễ tân, Kỹ thuật viên Xét nghiệm, Kỹ thuật viên CĐHA); phân công số phòng làm việc cố định cho Bác sĩ và Kỹ thuật viên.
-- **Cấu hình danh mục chuyên môn:** Quản lý danh mục dịch vụ kỹ thuật (`services`), danh mục thuốc & tủ thuốc (`medicines`), quản lý chỉ số xét nghiệm (`lab_test_items`) và thiết lập khoảng tham chiếu sinh lý chuẩn theo loài (`lab_test_reference_ranges`).
+- **Quản lý tài khoản & nhân sự:** Tạo, kích hoạt, khóa, ngừng sử dụng tài khoản nhân viên (không xóa cứng); lập hồ sơ nhân sự (mã nhân viên, CCCD, chức danh, bộ phận, ngày vào làm, người liên hệ khẩn cấp), hồ sơ chuyên môn của Bác sĩ (chứng chỉ hành nghề, học vị, chuyên khoa); gán vai trò (một người có thể nhiều vai trò); phân công số phòng làm việc cố định.
+- **Cấu hình danh mục chuyên môn:** Quản lý nhóm dịch vụ (`service_categories`: nhóm nào thu trước, vào hàng đợi nào), dịch vụ (`services`) và **bảng giá dịch vụ có lịch sử** (`service_prices`); danh mục thuốc (`medicines`, thành phần `medicine_ingredients`, quy cách) và **bảng giá thuốc có lịch sử** (`medicine_prices`); chỉ số xét nghiệm (`lab_test_items`) và khoảng tham chiếu theo loài (`lab_test_reference_ranges`).
 - **Giám sát kho dược:** Quản lý nhập/xuất kho, theo dõi số lượng tồn kho khả dụng và nhận cảnh báo khi thuốc chạm ngưỡng tối thiểu (`min_stock_alert`).
-- **Báo cáo & Thống kê:** Xem báo cáo doanh thu theo thời gian, theo dịch vụ (từ hóa đơn dịch vụ), theo thuốc (từ hóa đơn thuốc); theo dõi công nợ và hiệu suất khám bệnh của các phòng khám.
+- **Báo cáo & Thống kê:** Xem báo cáo doanh thu theo thời gian, theo nhóm dịch vụ, theo nhóm thuốc, hiệu suất từng Bác sĩ, thời gian chờ trung bình (phân hệ báo cáo `reporting-service`); theo dõi công nợ.
 
 > **Lưu ý:** Quản trị viên **không trực tiếp tham gia quy trình khám chữa bệnh** hay can thiệp vào chuyên môn của đợt khám.
 
@@ -143,7 +145,7 @@ Bác sĩ thú y là nhân sự trực tiếp chịu trách nhiệm về chuyên 
 
 **Đặc điểm nghiệp vụ và phân quyền:**
 - **Cùng vai trò nghiệp vụ:** Tất cả các bác sĩ trong hệ thống đều có chung vai trò `VETERINARIAN` và cùng tập quyền hạn chuyên môn, không phân chia bác sĩ trưởng hay bác sĩ thường, không chia chuyên khoa trong phạm vi đồ án.
-- **Phòng khám cố định:** Mỗi Bác sĩ được cấu hình làm việc tại một **số phòng khám cố định** (quản lý trực tiếp qua thuộc tính `room_number` trong thông tin tài khoản `users`, ví dụ: Bác sĩ A gắn với Phòng P01, Bác sĩ B gắn với Phòng P02). Khi Lễ tân phân công ca khám cho bác sĩ, bệnh nhân tự động được hướng dẫn vào đúng số phòng cố định này mà không cần bảng phòng khám riêng.
+- **Phòng khám cố định:** Mỗi Bác sĩ được cấu hình làm việc tại một **số phòng khám cố định** (thuộc tính `room_number` trong hồ sơ nhân sự `staff_profiles`, ví dụ: Bác sĩ A gắn với Phòng P01, Bác sĩ B gắn với Phòng P02). Khi Lễ tân phân công ca khám cho bác sĩ, bệnh nhân tự động được hướng dẫn vào đúng số phòng cố định này mà không cần bảng phòng khám riêng.
 - **Phạm vi công việc:**
   - Khám lâm sàng sơ bộ (Giai đoạn 1): Tiếp nhận ca từ hàng đợi, đo sinh hiệu, thăm khám, tra cứu tiền sử bệnh án.
   - Ra chỉ định dịch vụ kỹ thuật: Chỉ định xét nghiệm máu, siêu âm, chụp X-quang (khách nộp tiền xong được phát phiếu vào hàng đợi chuyên biệt của phòng Xét nghiệm và phòng CĐHA).
@@ -184,7 +186,7 @@ Lễ tân là nhân sự điều phối toàn bộ hoạt động tiếp đón, 
 - **Quản lý lịch hẹn:** Tiếp nhận và duyệt các yêu cầu đặt lịch trực tuyến (`PENDING` $\rightarrow$ `CONFIRMED` hoặc `CANCELLED`); tạo lịch hẹn mới qua điện thoại hoặc đặt trước trực tiếp tại quầy; thực hiện đổi ngày/khung giờ hẹn cho khách.
 - **Tiếp nhận tại quầy (Check-in):** Thực hiện check-in cho khách có lịch hẹn hoặc tiếp nhận khách vãng lai (Walk-in), ghi lý do đến khám, đánh giá nhanh dấu hiệu cấp cứu (**Lễ tân không cân, không đo thân nhiệt**; việc này do Bác sĩ thực hiện trong phòng khám), chuyển đổi Lịch hẹn thành Đợt khám (`Pet Visit`) ở trạng thái chờ khám (`WAITING`).
 - **Điều phối hàng đợi & Phân công phòng khám:** Giám sát danh sách chờ phân công và hàng đợi riêng của từng Bác sĩ, xử lý ưu tiên ca cấp cứu, xếp ca vào hàng đợi Bác sĩ (theo gợi ý Bác sĩ ít người chờ nhất) và chuyển ca giữa các hàng đợi khi cần.
-- **Thanh toán & Bán thuốc:** Mở bảng kê các hóa đơn dịch vụ của ca (mỗi dịch vụ một hóa đơn, đã được hệ thống lập sẵn từ lúc Bác sĩ chỉ định), áp dụng giảm giá trên từng hóa đơn, xác nhận thanh toán sau khi khách trả tiền ngoài quầy (tiền mặt hoặc chuyển khoản; hệ thống không lưu phương thức thanh toán). Nếu khách chọn mua thuốc theo đơn tại phòng khám: lập hóa đơn thuốc, lấy thuốc, xác nhận thanh toán (trừ tồn kho tự động trong cùng một giao dịch an toàn) và in phiếu hướng dẫn dùng thuốc; nếu khách mua ngoài thì in đơn thuốc trao cho khách.
+- **Thanh toán & Bán thuốc:** Mở bảng kê các hóa đơn dịch vụ của ca (mỗi dịch vụ một hóa đơn, đã được hệ thống lập sẵn từ lúc Bác sĩ chỉ định), áp dụng giảm giá trên từng hóa đơn, xác nhận thanh toán sau khi khách trả tiền ngoài quầy (tiền mặt hoặc chuyển khoản; hệ thống không lưu phương thức thanh toán). Nếu ca có đơn thuốc, hóa đơn thuốc nháp đã được hệ thống tạo sẵn khi Bác sĩ chốt ca: khách mua tại phòng khám thì sửa số lượng theo khách, lấy thuốc, xác nhận thanh toán (trừ tồn kho tự động trong cùng một giao dịch an toàn) và in phiếu hướng dẫn dùng thuốc; khách mua ngoài thì hủy hóa đơn nháp và in đơn thuốc trao cho khách.
 
 > **Nguyên tắc phân quyền nghiêm ngặt:** Lễ tân **tuyệt đối không được chỉnh sửa các dữ liệu chuyên môn** do Bác sĩ lập (nhận định lâm sàng, kết quả xét nghiệm, kết luận siêu âm, chẩn đoán xác định, đơn thuốc).
 
@@ -256,9 +258,9 @@ Trong đó:
   - Nhờ vậy, Bác sĩ không bị "thời gian chết" (15 phút chờ kết quả xét nghiệm), đồng thời tạo bộ đệm dự phòng cho tỷ lệ khách bùng lịch (No-Show Buffer 15 – 20%).
 
 **Cơ chế Điều phối & Xếp hàng đợi (Queue Scheduling):**
-- **Phục vụ theo thứ tự nộp tiền (FCFS):** Khách nộp phí khám trước được phát phiếu trước (`issued_at` sớm hơn) nên đứng trước trong hàng đợi.
+- **Phục vụ theo thứ tự nộp tiền (FCFS):** Khách nộp phí khám trước đứng trước trong hàng đợi (thứ tự theo thời điểm thu tiền).
 - **Chia đều vào hàng đợi riêng của từng Bác sĩ:** Với $N_{\text{active}}$ Bác sĩ và $2 \times N_{\text{active}}$ khách mỗi khung giờ, Lễ tân xếp mỗi Bác sĩ khoảng 2 khách (hệ thống gợi ý Bác sĩ ít người chờ nhất). Khách thứ 2 của mỗi Bác sĩ chờ 5 – 10 phút trước phòng và được gọi ngay khi Bác sĩ chuyển khách thứ nhất sang phòng cận lâm sàng.
-- **Thứ tự trong mỗi hàng đợi Bác sĩ:** Phiếu cấp cứu (`priority = 2`) đứng đầu; phiếu của ca có kết quả cận lâm sàng quay lại (`priority = 1`) đứng kế tiếp; còn lại theo giờ phát phiếu (`priority DESC, issued_at`).
+- **Thứ tự trong mỗi hàng đợi Bác sĩ:** Phiếu cấp cứu (`priority = 2`) đứng đầu; phiếu của ca có kết quả cận lâm sàng quay lại (`priority = 1`) đứng kế tiếp; còn lại theo thời điểm thu tiền (Redis Sorted Set, `score` = mức ưu tiên + thời điểm).
 
 **Thuật toán kiểm tra trạng thái khung giờ trên giao diện:**
 Khi khách hàng chọn một ngày trên lịch, hệ thống thực hiện các bước tính toán:
@@ -266,7 +268,8 @@ Khi khách hàng chọn một ngày trên lịch, hệ thống thực hiện cá
    ```sql
    SELECT COUNT(*) * 2 AS max_capacity
    FROM users u
-   JOIN roles r ON u.role_id = r.id
+   JOIN user_roles ur ON ur.user_id = u.id
+   JOIN roles r ON r.id = ur.role_id
    WHERE r.code = 'VETERINARIAN' AND u.status = 'ACTIVE';
    ```
    *(Bảng `users` thuộc CSDL của `auth-service`; `appointment-service` lấy số Bác sĩ đang `ACTIVE` qua API nội bộ rồi nhân hệ số 2, không JOIN trực tiếp giữa hai CSDL.)*
@@ -464,8 +467,9 @@ Khách đến phòng khám
    - Ghi nhận thời điểm tiếp nhận (`checked_in_at = NOW()`), ID lễ tân tiếp đón và cờ cấp cứu (nếu có); ghi 1 dòng lịch sử cho đợt khám (→ `WAITING`).
    - Từ chối tạo đợt khám nếu thú cưng còn một đợt khám chưa kết thúc (khác `COMPLETED` / `CANCELLED`).
    - Ghi Bác sĩ phụ trách nếu Lễ tân chọn (hệ thống gợi ý Bác sĩ ít người chờ nhất).
-   - Tự động tạo **dịch vụ khám** (`EXAMINATION`, mặc định "Khám tổng quát") kèm **hóa đơn phí khám `PENDING`** (chốt đơn giá, thuế suất). Ca hiện ở mục *"Chờ thu phí khám"* trên màn hình Thu ngân, **chưa vào hàng đợi**.
-7. **Sau khi giao dịch trên commit**, `clinical-service` phát sự kiện `VisitCheckedInEvent`; `appointment-service` nhận sự kiện, chuyển lịch hẹn sang `CHECKED_IN` và ghi 1 dòng lịch sử (`CONFIRMED` → `CHECKED_IN`) trong giao dịch riêng của mình. Hai CSDL khác nhau nên không ghi chung một giao dịch; độ trễ chỉ vài trăm mili giây và lịch vẫn được tính là chiếm chỗ của khung giờ.
+   - Tự động tạo **dịch vụ khám** (nhóm `EXAMINATION`, mặc định "Khám tổng quát") kèm **hóa đơn phí khám `PENDING`** (chốt đơn giá, thuế suất từ bảng giá đang hiệu lực).
+   - Ghi sự kiện `VisitCheckedInEvent` vào bảng outbox trong cùng giao dịch. Ca hiện ở mục *"Chờ thu phí khám"* trên màn hình Thu ngân, **chưa vào hàng đợi**.
+7. **Sau khi giao dịch trên commit**, tiến trình outbox gửi sự kiện `VisitCheckedInEvent` (gửi lại tới khi thành công); `appointment-service` nhận sự kiện, chuyển lịch hẹn sang `CHECKED_IN` và ghi 1 dòng lịch sử (`CONFIRMED` → `CHECKED_IN`) trong giao dịch riêng của mình. Hai CSDL khác nhau nên không ghi chung một giao dịch; độ trễ chỉ vài trăm mili giây và lịch vẫn được tính là chiếm chỗ của khung giờ.
 
 ### 8.2. Luồng tiếp nhận khách vãng lai (Walk-in Visit - Không đặt trước)
 Không phải tất cả khách hàng đều đặt lịch trước. Phòng khám luôn sẵn sàng phục vụ khách hàng vãng lai:
@@ -488,17 +492,17 @@ Không phải tất cả khách hàng đều đặt lịch trước. Phòng khá
   - Lễ tân xếp ngay ca vào hàng đợi của một Bác sĩ (ưu tiên Bác sĩ sắp khám xong); phiếu đứng **đầu hàng đợi** đó, vượt qua mọi ca thông thường, và được gọi ngay khi Bác sĩ khám xong ca hiện tại.
 
 ### 8.4. Quy tắc ưu tiên trong hàng đợi
-Mọi hàng đợi (danh sách chờ phân công, hàng đợi của từng Bác sĩ, phòng Xét nghiệm, phòng CĐHA) đều là danh sách **phiếu xếp hàng** (`queue_tickets`) đang `WAITING`, sắp theo cùng một quy tắc:
+Mọi hàng đợi (danh sách chờ phân công, hàng đợi của từng Bác sĩ, phòng Xét nghiệm, phòng CĐHA) đều là danh sách **phiếu xếp hàng** đang `WAITING` trên Redis, sắp theo cùng một quy tắc:
 1. **Ưu tiên tuyệt đối:** Phiếu cấp cứu (`priority = 2`) luôn đứng đầu và giữ cảnh báo đỏ.
 2. **Ca có kết quả cận lâm sàng quay lại (chỉ ở hàng đợi Bác sĩ):** khi ca chuyển `RESULTS_READY`, hệ thống phát phiếu `priority = 1` (không thu tiền), nên ca đứng ngay sau ca cấp cứu.
-3. **Thứ tự nộp tiền:** Các phiếu còn lại (`priority = 0`, có lịch hẹn hoặc vãng lai) theo giờ phát phiếu (`issued_at` = giờ nộp tiền), không đổi khi gọi / gọi lại / đổi Bác sĩ.
+3. **Thứ tự nộp tiền:** Các phiếu còn lại (`priority = 0`, có lịch hẹn hoặc vãng lai) theo giờ nộp tiền, không đổi khi gọi / gọi lại / đổi Bác sĩ.
 
-Truy vấn: `ORDER BY priority DESC, issued_at, id`, dùng chỉ mục `idx_qt_queue (queue_type, status, doctor_id, priority, issued_at)`. Số in trên phiếu (`ticket_no`) đánh lại từ 1 mỗi ngày theo từng loại hàng đợi.
+Cài đặt (v4.0): mỗi hàng đợi là một Sorted Set trên Redis, `score = (2 − priority) × 10^13 + thời điểm nộp tiền (ms)`, đọc tăng dần là đúng thứ tự trên. Số in trên phiếu (`ticket_no`) do bộ đếm Redis cấp, đánh lại từ 1 mỗi ngày theo từng loại hàng đợi.
 
 ### 8.5. Thu phí khám & Phát phiếu xếp hàng (thanh toán tách khỏi khám)
 1. Sau khi tiếp đón, ca hiện ở mục *"Chờ thu phí khám"* của màn hình Thu ngân (Lễ tân kiêm Thu ngân).
 2. Khách nộp phí khám (tiền mặt / chuyển khoản ngoài quầy); Thu ngân bấm **"Xác nhận thanh toán"**.
-3. Trong **một giao dịch** của `clinical-service`: hóa đơn phí khám → `PAID`; hệ thống phát **phiếu `DOCTOR`** (`doctor_id` = Bác sĩ đã chọn hoặc `NULL`, `priority = 0`, `ticket_no` tiếp theo trong ngày, `issued_by` = Thu ngân) và in phiếu ghi **số phòng + số thứ tự**.
+3. Hóa đơn phí khám → `PAID` (giao dịch của `clinical-service`, kèm sự kiện thanh toán ghi vào outbox). Ngay sau đó (thường dưới 1 giây) hệ thống phát **phiếu `DOCTOR`** trên Redis (Bác sĩ đã chọn hoặc danh sách chờ phân công, `priority = 0`, số thứ tự tiếp theo trong ngày, người phát = Thu ngân) và hiển thị / in **số phòng + số thứ tự**. Đã thu tiền thì chắc chắn có phiếu, kể cả khi hệ thống trục trặc ngay sau khi thu.
 4. Ca xuất hiện trên màn hình hàng đợi của Bác sĩ (mỗi dòng có nút "Gọi" và "Bắt đầu"). Ca chưa nộp phí khám **không hiện** trên màn hình Bác sĩ.
 5. Khách bỏ về trước khi khám (EX-03): phiếu bị hủy; phí khám chưa nộp thì hủy hóa đơn, **đã nộp thì không hoàn**.
 
@@ -508,22 +512,22 @@ Truy vấn: `ORDER BY priority DESC, issued_at, id`, dùng chỉ mục `idx_qt_q
 
 ## 9. Hàng đợi khám
 
-Hệ thống có **bốn loại hàng đợi**, đều là danh sách **phiếu xếp hàng** (`queue_tickets`), dùng chung cơ chế "Gọi" theo từng dòng (không đổi thứ tự). Phiếu chỉ được phát **sau khi khách nộp tiền** dịch vụ cần thu trước (`services.requires_prepayment = TRUE`), trừ ca cấp cứu và ca có kết quả CLS:
+Hệ thống có **bốn loại hàng đợi**, đều là danh sách **phiếu xếp hàng** lưu trên **Redis** (thay đổi tức thời, thao tác nguyên tử, không xung đột khi nhiều người bấm cùng lúc), dùng chung cơ chế "Gọi" theo từng dòng (không đổi thứ tự). Phiếu chỉ được phát **sau khi khách nộp tiền** dịch vụ thuộc nhóm thu trước (`service_categories.requires_prepayment = TRUE`), trừ ca cấp cứu và ca có kết quả CLS. Phiếu kết thúc (xong / hủy) được ghi vào lịch sử `queue_ticket_histories` để tra cứu và thống kê thời gian chờ:
 
 | Hàng đợi | Phiếu được phát khi nào | Ai gọi số | Gồm những phiếu nào |
 | :--- | :--- | :--- | :--- |
-| **Danh sách chờ phân công** | Thu xong phí khám mà Lễ tân chưa chọn Bác sĩ | (không gọi) – Lễ tân xếp vào hàng đợi Bác sĩ | Phiếu `DOCTOR` `WAITING`, `doctor_id IS NULL` |
-| **Hàng đợi riêng của từng Bác sĩ** | Thu xong phí khám (`priority = 0`); ca cấp cứu (`priority = 2`); ca có kết quả CLS (`priority = 1`, không thu tiền) | Bác sĩ | Phiếu `DOCTOR` `WAITING` có `doctor_id` của Bác sĩ đó |
+| **Danh sách chờ phân công** | Thu xong phí khám mà Lễ tân chưa chọn Bác sĩ | (không gọi) – Lễ tân xếp vào hàng đợi Bác sĩ | Phiếu `DOCTOR` `WAITING` chưa có Bác sĩ |
+| **Hàng đợi riêng của từng Bác sĩ** | Thu xong phí khám (`priority = 0`); ca cấp cứu (`priority = 2`); ca có kết quả CLS (`priority = 1`, không thu tiền) | Bác sĩ | Phiếu `DOCTOR` `WAITING` của Bác sĩ đó |
 | **Hàng đợi phòng Xét nghiệm** | Thu xong tiền các dịch vụ `LABORATORY` | KTV Xét nghiệm | Phiếu `LABORATORY` `WAITING` |
 | **Hàng đợi phòng CĐHA** | Thu xong tiền các dịch vụ `IMAGING` | KTV / Bác sĩ CĐHA | Phiếu `IMAGING` `WAITING` |
 
 Một ca khám có cận lâm sàng thường có **3 phiếu nối tiếp**: phiếu Bác sĩ lần 1 (sau khi nộp phí khám) → phiếu phòng Xét nghiệm / CĐHA (sau khi nộp tiền CLS) → phiếu Bác sĩ lần 2 (ưu tiên, không thu tiền).
 
-**Gọi:** mỗi phiếu trong hàng đợi có nút *"Gọi"* (và *"Bắt đầu"*). Người phụ trách hàng đợi (khi không đang làm dở ca nào) bấm *"Gọi"* ở một phiếu **bất kỳ** (hoặc *"Gọi số tiếp theo"* để gọi phiếu đứng đầu): hệ thống ghi giờ gọi vào phiếu (`last_called_at`, hiển thị "Đã gọi HH:mm"), hiển thị số thứ tự và số phòng trên màn hình sảnh và gửi thông báo đến ứng dụng của chủ nuôi. Gọi **không đổi trạng thái và không đổi thứ tự**: phiếu chỉ chuyển `IN_SERVICE` khi thú cưng vào phòng và người phụ trách bấm "Bắt đầu khám" / "Bắt đầu Giai đoạn 2" / "Bắt đầu".
+**Gọi:** mỗi phiếu trong hàng đợi có nút *"Gọi"* (và *"Bắt đầu"*). Người phụ trách hàng đợi (khi không đang làm dở ca nào) bấm *"Gọi"* ở một phiếu **bất kỳ** (hoặc *"Gọi số tiếp theo"* để gọi phiếu đứng đầu): hệ thống ghi giờ gọi và tăng số lần gọi trên phiếu (hiển thị "Đã gọi HH:mm"), hiển thị số thứ tự và số phòng trên màn hình sảnh và gửi thông báo đến ứng dụng của chủ nuôi. Gọi **không đổi trạng thái và không đổi thứ tự**: phiếu chỉ chuyển `IN_SERVICE` khi thú cưng vào phòng và người phụ trách bấm "Bắt đầu khám" / "Bắt đầu Giai đoạn 2" / "Bắt đầu".
 
 **Khách vắng / quay lại:** gọi 2–3 lần không thấy, người phụ trách bấm *"Gọi"* ở **phiếu khác** trong danh sách; phiếu vắng giữ nguyên vị trí. Ví dụ hàng đợi Bác sĩ A là `[Milo, Lu, Na]`: gọi Milo không thấy → gọi Lu (hàng đợi vẫn là `[Milo, Lu, Na]`). Khi khách quay lại (Bác sĩ nhận thông báo hoặc khách báo tại quầy), Bác sĩ bấm *"Gọi lại"* ở đúng ca đó. Hệ thống không theo dõi việc khách quay lại, nên không bao giờ xảy ra tình trạng hai ca đầu hàng đổi chỗ cho nhau mãi mãi hay ca cấp cứu bị mất ưu tiên. *(Cập nhật 13/11/2026: thay cho cơ chế "Đẩy lùi 1 bậc" của bản v3.0 đầu; cột `skip_count`, hành động `SKIPPED` và API đẩy lùi đã bị xóa.)*
 
-**Gộp ca ở phòng Xét nghiệm / CĐHA:** các dịch vụ đã nộp tiền của **cùng một đợt khám trong cùng phòng** (ví dụ siêu âm + X-quang) nằm chung **một phiếu** (`queue_ticket_items`): gọi một lần, "Bắt đầu" cả phiếu; nhập kết quả và hủy vẫn theo từng dịch vụ (mỗi dịch vụ có kết quả và hóa đơn riêng).
+**Gộp ca ở phòng Xét nghiệm / CĐHA:** các dịch vụ đã nộp tiền của **cùng một đợt khám trong cùng phòng** (ví dụ siêu âm + X-quang) nằm chung **một phiếu**: gọi một lần, "Bắt đầu" cả phiếu; nhập kết quả và hủy vẫn theo từng dịch vụ (mỗi dịch vụ có kết quả và hóa đơn riêng).
 
 ---
 
@@ -622,16 +626,21 @@ Visit lưu:
 - Bác sĩ được phân công.
 - Lễ tân tiếp nhận.
 - Phòng khám (suy ra từ số phòng của Bác sĩ, không lưu riêng trên Visit).
-- Thời gian tiếp nhận.
-- *(Không lưu thông tin xếp hàng trên Visit: số phiếu, thứ tự, giờ gọi nằm ở bảng phiếu xếp hàng `queue_tickets`; một Visit có thể có nhiều phiếu nối tiếp.)*
-- Thời gian bắt đầu khám, chốt ca, hoàn tất, lý do hủy (lấy từ lịch sử trạng thái `pet_visit_status_histories`, không lưu thành cột riêng).
-- Cân nặng.
-- Thân nhiệt.
-- Triệu chứng ban đầu.
-- Chẩn đoán.
-- Hướng điều trị.
-- Lời dặn.
+- Thời gian tiếp nhận, lý do đến khám (chủ nuôi khai với Lễ tân), cờ cấp cứu.
 - Trạng thái.
+- Tên Bác sĩ chụp lại (snapshot) để danh sách hiển thị nhanh, không phải hỏi phân hệ tài khoản.
+- *(Không lưu thông tin xếp hàng trên Visit: phiếu nằm trên Redis, lịch sử phiếu ở `queue_ticket_histories`; một Visit có thể có nhiều phiếu nối tiếp.)*
+- Thời gian bắt đầu khám, chốt ca, hoàn tất, lý do hủy (lấy từ lịch sử trạng thái `pet_visit_status_histories`, không lưu thành cột riêng).
+
+**Từ v4.0, thông tin của một lần khám được tách thành 3 phần theo người nhập và thời điểm nhập:**
+
+| Phần | Bảng | Người nhập | Thời điểm | Nội dung |
+| :--- | :--- | :--- | :--- | :--- |
+| Hành chính / tiếp đón | `pet_visits` | Lễ tân | Lúc tiếp đón | Thú cưng, lịch hẹn, Bác sĩ phụ trách, Lễ tân, cấp cứu, lý do đến khám, trạng thái |
+| Sinh hiệu / tiền trạm | `vital_signs` (nhiều dòng) | Bác sĩ (hoặc nhân viên được giao đo) | Đầu buổi khám, đo lại khi cần | Cân nặng, thân nhiệt, nhịp tim, nhịp thở, điểm thể trạng (BCS), màu niêm mạc, thời gian làm đầy mao mạch |
+| Chuyên môn | `medical_records` (1–1) | Bác sĩ | Suốt Giai đoạn 1 và 2, khóa khi chốt ca | Bệnh sử, kết quả khám lâm sàng, chẩn đoán sơ bộ, chẩn đoán xác định, phác đồ điều trị, lời dặn, ngày tái khám |
+
+Tách như vậy để ba người không cùng sửa một dòng dữ liệu, đo sinh hiệu nhiều lần không ghi đè lần trước, và phân quyền theo bảng (Lễ tân không sửa được chẩn đoán).
 
 ---
 
@@ -708,7 +717,7 @@ Sau khi tiếp nhận tại quầy (từ lịch hẹn hoặc khách vãng lai):
 - Thú cưng vào phòng khám cố định của Bác sĩ. Bác sĩ bấm **"Bắt đầu khám"** -> phiếu `IN_SERVICE`, `Visit.status = IN_PROGRESS`, dịch vụ khám (đã nộp phí lúc tiếp đón) chuyển `IN_PROGRESS`. Bác sĩ chuyển sang trạng thái bận (`BUSY`).
 - Bác sĩ tiến hành **Khám lâm sàng & Đo sinh hiệu**:
   - Hỏi bệnh sử, triệu chứng phát sinh.
-  - Đặt thú cưng lên bàn cân (`weight_at_visit`) và dùng nhiệt kế đo thân nhiệt (`temperature`), ghi nhận vào bệnh án.
+  - Cân, đo thân nhiệt, nhịp tim, nhịp thở, đánh giá thể trạng, niêm mạc → ghi một lần đo vào `vital_signs` (đo lại thì thêm dòng mới). Bệnh sử và nhận định lâm sàng ghi vào hồ sơ khám `medical_records` (tạo khi bấm "Bắt đầu khám").
   - Nghe tim phổi, nắn bụng, kiểm tra niêm mạc, hạch bạch huyết.
   - Ghi nhận nhận định lâm sàng ban đầu.
 - **Rẽ nhánh nghiệp vụ:**
@@ -821,11 +830,11 @@ Khi nhân sự phòng Lab / CĐHA nhập đầy đủ kết quả đo đạc (WB
   - Xem bảng chỉ số máu đã được hệ thống tự động so sánh với khoảng tham chiếu chuẩn theo loài (chỉ rõ chỉ số nào `LOW`, `NORMAL`, `HIGH`).
   - Xem hình ảnh siêu âm / X-quang và kết luận hình thái học.
 - Bác sĩ tổng hợp với triệu chứng lâm sàng ban đầu để đưa ra:
-  - **Chẩn đoán xác định** (`diagnosis`).
-  - **Phác đồ điều trị** (`treatment_plan`).
+  - **Chẩn đoán xác định** (`medical_records.final_diagnosis`; chẩn đoán sơ bộ của Giai đoạn 1 ở `preliminary_diagnosis`).
+  - **Phác đồ điều trị**, lời dặn, ngày tái khám (`medical_records.treatment_plan`, `doctor_advice`, `follow_up_date`).
   - **Thực hiện thêm dịch vụ tại phòng** nếu cần (tiêm thuốc, truyền dịch, thủ thuật – mỗi dịch vụ sinh 1 hóa đơn dịch vụ, làm ngay, thu khi chốt ca).
   - **Kê đơn thuốc điện tử** (`prescriptions` – hiển thị tồn kho để tham khảo, chỉ cảnh báo nếu không đủ vì khách có thể mua ngoài).
-- Bác sĩ thực hiện thao tác **Chốt đợt khám** -> phiếu `DONE`, `Visit.status = WAITING_PAYMENT`. Hồ sơ chuyên môn của ca bệnh được khóa lại.
+- Bác sĩ thực hiện thao tác **Chốt đợt khám** -> phiếu `DONE` (ghi lịch sử phiếu), `Visit.status = WAITING_PAYMENT`. Hồ sơ khám và đơn thuốc được khóa lại; nếu có đơn thuốc, hệ thống phát sự kiện để quầy thuốc tạo hóa đơn thuốc nháp.
 - **Sau khi chốt ca:** Bác sĩ trở về `AVAILABLE` và bấm "Gọi" (hoặc "Gọi số tiếp theo") để gọi bệnh nhân trong hàng đợi của mình (ca có kết quả khác, ca cấp cứu hoặc ca mới).
 
 ---
@@ -866,9 +875,9 @@ Mỗi dịch vụ được tạo thành một dòng chỉ định **kèm đúng 
 visit_service_details  ── (1 : 1) ──  service_invoices (PENDING, snapshot unit_price, vat_rate)
 ```
 
-Dòng chỉ định chỉ chứa thông tin chuyên môn (dịch vụ, số lượng, trạng thái thực hiện); thông tin tiền nằm ở hóa đơn dịch vụ; thông tin xếp hàng (nếu là dịch vụ Xét nghiệm / CĐHA) nằm ở phiếu xếp hàng (`queue_ticket_items`).
+Dòng chỉ định chỉ chứa thông tin chuyên môn (dịch vụ, số lượng, trạng thái thực hiện); thông tin tiền nằm ở hóa đơn dịch vụ; thông tin xếp hàng (nếu là dịch vụ Xét nghiệm / CĐHA) nằm ở phiếu xếp hàng trên Redis.
 
-**Thời điểm thu tiền** do danh mục dịch vụ quyết định (`services.requires_prepayment`):
+**Thời điểm thu tiền** do **nhóm dịch vụ** quyết định (bảng danh mục `service_categories`: cột `requires_prepayment` và loại hàng đợi `queue_type`):
 
 | Nhóm dịch vụ | Thu trước? | Vào hàng đợi khi nào |
 | :--- | :---: | :--- |
@@ -876,7 +885,7 @@ Dòng chỉ định chỉ chứa thông tin chuyên môn (dịch vụ, số lư�
 | Xét nghiệm (`LABORATORY`), CĐHA (`IMAGING`) | Có | Nộp tiền xong → phiếu hàng đợi phòng XN / CĐHA |
 | Làm tại phòng (`VACCINATION`, `DEWORMING`, `EXTERNAL_PARASITE`, `INJECTION_INFUSION`, `PROCEDURE`, `SURGERY`) | Không | Không qua hàng đợi; Bác sĩ làm ngay, thu khi chốt ca |
 
-Chính sách nằm ở dữ liệu danh mục nên đổi được mà không phải sửa quy trình (ví dụ sau này muốn thu trước tiền phẫu thuật thì chỉ cần bật cờ cho dịch vụ đó).
+Chính sách nằm ở dữ liệu danh mục nên đổi được mà không phải sửa quy trình hay sửa cấu trúc bảng (ví dụ sau này muốn thu trước tiền phẫu thuật thì chỉ cần bật cờ cho nhóm `SURGERY`; thêm nhóm dịch vụ mới chỉ cần thêm một dòng danh mục).
 
 ---
 
@@ -945,7 +954,7 @@ Hệ thống quản lý hai dòng doanh thu bằng **hai loại hóa đơn độ
 | Loại chi phí | Gồm những gì | Chứng từ | Khách có bắt buộc trả tại phòng khám? |
 | :--- | :--- | :--- | :--- |
 | **Dịch vụ** | Phí khám, cận lâm sàng, dịch vụ thực hiện tại phòng (tiêm phòng, tẩy giun, tiêm thuốc, truyền dịch, thủ thuật…) **kể cả thuốc / vaccine / vật tư dùng ngay tại chỗ** | Hóa đơn dịch vụ (`service_invoices`), mỗi dịch vụ một hóa đơn | Có – điều kiện để đợt khám hoàn tất |
-| **Thuốc mang về** | Thuốc trong đơn thuốc Bác sĩ kê để khách dùng tại nhà | Hóa đơn thuốc (`medicine_invoices`), tối đa một hóa đơn cho một đơn thuốc | Không – khách được mua tại phòng khám hoặc mua ngoài |
+| **Thuốc mang về** | Thuốc trong đơn thuốc Bác sĩ kê để khách dùng tại nhà | Hóa đơn thuốc (`medicine_invoices`), hệ thống tự tạo **bản nháp** khi Bác sĩ chốt ca, tối đa một hóa đơn cho một đơn thuốc | Không – khách mua tại phòng khám (thu hóa đơn nháp) hoặc mua ngoài (hủy hóa đơn nháp) |
 
 ```text
 - Tiêm vaccine:
@@ -958,8 +967,8 @@ Hệ thống quản lý hai dòng doanh thu bằng **hai loại hóa đơn độ
   └── Dịch vụ "Tẩy giun" (gồm viên thuốc cho uống tại chỗ)                        ──→ Hóa đơn dịch vụ
 
 - Thuốc kháng sinh uống 7 ngày tại nhà:
-  └── Đơn thuốc ──(khách chọn mua tại phòng khám)──→ Hóa đơn thuốc + trừ tồn kho
-                └─(khách chọn mua ngoài)───────────→ In đơn thuốc, không phát sinh hóa đơn
+  └── Đơn thuốc ──(chốt ca)──→ Hóa đơn thuốc nháp ──(khách mua tại phòng khám)──→ Thu tiền + trừ tồn kho
+                                                └─(khách mua ngoài)──────────→ Hủy nháp, in đơn thuốc
 ```
 
 **Vì sao thuốc dùng tại chỗ tính vào giá dịch vụ:** thuốc đã tiêm / đã cho uống ngay trong phòng không thể "mua ngoài", nên không thể đi theo luồng hóa đơn thuốc tùy chọn. Tính trọn gói giúp mọi khoản bắt buộc đều nằm ở hóa đơn dịch vụ. Lượng vaccine / vật tư tiêu hao tại phòng được Quản trị viên cân chỉnh kho định kỳ bằng giao dịch `ADJUSTMENT` (ghi chú rõ lý do), còn tồn kho thuốc bán theo đơn được trừ tự động khi bán.
@@ -1004,8 +1013,9 @@ Khi nhập giá trị đo được (ví dụ đo máu Chó có `WBC = 21.0`), h�
 
 Nhằm bảo toàn tính pháp lý và lịch sử bệnh án:
 - **Snapshot Tham chiếu:** Khi lưu kết quả xét nghiệm, hệ thống sao chép `min_value` và `max_value` của loài tại thời điểm đó vào `lab_test_results.min_value_snapshot` / `max_value_snapshot`. Nếu sau này Quản trị viên điều chỉnh cấu hình tham chiếu, các kết quả cũ vẫn giữ nguyên đánh giá gốc.
-- **Snapshot Đơn giá dịch vụ:** Đơn giá và thuế suất dịch vụ được chụp vào **hóa đơn dịch vụ** (`service_invoices.unit_price`, `vat_rate`) tại thời điểm Bác sĩ chỉ định (phí khám: thời điểm tiếp đón).
-- **Snapshot Đơn giá thuốc:** Đơn giá và thuế suất thuốc được chụp vào **chi tiết hóa đơn thuốc** (`medicine_invoice_items.unit_price`, `vat_rate`) tại thời điểm Thu ngân lập hóa đơn thuốc. Đơn thuốc của Bác sĩ không chứa giá.
+- **Bảng giá có lịch sử (v4.0):** giá dịch vụ (`service_prices`) và giá thuốc (`medicine_prices`) lưu thành từng dòng có thời điểm bắt đầu / kết thúc hiệu lực. Đổi giá = đóng dòng đang áp dụng và thêm dòng mới; không sửa, không xóa dòng giá cũ, nên luôn tra được giá ở mọi thời điểm và đặt trước được giá cho ngày sau.
+- **Snapshot Đơn giá dịch vụ:** Đơn giá và thuế suất của dòng giá đang hiệu lực được chụp vào **hóa đơn dịch vụ** (`service_invoices.unit_price`, `vat_rate`) tại thời điểm Bác sĩ chỉ định (phí khám: thời điểm tiếp đón).
+- **Snapshot Đơn giá thuốc:** Đơn giá và thuế suất của dòng giá thuốc đang hiệu lực được chụp vào **chi tiết hóa đơn thuốc** (`medicine_invoice_items.unit_price`, `vat_rate`); khi Thu ngân xác nhận thu tiền, giá được cập nhật theo dòng giá hiện hành một lần cuối. Đơn thuốc của Bác sĩ không chứa giá.
 
 ---
 
@@ -1017,12 +1027,12 @@ Sau khi có đủ kết quả:
 Khám + Xét nghiệm + CĐHA + Theo dõi ───→ Chẩn đoán
 ```
 
-Bác sĩ cập nhật:
+Bác sĩ cập nhật trên hồ sơ khám (`medical_records`):
 
-- Chẩn đoán xác định.
+- Chẩn đoán xác định (giữ nguyên chẩn đoán sơ bộ của Giai đoạn 1 để đối chiếu).
 - Hướng điều trị.
 - Lời dặn.
-- Kế hoạch theo dõi nếu cần.
+- Ngày hẹn tái khám / kế hoạch theo dõi nếu cần.
 
 ---
 
@@ -1043,14 +1053,15 @@ Visit
 Cấu trúc CSDL:
 
 ```text
-prescriptions
-       │
-       ↓
-prescription_items
-       │
-       ↓
-medicines
+clinical-service                         billing-pharmacy-service
+prescriptions                            medicines (thông tin, quy cách)
+       │                                    ├── medicine_ingredients (thành phần)
+       ↓                                    ├── medicine_prices (lịch sử giá)
+prescription_items ── medicine_id ───────→  └── medicine_stocks (tồn kho)
+   (chụp lại tên thuốc, đơn vị)
 ```
+
+Từ v4.0, **đơn thuốc thuộc phân hệ khám** (`clinical-service`), cùng nơi với hồ sơ khám: kê đơn là việc chuyên môn của Bác sĩ, sửa được khi đang khám và khóa khi chốt ca. Mỗi dòng đơn trỏ tới thuốc trong danh mục của quầy thuốc và **chụp lại tên thuốc, đơn vị tính** lúc kê, nên bệnh án luôn đọc được kể cả khi thuốc đổi tên hay ngừng kinh doanh. Bác sĩ tìm thuốc qua danh mục của quầy thuốc (thấy thành phần, quy cách, tồn kho tham khảo).
 
 Mỗi `prescription_item` lưu:
 
@@ -1067,25 +1078,26 @@ Mỗi `prescription_item` lưu:
 
 ## 26. Snapshot giá
 
-**Giá thuốc** được chốt khi khách mua tại phòng khám (lúc Thu ngân lập hóa đơn thuốc):
+**Giá thuốc** lấy từ bảng giá có lịch sử và được chốt vào hóa đơn thuốc khi khách mua tại phòng khám:
 
 ```text
-Medicine:              sale_price = 50.000, vat_rate = 0.05
+medicine_prices:  50.000 đ, VAT 5%, hiệu lực 01/01/2026 → (đang áp dụng)
 Medicine Invoice Item: unit_price = 50.000, vat_rate = 0.05
 ```
 
-Sau này nếu giá thay đổi:
+Ngày 01/12/2026 Quản trị viên đổi giá:
 
 ```text
-Medicine: sale_price = 60.000
+medicine_prices:  50.000 đ, hiệu lực 01/01/2026 → 01/12/2026   (đóng lại, không sửa số tiền)
+                  60.000 đ, hiệu lực 01/12/2026 → (đang áp dụng)
 ```
 
-Hóa đơn thuốc cũ vẫn giữ nguyên `unit_price = 50.000`.
+Hóa đơn thuốc cũ vẫn giữ nguyên `unit_price = 50.000`; báo cáo vẫn biết giá niêm yết của từng giai đoạn.
 
-**Giá dịch vụ** được chốt khi Bác sĩ chỉ định (phí khám: khi tiếp đón), vào hóa đơn dịch vụ:
+**Giá dịch vụ** lấy từ `service_prices` đang hiệu lực, chốt khi Bác sĩ chỉ định (phí khám: khi tiếp đón), vào hóa đơn dịch vụ:
 
 ```text
-Service:         price = 200.000, vat_rate = 0.00
+service_prices:  200.000 đ, VAT 0%, hiệu lực 01/01/2026 → (đang áp dụng)
 Service Invoice: unit_price = 200.000, vat_rate = 0.00
 ```
 
@@ -1112,7 +1124,7 @@ Nếu phát hiện sai sót, cần có nghiệp vụ **mở lại Visit** bởi 
 
 - **Người thực hiện:** Bác sĩ phụ trách ca hoặc Quản trị viên.
 - **Điều kiện:** Visit đang `WAITING_PAYMENT` (chưa `COMPLETED`); Bác sĩ không đang khám ca khác; bắt buộc nhập lý do (ghi vào lịch sử trạng thái).
-- **Kết quả:** `WAITING_PAYMENT → IN_PROGRESS`. Hóa đơn dịch vụ đã thanh toán giữ nguyên; dịch vụ bị bỏ thì hủy kèm hóa đơn của nó; dịch vụ thêm mới được lập hóa đơn mới. Nếu đơn thuốc đã có hóa đơn thuốc chưa hủy (`PENDING` hoặc `PAID`) thì không được sửa đơn thuốc. Bác sĩ sửa xong chốt lại.
+- **Kết quả:** `WAITING_PAYMENT → IN_PROGRESS`. Hóa đơn dịch vụ đã thanh toán giữ nguyên; dịch vụ bị bỏ thì hủy kèm hóa đơn của nó; dịch vụ thêm mới được lập hóa đơn mới. Đơn thuốc: hệ thống hỏi quầy thuốc (đọc) trạng thái hóa đơn thuốc của đơn; nếu đã `PAID` thì không được sửa đơn thuốc; nếu còn nháp `PENDING` thì được sửa, khi chốt lại hệ thống phát lại sự kiện đơn thuốc và quầy thuốc **cập nhật lại hóa đơn nháp** theo đơn mới. Bác sĩ sửa xong chốt lại.
 
 ---
 
@@ -1162,9 +1174,9 @@ Từ v3.0, hệ thống có **hai loại hóa đơn**, không còn hóa đơn g�
 ```text
 Visit
  └── (1 : N) Visit Service Detail ── (1 : 1) ── Service Invoice      (bắt buộc, tạo lúc chỉ định / tiếp đón)
- └── (1 : N) Queue Ticket (phiếu xếp hàng, phát khi thu tiền xong) ── (1 : N) Queue Ticket Item ── Visit Service Detail
- └── (1 : 0..1) Prescription ── (1 : 0..1) ── Medicine Invoice      (tùy chọn, tạo khi khách mua)
-                                                 └── (1 : N) Medicine Invoice Items
+ └── Phiếu xếp hàng trên Redis (phát khi thu tiền xong) → kết thúc thì ghi Queue Ticket History
+ └── (1 : 0..1) Prescription ··(sự kiện chốt ca)··> (0..1) Medicine Invoice   (nháp tự tạo; PAID khi khách mua, CANCELLED khi mua ngoài)
+                                                          └── (1 : N) Medicine Invoice Items ── (N : 1) ── Medicines
 ```
 
 **Hóa đơn dịch vụ (`service_invoices`, thuộc `clinical-service`) lưu:**
@@ -1176,8 +1188,8 @@ Visit
 - Thu ngân xác nhận và thời điểm thanh toán.
 
 **Hóa đơn thuốc (`medicine_invoices` + `medicine_invoice_items`, thuộc `billing-pharmacy-service`) lưu:**
-- Mã hóa đơn (`MINV-YYYY-XXXX`), đơn thuốc tương ứng (tối đa 1 hóa đơn / đơn thuốc).
-- Từng thuốc khách mua: số lượng (số kê chỉ tham khảo; không vượt tồn kho), đơn giá và thuế suất snapshot lúc lập hóa đơn.
+- Mã hóa đơn (`MINV-YYYY-XXXX`), đơn thuốc tương ứng (tối đa 1 hóa đơn / đơn thuốc – liên kết duy nhất sang phân hệ khám), đợt khám, tên khách / thú cưng / Bác sĩ chụp lại để in hóa đơn.
+- Từng thuốc: **trỏ thẳng tới thuốc trong danh mục** (không trỏ tới dòng đơn thuốc), số lượng kê (để đối chiếu), số lượng khách mua (khác số kê được; không vượt tồn kho), đơn giá và thuế suất snapshot.
 - Giảm giá, trạng thái thanh toán, thu ngân, thời điểm thanh toán.
 
 **Không lưu:** tổng tiền dịch vụ, tổng tiền thuốc, tổng phải thanh toán (tính được, xem mục 28) và **phương thức thanh toán** (khách trả ngoài quầy, hệ thống không tích hợp VietQR / máy POS trong phạm vi đồ án).
@@ -1206,25 +1218,26 @@ Các bước thu tiền giống nhau ở cả 3 mục:
 3. Nếu có ưu đãi, nhập giảm giá trên từng hóa đơn (giảm giá không vượt số tiền của chính hóa đơn đó – EX-14).
 4. Khách hàng thanh toán tiền bên ngoài quầy.
 5. Sau khi nhận đủ tiền, Thu ngân nhấn **"Xác nhận thanh toán"** (không chọn phương thức thanh toán).
-6. Trong một giao dịch, hệ thống chuyển các hóa đơn sang `PAID`, ghi `paid_at`, `cashier_id`; với phí khám / Xét nghiệm / CĐHA thì **phát phiếu xếp hàng** và in phiếu số thứ tự. Nếu đợt khám đang `WAITING_PAYMENT` và **mọi hóa đơn dịch vụ của ca đều `PAID`, `CANCELLED` hoặc `REFUNDED`**, đợt khám chuyển `COMPLETED` ngay trong giao dịch đó.
+6. Trong một giao dịch, hệ thống chuyển các hóa đơn sang `PAID`, ghi `paid_at`, `cashier_id` và ghi sự kiện thanh toán vào outbox; ngay sau đó, với phí khám / Xét nghiệm / CĐHA hệ thống **phát phiếu xếp hàng** trên Redis và hiển thị số thứ tự. Nếu đợt khám đang `WAITING_PAYMENT` và **mọi hóa đơn dịch vụ của ca đều `PAID`, `CANCELLED` hoặc `REFUNDED`**, đợt khám chuyển `COMPLETED` ngay trong giao dịch đó.
 7. In phiếu thu.
 
-**Hoàn tiền:** phí khám đã nộp **không hoàn** trong mọi trường hợp; khách tự bỏ về hoặc tự hủy dịch vụ đã nộp cũng không được hoàn. Chỉ khi **phòng khám không thực hiện được** dịch vụ Xét nghiệm / CĐHA đã thu (máy hỏng, không lấy được mẫu, Bác sĩ hủy chỉ định trước khi làm), hóa đơn chuyển `REFUNDED` và Thu ngân trả lại tiền cho khách. Nếu ca có đơn thuốc, hệ thống hỏi khách có muốn mua thuốc tại phòng khám không (mục 31).
+**Hoàn tiền:** phí khám đã nộp **không hoàn** trong mọi trường hợp; khách tự bỏ về hoặc tự hủy dịch vụ đã nộp cũng không được hoàn. Chỉ khi **phòng khám không thực hiện được** dịch vụ Xét nghiệm / CĐHA đã thu (máy hỏng, không lấy được mẫu, Bác sĩ hủy chỉ định trước khi làm), hóa đơn chuyển `REFUNDED` và Thu ngân trả lại tiền cho khách. Nếu ca có đơn thuốc, màn hình Thu ngân hiện sẵn **hóa đơn thuốc nháp** để hỏi khách có mua tại phòng khám không (mục 31).
 
 ---
 
 ## 31. Bán thuốc theo đơn (tùy chọn)
 
-Khách hàng **không bắt buộc** mua thuốc tại phòng khám.
+Khách hàng **không bắt buộc** mua thuốc tại phòng khám. Từ v4.0, khi Bác sĩ chốt ca, phân hệ khám phát sự kiện "đã có đơn thuốc" và quầy thuốc **tự tạo hóa đơn thuốc nháp** (`PENDING`) đúng theo đơn, giá lấy từ bảng giá hiện hành; Thu ngân không phải nhập lại từng thuốc.
 
 ```text
-Đơn thuốc ──┬── Khách mua ngoài ──→ In đơn thuốc, kết thúc (không hóa đơn, không trừ kho)
-            └── Khách mua tại phòng khám
-                   │
-                   ↓
-            Chọn thuốc & số lượng (nhiều / ít / bằng số kê, ≤ tồn kho)
-                   ↓
-            Lập hóa đơn thuốc (PENDING, chốt đơn giá & thuế suất)
+Bác sĩ chốt ca ──→ Hóa đơn thuốc nháp (PENDING, đủ các thuốc trong đơn, số lượng = số kê)
+                         │
+            ┌────────────┴────────────┐
+   Khách mua ngoài            Khách mua tại phòng khám
+            │                         │
+            ↓                         ↓
+   Hủy hóa đơn nháp          Sửa số lượng (nhiều / ít / bằng số kê, ≤ tồn kho) hoặc bỏ dòng
+   (CANCELLED), in đơn                ↓
                    ↓
             Lấy thuốc từ tủ, kiểm tra hạn dùng, dán nhãn
                    ↓
@@ -1242,8 +1255,8 @@ Sau khi bán: 90 viên (4 viên còn lại khách tự mua ngoài nếu cần)
 ```
 
 **Đảm bảo an toàn:**
-- **Không bán âm kho:** trừ kho bằng `UPDATE ... WHERE stock_quantity >= :qty`; nếu thiếu (do quầy khác vừa bán), toàn bộ giao dịch bị hoàn tác, hóa đơn giữ `PENDING`; Thu ngân sửa chính hóa đơn đó (giảm số lượng / bỏ thuốc thiếu) rồi xác nhận lại, hoặc hủy để khách mua ngoài (EX-15). Vì chưa có khoản nào được ghi nhận đã thu, không phát sinh hoàn tiền.
-- **Không bán trùng:** mỗi đơn thuốc chỉ có tối đa một hóa đơn thuốc (`prescription_id UNIQUE`, kể cả hóa đơn đã hủy); muốn đổi số lượng thì sửa hóa đơn đang `PENDING`; hóa đơn đã `PAID` không xác nhận lại được (EX-16).
+- **Không bán âm kho:** trừ kho trên bảng tồn kho riêng bằng `UPDATE medicine_stocks ... WHERE quantity_on_hand >= :qty`; nếu thiếu (do quầy khác vừa bán), toàn bộ giao dịch bị hoàn tác, hóa đơn giữ `PENDING`; Thu ngân sửa chính hóa đơn đó (giảm số lượng / bỏ thuốc thiếu) rồi xác nhận lại, hoặc hủy để khách mua ngoài (EX-15). Vì chưa có khoản nào được ghi nhận đã thu, không phát sinh hoàn tiền.
+- **Không bán trùng:** mỗi đơn thuốc chỉ có tối đa một hóa đơn thuốc (`prescription_id UNIQUE`, kể cả hóa đơn đã hủy; sự kiện đến 2 lần cũng không tạo hóa đơn thứ hai); muốn đổi số lượng thì sửa hóa đơn đang `PENDING`; hóa đơn đã `PAID` không xác nhận lại được (EX-16).
 - **Không ảnh hưởng đợt khám:** bán thuốc không làm thay đổi trạng thái đợt khám.
 
 ---
@@ -1326,16 +1339,12 @@ Chủ thú cưng có thể:
 
 Administrator quản lý thông tin thuốc:
 
-- Mã thuốc (`code`).
-- Tên thuốc (`name`).
-- Hoạt chất (`active_ingredient`).
-- Dạng bào chế (`dosage_form`).
-- Đơn vị tính (`unit`).
-- Giá bán lẻ (`sale_price`).
-- Thuế suất VAT (`vat_rate`).
-- Số lượng tồn kho (`stock_quantity`) – chỉ thay đổi qua giao dịch kho hoặc bán thuốc, không sửa tay trên form danh mục.
-- Mức tồn tối thiểu cảnh báo (`min_stock_alert`).
-- Trạng thái kinh doanh (`is_active`).
+- **Thông tin thuốc** (`medicines`): mã, tên thương mại, nhóm thuốc (bảng danh mục `medicine_categories`), dạng bào chế, hàm lượng, đơn vị bán nhỏ nhất, **quy cách đóng gói** (ví dụ "Hộp 10 vỉ x 10 viên"), nhà sản xuất, nước sản xuất, số đăng ký lưu hành, điều kiện bảo quản, thuốc kê đơn hay không, mức tồn tối thiểu cảnh báo, trạng thái kinh doanh (ngừng kinh doanh = xóa mềm).
+- **Thành phần** (`medicine_ingredients`): từng hoạt chất và hàm lượng (ví dụ Amoxicillin 200 mg + Clavulanic acid 50 mg).
+- **Giá bán có lịch sử** (`medicine_prices`): giá, thuế suất, thời điểm bắt đầu / kết thúc hiệu lực, lý do điều chỉnh, người lập.
+- **Tồn kho hiện tại** (`medicine_stocks`): chỉ thay đổi qua giao dịch kho hoặc bán thuốc, không sửa tay trên form danh mục.
+
+Tách bốn phần vì chúng thay đổi với tần suất khác nhau: thông tin thuốc hầu như không đổi, giá đổi theo đợt, tồn kho đổi sau mỗi lần bán.
 
 *(Mở rộng trong tương lai: Quản lý lô thuốc, hạn sử dụng, nhà cung cấp).*
 
@@ -1354,9 +1363,9 @@ ADJUSTMENT   (±)  Cân chỉnh sau kiểm kê, hao hụt, hết hạn,
 Tồn kho hiện tại = Σ quantity của mọi giao dịch kho của thuốc đó
 ```
 
-`medicines.stock_quantity` được lưu sẵn (phi chuẩn hóa có chủ đích) để trừ kho nguyên tử và chống bán âm kho; mỗi giao dịch kho cập nhật cột này trong cùng giao dịch, đảm bảo bất biến `stock_quantity = SUM(inventory_transactions.quantity)`.
+`medicine_stocks.quantity_on_hand` được lưu sẵn (phi chuẩn hóa có chủ đích) để trừ kho nguyên tử và chống bán âm kho; mỗi giao dịch kho cập nhật cột này trong cùng giao dịch, đảm bảo bất biến `quantity_on_hand = SUM(inventory_transactions.quantity)`.
 
-Khi `stock_quantity <= min_stock_alert`, hệ thống phát cảnh báo tồn kho thấp.
+Khi `quantity_on_hand <= min_stock_alert`, hệ thống phát cảnh báo tồn kho thấp.
 
 ---
 
@@ -1367,8 +1376,8 @@ Administrator có thể:
 - Thêm dịch vụ.
 - Sửa dịch vụ.
 - Ngừng sử dụng dịch vụ (`is_active = FALSE`).
-- Thiết lập bảng giá (`price`) và thuế suất (`vat_rate`). Giá mới chỉ áp dụng cho chỉ định mới; hóa đơn đã lập giữ giá cũ.
-- Phân loại nhóm dịch vụ (`category`).
+- Thiết lập **bảng giá có lịch sử** (`service_prices`): giá, thuế suất, thời điểm hiệu lực, lý do. Giá mới chỉ áp dụng cho chỉ định từ thời điểm hiệu lực; hóa đơn đã lập giữ giá cũ.
+- Phân loại nhóm dịch vụ (bảng danh mục `service_categories`; thêm nhóm mới không phải sửa cấu trúc CSDL).
 - Với dịch vụ xét nghiệm: cấu hình gói gồm những chỉ số nào (`service_lab_test_items`).
 
 > Không xóa cứng dịch vụ đã từng phát sinh trong lịch sử khám để bảo toàn tính toàn vẹn dữ liệu.
@@ -1387,7 +1396,7 @@ Administrator có thể xem:
 - **Thuốc:** Thuốc bán chạy, thuốc sắp hết hàng, tỷ lệ khách mua thuốc tại phòng khám.
 - **Bác sĩ:** Thống kê số ca khám, số ca hoàn thành (không phân quyền theo thống kê).
 
-Hóa đơn `CANCELLED` không tính vào doanh thu. Số tiền tính qua `v_service_invoice_amounts`, `v_medicine_invoice_amounts`. Vì hai loại hóa đơn nằm ở hai service khác nhau, báo cáo tổng gọi API của từng service rồi cộng ở tầng ứng dụng.
+Hóa đơn `CANCELLED` không tính vào doanh thu; hóa đơn `REFUNDED` ghi một dòng doanh thu âm. Từ v4.0 các báo cáo lấy từ **phân hệ báo cáo** (`reporting-service`): phân hệ này nhận sự kiện thu tiền / hoàn tiền / hoàn tất ca từ các phân hệ khác và ghi sẵn vào bảng phẳng (đã có tên, nhóm, số tiền), nên mỗi báo cáo là một truy vấn, không phải ghép dữ liệu nhiều phân hệ. Thêm: **thời gian chờ trung bình** từng hàng đợi (từ lịch sử phiếu).
 
 ---
 
@@ -1410,14 +1419,14 @@ Hóa đơn `CANCELLED` không tính vào doanh thu. Số tiền tính qua `v_ser
 - **BR-10:** Lễ tân chịu trách nhiệm phân công bác sĩ phụ trách.
 - **BR-11:** Mỗi bác sĩ có một hàng đợi riêng. Lễ tân được xếp ca `WAITING` vào hàng đợi của bất kỳ bác sĩ đang làm việc nào, bất cứ lúc nào, không phụ thuộc bác sĩ đang rảnh hay đang khám; hệ thống gợi ý bác sĩ có ít người chờ nhất. Ca vừa có kết quả cận lâm sàng được phát phiếu ưu tiên vào hàng đợi của bác sĩ khám chính (sau ca cấp cứu).
 - **BR-12:** Một bác sĩ chỉ khám một ca tại một thời điểm (không có đồng thời 2 ca `IN_PROGRESS`); bác sĩ chỉ được "Gọi" khi không có ca đang khám.
-- **BR-13:** Bác sĩ khám tại số phòng cố định đã được gán sẵn trong tài khoản.
+- **BR-13:** Bác sĩ khám tại số phòng cố định đã được gán sẵn trong hồ sơ nhân sự. Tài khoản Bác sĩ bắt buộc có hồ sơ chuyên môn (số chứng chỉ hành nghề).
 
 ### Nhóm Visit
 - **BR-14:** Visit có thể sinh ra từ Appointment (`CHECKED_IN`) hoặc tạo trực tiếp từ Walk-in.
 - **BR-15:** Một Visit gắn liền với duy nhất một thú cưng.
 - **BR-16:** Một Visit có một bác sĩ phụ trách chính sau khi phân công.
 - **BR-17:** Một Visit có thể bao gồm nhiều chỉ định dịch vụ (phí khám cũng là một dịch vụ, được tạo tự động khi tiếp đón).
-- **BR-18:** Một Visit có tối đa một Prescription (đơn thuốc); đơn thuốc không chứa giá và không có trạng thái cấp phát.
+- **BR-18:** Một Visit có tối đa một Prescription (đơn thuốc, thuộc phân hệ khám); đơn thuốc không chứa giá, không có trạng thái cấp phát, khóa khi chốt ca.
 - **BR-19:** Mỗi dịch vụ được chỉ định có đúng một hóa đơn dịch vụ riêng; một Visit có thể có nhiều hóa đơn dịch vụ. Hệ thống không lưu tổng tiền hóa đơn.
 
 ### Nhóm chuyên môn
@@ -1428,20 +1437,28 @@ Hóa đơn `CANCELLED` không tính vào doanh thu. Số tiền tính qua `v_ser
 - **BR-24:** Khoảng tham chiếu (min, max) phải được snapshot vào kết quả tại thời điểm thực hiện; nhãn đánh giá được tính khi hiển thị.
 
 ### Nhóm tài chính & Thanh toán
-- **BR-25:** Đơn giá và thuế suất dịch vụ được snapshot vào hóa đơn dịch vụ tại thời điểm bác sĩ chỉ định (phí khám: thời điểm tiếp đón).
-- **BR-26:** Đơn giá và thuế suất thuốc được snapshot vào hóa đơn thuốc tại thời điểm thu ngân lập hóa đơn thuốc (không phải lúc kê đơn).
+- **BR-25:** Đơn giá và thuế suất dịch vụ lấy từ dòng giá đang hiệu lực của bảng giá dịch vụ và được snapshot vào hóa đơn dịch vụ tại thời điểm bác sĩ chỉ định (phí khám: thời điểm tiếp đón). Dòng giá cũ không được sửa số tiền hay xóa.
+- **BR-26:** Đơn giá và thuế suất thuốc lấy từ bảng giá thuốc đang hiệu lực, snapshot vào hóa đơn thuốc nháp và cập nhật lần cuối khi thu tiền (không phải lúc kê đơn).
 - **BR-27:** Hóa đơn dịch vụ được lập tự động lúc chỉ định (phí khám: lúc tiếp đón). Dịch vụ thu trước (khám, Xét nghiệm, CĐHA) được thu ngay; dịch vụ làm tại phòng chỉ thu khi Visit đã được bác sĩ chốt chuyên môn (`WAITING_PAYMENT`) hoặc khi thu công nợ của Visit đã đóng.
 - **BR-28:** Visit chuyển sang `COMPLETED` khi mọi hóa đơn dịch vụ đều `PAID`, `CANCELLED` hoặc `REFUNDED`; việc mua thuốc không ảnh hưởng. Ngoại lệ: khi khách bỏ về (EX-11), Visit được đóng sang `COMPLETED` và các hóa đơn dịch vụ còn `PENDING` giữ làm công nợ.
 - **BR-33:** Khi một dịch vụ được chỉ định bị hủy mà hóa đơn chưa thu, hóa đơn dịch vụ tương ứng chuyển `CANCELLED` trong cùng giao dịch; không có thao tác hủy hóa đơn dịch vụ riêng lẻ. Dịch vụ đã thu bị hủy thì theo BR-36.
 - **BR-34:** Ở hàng đợi bác sĩ, phòng Xét nghiệm và phòng CĐHA, mỗi phiếu có nút "Gọi" (chỉ ghi giờ gọi và phát thông báo, không đổi trạng thái và không đổi thứ tự) và "Bắt đầu"; "Gọi số tiếp theo" là phím tắt gọi người đứng đầu. Khách vắng thì gọi ca khác; khách quay lại thì gọi lại (hệ thống không theo dõi việc quay lại). Ca cấp cứu luôn giữ ưu tiên. Ở phòng Xét nghiệm / CĐHA, các dịch vụ của cùng một đợt khám trong cùng phòng nằm chung một phiếu (gọi một lần).
-- **BR-35 (Thu tiền trước – xếp hàng sau):** Dịch vụ được đánh dấu thu trước trong danh mục (khám lâm sàng, Xét nghiệm, CĐHA) phải thu tiền xong thì hệ thống mới phát phiếu xếp hàng vào hàng đợi phòng tương ứng; dịch vụ làm tại phòng làm ngay, thu khi chốt ca. Ngoại lệ: ca cấp cứu phát phiếu ngay (khám trước thu sau); ca có kết quả CLS phát phiếu ưu tiên không thu thêm.
+- **BR-35 (Thu tiền trước – xếp hàng sau):** Dịch vụ thuộc nhóm được đánh dấu thu trước trong danh mục nhóm dịch vụ (khám lâm sàng, Xét nghiệm, CĐHA) phải thu tiền xong thì hệ thống mới phát phiếu xếp hàng vào hàng đợi phòng tương ứng (phát ngay sau khi thu, qua sự kiện; đã thu thì chắc chắn có phiếu); dịch vụ làm tại phòng làm ngay, thu khi chốt ca. Ngoại lệ: ca cấp cứu phát phiếu ngay (khám trước thu sau); ca có kết quả CLS phát phiếu ưu tiên không thu thêm.
 - **BR-36 (Hoàn tiền):** Phí khám đã nộp không hoàn; khách tự bỏ về / tự hủy dịch vụ đã nộp không được hoàn. Chỉ hoàn (`REFUNDED`) khi phòng khám không thực hiện được dịch vụ Xét nghiệm / CĐHA đã thu.
 
 ### Nhóm kho dược
 - **BR-29:** Thuốc chỉ bị trừ tồn kho khi hóa đơn thuốc được xác nhận thanh toán; chuyển `PAID`, trừ kho và ghi nhật ký `EXPORT_SALE` diễn ra trong cùng một giao dịch.
 - **BR-30:** Không được bán (xuất kho) vượt quá số lượng tồn kho tại thời điểm xác nhận; khi kê đơn, số lượng vượt tồn kho chỉ bị cảnh báo.
-- **BR-31:** Mỗi đơn thuốc có tối đa một hóa đơn thuốc; hóa đơn thuốc đã thanh toán không được xác nhận lại, nên một đơn thuốc không bị trừ kho nhiều hơn một lần.
-- **BR-32:** Khách hàng được tự chọn mua thuốc tại phòng khám hoặc mua ngoài theo đơn in; được mua nhiều hơn, ít hơn hoặc bằng số lượng kê (số kê chỉ để tham khảo), nhưng không vượt tồn kho hiện tại.
+- **BR-31:** Mỗi đơn thuốc có tối đa một hóa đơn thuốc (nháp tự tạo khi chốt ca); hóa đơn thuốc đã thanh toán không được xác nhận lại, nên một đơn thuốc không bị trừ kho nhiều hơn một lần.
+- **BR-32:** Khách hàng được tự chọn mua thuốc tại phòng khám (thu hóa đơn nháp) hoặc mua ngoài theo đơn in (hủy hóa đơn nháp); được mua nhiều hơn, ít hơn hoặc bằng số lượng kê (số kê chỉ để tham khảo), nhưng không vượt tồn kho hiện tại.
+
+
+### Nhóm dữ liệu, danh mục & người dùng (bổ sung v4.0)
+- **BR-37 (Xóa mềm):** Tài khoản, dịch vụ, thuốc, nhóm, vai trò, thú cưng không bị xóa cứng. Ngừng sử dụng thì không xuất hiện trong lựa chọn mới; dữ liệu cũ tham chiếu tới vẫn hiển thị kèm nhãn "Đã khóa" / "Ngừng sử dụng" thay vì báo lỗi không tìm thấy.
+- **BR-38 (Giá có lịch sử):** Tại một thời điểm, mỗi dịch vụ / thuốc có đúng một dòng giá hiệu lực. Đổi giá = đóng dòng đang áp dụng và thêm dòng mới có thời điểm bắt đầu sau thời điểm bắt đầu của dòng đang áp dụng; không sửa số tiền, không xóa dòng giá.
+- **BR-39 (Phân công Bác sĩ còn hoạt động):** Chỉ được phân công / chuyển ca cho tài khoản có vai trò Bác sĩ đang `ACTIVE`, kiểm tra ngay tại thời điểm phân công. Khi một Bác sĩ bị khóa hoặc nghỉ việc, các phiếu đang chờ của Bác sĩ đó tự chuyển về danh sách chờ phân công và Lễ tân được thông báo.
+- **BR-40 (Hồ sơ khám):** Sinh hiệu đo bao nhiêu lần ghi bấy nhiêu bản ghi (không ghi đè); hồ sơ khám chuyên môn và đơn thuốc chỉ Bác sĩ phụ trách được sửa, khóa khi chốt ca (mở lại theo mục 27).
+- **BR-41 (Hồ sơ người dùng):** Mỗi tài khoản có một hồ sơ cá nhân chung; nhân viên có hồ sơ nhân sự; Bác sĩ có thêm hồ sơ chuyên môn với số chứng chỉ hành nghề duy nhất; khách hàng có hồ sơ khách hàng. Một tài khoản có thể giữ nhiều vai trò.
 
 ---
 
@@ -1581,7 +1598,7 @@ Nhánh hủy / đóng ca đặc biệt:
                        ↓
                     Kê đơn
                        ↓
-              CHỐT ĐỢT KHÁM
+              CHỐT ĐỢT KHÁM ──(sự kiện đơn thuốc)──→ quầy thuốc tạo HÓA ĐƠN THUỐC NHÁP
                        ↓
                 WAITING_PAYMENT
                        ↓
@@ -1595,8 +1612,8 @@ Nhánh hủy / đóng ca đặc biệt:
      Khách mua thuốc        Khách mua ngoài /
      tại phòng khám         không kê đơn
              ↓                    ↓
-     HÓA ĐƠN THUỐC           In đơn thuốc,
-     + TRỪ TỒN KHO             ra về
+   THU HÓA ĐƠN NHÁP        Hủy hóa đơn nháp,
+     + TRỪ TỒN KHO          in đơn thuốc, ra về
    (cùng một giao dịch)
 ```
 
@@ -1605,73 +1622,79 @@ Nhánh hủy / đóng ca đặc biệt:
 
 ## 44. Mô hình dữ liệu khái niệm (Conceptual Data Model)
 
-### 44.1. Cấu trúc tài khoản người dùng
-Không chia thành các bảng tài khoản phân mảnh, sử dụng mô hình xác thực tập trung:
-- `users`: Thông tin định danh, tài khoản, mật khẩu, trạng thái.
-- `roles`: Bảng vai trò (`ADMIN`, `VETERINARIAN`, `RECEPTIONIST`, `LAB_TECHNICIAN`, `IMAGING_TECHNICIAN`, `PET_OWNER`).
+### 44.1. Cấu trúc tài khoản người dùng (v4.0)
+- `users`: chỉ thông tin đăng nhập (tên đăng nhập, mật khẩu băm, trạng thái `ACTIVE` / `LOCKED` / `INACTIVE`).
+- `roles` (bảng danh mục, không còn kiểu ENUM) + `user_roles`: một tài khoản có thể nhiều vai trò.
+- `user_profiles`: họ tên, số điện thoại, email, giới tính, ngày sinh, địa chỉ, ảnh đại diện – dùng chung cho mọi người dùng.
+- `staff_profiles`: hồ sơ nhân sự (mã nhân viên, CCCD, chức danh, bộ phận, phòng làm việc, hình thức làm việc, ngày vào làm / nghỉ việc, người liên hệ khẩn cấp).
+- `veterinarian_profiles`: hồ sơ chuyên môn của Bác sĩ (số chứng chỉ hành nghề, ngày cấp, nơi cấp, hạn, học vị, chuyên khoa, nơi đào tạo, năm bắt đầu hành nghề, giới thiệu).
+- `pet_owner_profiles`: hồ sơ khách hàng (mã khách hàng, kênh đăng ký, kênh liên hệ ưu tiên).
 
-### 44.2. Các thực thể chính trong hệ thống (27 bảng, 4 CSDL logic – lược đồ v3.0, cập nhật 16–17/11)
+### 44.2. Các thực thể chính (52 bảng, 5 CSDL logic + Redis – lược đồ v4.0, 18/11/2026)
 
 ```text
-AUTH-SERVICE (pet_clinic_auth_db)
-1. ROLES
-2. USERS
-3. REFRESH_TOKENS
+AUTH-SERVICE (pet_clinic_auth_db) – 9 bảng
+  ROLES, USERS, USER_ROLES, USER_PROFILES, STAFF_PROFILES, VETERINARIAN_PROFILES,
+  PET_OWNER_PROFILES, REFRESH_TOKENS, OUTBOX_EVENTS
 
-APPOINTMENT-SERVICE (pet_clinic_appointment_db)
-4. APPOINTMENTS
-5. APPOINTMENT_STATUS_HISTORIES
+APPOINTMENT-SERVICE (pet_clinic_appointment_db) – 4 bảng
+  APPOINTMENTS, APPOINTMENT_STATUS_HISTORIES, OUTBOX_EVENTS, PROCESSED_EVENTS
 
-CLINICAL-SERVICE (pet_clinic_clinical_db)
-6. SPECIES
-7. PETS
-8. SERVICES
-9. LAB_TEST_ITEMS
-10. SERVICE_LAB_TEST_ITEMS          (gói xét nghiệm gồm những chỉ số nào)
-11. LAB_TEST_REFERENCE_RANGES
-12. PET_VISITS
-13. PET_VISIT_STATUS_HISTORIES
-14. VISIT_SERVICE_DETAILS
-15. VISIT_SERVICE_DETAIL_HISTORIES
-16. LAB_TEST_RESULTS
-17. IMAGING_RESULTS
-18. IMAGING_ATTACHMENTS
-19. SERVICE_INVOICES                (hóa đơn riêng cho từng dịch vụ)
-20. QUEUE_TICKETS                   (phiếu xếp hàng – dữ liệu vận hành, phát khi thu tiền xong)
-21. QUEUE_TICKET_ITEMS              (các dịch vụ XN / CĐHA thuộc một phiếu)
+CLINICAL-SERVICE (pet_clinic_clinical_db) – 24 bảng
+  Danh mục & giá : SPECIES, SERVICE_CATEGORIES, SERVICES, SERVICE_PRICES,
+                   LAB_TEST_ITEMS, SERVICE_LAB_TEST_ITEMS, LAB_TEST_REFERENCE_RANGES
+  Khám bệnh      : PETS, PET_VISITS (tiếp đón), VITAL_SIGNS (sinh hiệu), MEDICAL_RECORDS (hồ sơ khám),
+                   PET_VISIT_STATUS_HISTORIES
+  Dịch vụ        : VISIT_SERVICE_DETAILS, VISIT_SERVICE_DETAIL_HISTORIES, LAB_TEST_RESULTS,
+                   IMAGING_RESULTS, IMAGING_ATTACHMENTS (lưu file_key), SERVICE_INVOICES
+  Đơn thuốc      : PRESCRIPTIONS, PRESCRIPTION_ITEMS
+  Hàng đợi       : QUEUE_TICKET_HISTORIES, QUEUE_TICKET_HISTORY_ITEMS (phiếu đang chạy ở Redis)
+  Sự kiện        : OUTBOX_EVENTS, PROCESSED_EVENTS
 
-BILLING-PHARMACY-SERVICE (pet_clinic_billing_pharmacy_db)
-22. MEDICINES
-23. PRESCRIPTIONS
-24. PRESCRIPTION_ITEMS
-25. MEDICINE_INVOICES               (hóa đơn thuốc – tùy chọn)
-26. MEDICINE_INVOICE_ITEMS
-27. INVENTORY_TRANSACTIONS
+BILLING-PHARMACY-SERVICE (pet_clinic_billing_pharmacy_db) – 10 bảng
+  MEDICINE_CATEGORIES, MEDICINES, MEDICINE_INGREDIENTS, MEDICINE_PRICES, MEDICINE_STOCKS,
+  MEDICINE_INVOICES (nháp tự tạo từ đơn thuốc), MEDICINE_INVOICE_ITEMS, INVENTORY_TRANSACTIONS,
+  OUTBOX_EVENTS, PROCESSED_EVENTS
+
+REPORTING-SERVICE (pet_clinic_reporting_db) – 5 bảng (mô hình đọc cho báo cáo)
+  VISIT_FACTS, REVENUE_FACTS, DAILY_REVENUE_SUMMARIES, DOCTOR_DAILY_PERFORMANCES, PROCESSED_EVENTS
+
+REDIS: phiếu xếp hàng đang chờ / đang phục vụ của hàng đợi Bác sĩ, Xét nghiệm, CĐHA
 ```
 
-*(Bản 2.0 có `INVOICES` và `INVOICE_ITEMS` – hóa đơn gộp một ca một hóa đơn – nay đã thay bằng `SERVICE_INVOICES`, `MEDICINE_INVOICES`, `MEDICINE_INVOICE_ITEMS`.)*
+*(Chi tiết cột, khóa, quan hệ: `THIET_KE_CO_SO_DU_LIEU_ERD.md` v4.0.)*
 
 ### 44.3. Trục dữ liệu chính (Core Data Backbone)
 
 ```text
 APPOINTMENTS ─── (1 : N) ─── APPOINTMENT_STATUS_HISTORIES
 
+USER ── (1 : 1) USER_PROFILE ── (1 : 0..1) STAFF_PROFILE ── (1 : 0..1) VETERINARIAN_PROFILE
+     └─ (1 : 0..1) PET_OWNER_PROFILE
 PET_OWNER (USER)
     ↓ (1 : N)
 PET
     ↓ (1 : N)
 PET_VISIT ─── (1 : N) ─── PET_VISIT_STATUS_HISTORIES
-    ├── (1 : N) ─── QUEUE_TICKETS ─── (1 : N) ─── QUEUE_TICKET_ITEMS ─── (1 : 1) ─── VISIT_SERVICE_DETAILS
+    ├── (1 : N) ─── VITAL_SIGNS
+    ├── (1 : 1) ─── MEDICAL_RECORD
+    ├── (1 : N) ─── QUEUE_TICKET_HISTORIES ─── (1 : N) ─── QUEUE_TICKET_HISTORY_ITEMS
     ├── (1 : N) ─── VISIT_SERVICE_DETAILS ─── (1 : N) ─── VISIT_SERVICE_DETAIL_HISTORIES
     │                     ├── (1 : 1) ─── SERVICE_INVOICES
     │                     ├── (1 : N) ─── LAB_TEST_RESULTS
     │                     └── (1 : 0..1) ─ IMAGING_RESULTS ─── (1 : N) ─── IMAGING_ATTACHMENTS
     │
-    └── (1 : 0..1) ─ PRESCRIPTION
-                          ├── (1 : N) ─── PRESCRIPTION_ITEMS ─── (N : 1) ─── MEDICINES
-                          │                                                    └── (1 : N) ─── INVENTORY_TRANSACTIONS
-                          └── (1 : 0..1) ─ MEDICINE_INVOICE
-                                                └── (1 : N) ─── MEDICINE_INVOICE_ITEMS ─── (N : 1) ─── PRESCRIPTION_ITEMS
+    └── (1 : 0..1) ─ PRESCRIPTION ─── (1 : N) ─── PRESCRIPTION_ITEMS ··· medicine_id ···> MEDICINES
+
+SERVICE_CATEGORY ── (1 : N) SERVICE ── (1 : N) SERVICE_PRICES
+
+MEDICINE_CATEGORY ── (1 : N) MEDICINE ── (1 : N) MEDICINE_INGREDIENTS
+                                      ├── (1 : N) MEDICINE_PRICES
+                                      ├── (1 : 1) MEDICINE_STOCK
+                                      └── (1 : N) INVENTORY_TRANSACTIONS
+
+PRESCRIPTION ··· prescription_id ···> MEDICINE_INVOICE ── (1 : N) MEDICINE_INVOICE_ITEMS ── (N : 1) MEDICINES
+(··· = khóa ngoại logic giữa 2 phân hệ; không còn liên kết dòng hóa đơn thuốc ↔ dòng đơn thuốc)
 ```
 
 ### 44.4. Phân rã nghiệp vụ theo vai trò người dùng
@@ -1681,7 +1704,9 @@ USER
  │
  ├── ADMIN
  │      ├── Quản lý nhân sự, gán phòng làm việc cố định
- │      ├── Cấu hình danh mục Dịch vụ, Thuốc, Xét nghiệm, Tham chiếu
+ │      ├── Cấu hình danh mục Dịch vụ, Nhóm dịch vụ, Thuốc (thành phần, quy cách), Xét nghiệm, Tham chiếu
+ │      ├── Quản lý bảng giá dịch vụ và giá thuốc có lịch sử
+ │      ├── Lập hồ sơ nhân sự, hồ sơ chuyên môn Bác sĩ, gán vai trò
  │      ├── Nhập kho & cân chỉnh kho
  │      └── Xem thống kê, báo cáo doanh thu, công nợ & vận hành
  │
@@ -1690,10 +1715,10 @@ USER
  │      ├── Chọn Bác sĩ cho ca (hàng đợi riêng của từng Bác sĩ)
  │      ├── Thu phí khám, tiền XN / CĐHA → hệ thống phát phiếu xếp hàng
  │      ├── Thu các hóa đơn dịch vụ còn lại, thu công nợ, hoàn tiền khi phòng khám không làm được
- │      └── Bán thuốc theo đơn khi khách chọn mua (lập hóa đơn thuốc, xuất thuốc)
+ │      └── Bán thuốc theo hóa đơn nháp tự tạo khi chốt ca (sửa số lượng, thu tiền, xuất thuốc) hoặc hủy nháp nếu khách mua ngoài
  │
  ├── VETERINARIAN
- │      ├── Khám lâm sàng, cân đo sinh hiệu & ghi nhận triệu chứng ban đầu
+ │      ├── Khám lâm sàng, ghi sinh hiệu (nhiều lần đo) & hồ sơ khám (bệnh sử, chẩn đoán sơ bộ / xác định)
  │      ├── Chỉ định dịch vụ cận lâm sàng (Lab, CĐHA) & thực hiện dịch vụ tại phòng
  │      ├── Kết luận chẩn đoán xác định & kê đơn thuốc mang về
  │      └── Chốt đợt khám (và mở lại hồ sơ khi cần sửa sai sót)
@@ -1718,8 +1743,9 @@ USER
 
 ## PHỤ LỤC: THAY ĐỔI SO VỚI PHIÊN BẢN 2.0
 
-| Vị trí | Bản 2.0 | Bản 3.0 | Lý do |
+| Vị trí | Bản cũ | Bản mới | Lý do |
 | :--- | :--- | :--- | :--- |
+| Mục 0, 3.1, 3.2, 5.3, 8.4, 8.5, 9, 14, 17, 19, 21, 23, 25–27, 29–31, 37–40, 41 (BR-13, 18, 25, 26, 31, 32, 35; thêm BR-37 → BR-41), 43, 44 (**v4.0, 18/11/2026**) | `users` chứa họ tên, phòng; phiếu xếp hàng là bảng `queue_tickets` phát trong giao dịch thu tiền; thông tin đợt khám gộp sinh hiệu + chuyên môn; giá nằm trên `services` / `medicines`; `medicines` gồm cả hoạt chất, giá, tồn; đơn thuốc ở billing; hóa đơn thuốc do Thu ngân lập, dòng trỏ `prescription_items`; báo cáo tổng gọi API từng service; 27 bảng | Hồ sơ người dùng tách theo loại, nhiều vai trò; phiếu trên Redis, phát ngay sau thu tiền qua sự kiện, lịch sử phiếu ở MySQL; đợt khám tách `pet_visits` / `vital_signs` / `medical_records`; bảng giá có lịch sử; thuốc tách thông tin / thành phần / giá / tồn; đơn thuốc ở clinical, hóa đơn thuốc nháp tự tạo khi chốt ca, dòng trỏ `medicines`; phân hệ báo cáo riêng; xóa mềm; 52 bảng | Nhận xét chi tiết của GVHD (Notes.pdf + góp ý bổ sung) |
 | Mục 1, 43 (luồng tổng thể) | Thanh toán → Xuất thuốc → Hoàn tất | Thanh toán hóa đơn dịch vụ → Hoàn tất; mua thuốc là nhánh tùy chọn | Khách được mua thuốc ngoài (góp ý GVHD) |
 | Mục 2.2, 14 | Cân nặng trên hồ sơ thú cưng; Visit lưu phòng, thời gian bắt đầu / kết thúc | Cân nặng lấy từ lần khám gần nhất; phòng suy ra từ Bác sĩ; thời điểm lấy từ lịch sử | Bỏ thuộc tính trùng lặp / dẫn xuất |
 | Mục 3.5, 8 (sơ đồ) | Lễ tân cân đo sinh hiệu ban đầu | Lễ tân không cân đo; Bác sĩ đo trong phòng khám | Mâu thuẫn với mục 8.1, 8.2, 17 |
