@@ -1,5 +1,7 @@
 package com.vetclinic.clinical.service.impl;
 
+import com.vetclinic.common.event.DomainEvent;
+import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.clinical.constant.PaymentStatus;
 import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
@@ -32,7 +34,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -52,6 +53,7 @@ import static com.vetclinic.clinical.testsupport.TestData.service;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -73,7 +75,7 @@ class ServiceInvoiceServiceImplTest {
     @Mock
     private ServiceInvoiceRepository invoiceRepository;
     @Mock
-    private ApplicationEventPublisher publisher;
+    private OutboxWriter outboxWriter;
     @Mock
     private VisitAssembler assembler;
     @Mock
@@ -89,11 +91,11 @@ class ServiceInvoiceServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository, detailHistoryRepository,
-                invoiceRepository, ticketIssuer, publisher, CLOCK);
+                invoiceRepository, ticketIssuer, outboxWriter, CLOCK);
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new ServiceInvoiceServiceImpl(visitRepository, detailRepository, invoiceRepository, ticketRepository, support,
-                ticketIssuer, assembler, publisher, CLOCK, tm);
+                ticketIssuer, assembler, outboxWriter, CLOCK, tm);
         examInvoice = invoice(11L, 1L, "100000.00", "0.00");
         labInvoice = invoice(12L, 2L, "250000.00", "0.00");
         xrayInvoice = invoice(13L, 3L, "180000.00", "0.00");
@@ -266,8 +268,8 @@ class ServiceInvoiceServiceImplTest {
         assertThat(history.getValue().getFromStatus()).isEqualTo(VisitStatus.WAITING_PAYMENT);
         assertThat(history.getValue().getToStatus()).isEqualTo(VisitStatus.COMPLETED);
         assertThat(history.getValue().getChangedByUserId()).isEqualTo(RECEPTIONIST);   // người đổi trạng thái = thu ngân
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(event.capture());
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
         assertThat(((VisitCompletedEvent) event.getValue()).abandoned()).isFalse();
     }
 
@@ -282,7 +284,7 @@ class ServiceInvoiceServiceImplTest {
         assertThat(xrayInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
         assertThat(result.totalPending()).isEqualByComparingTo("180000.00");
         verify(historyRepository, never()).save(any());
-        verify(publisher, never()).publishEvent(any(Object.class));
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
     }
 
     @Test
@@ -307,7 +309,7 @@ class ServiceInvoiceServiceImplTest {
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
         assertThat(result.totalPending()).isEqualByComparingTo("430000.00");
         verify(historyRepository, never()).save(any());
-        verify(publisher, never()).publishEvent(any(Object.class));
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
     }
 
     @Test

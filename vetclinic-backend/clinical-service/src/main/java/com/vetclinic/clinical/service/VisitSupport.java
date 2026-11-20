@@ -10,6 +10,8 @@ import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
+import com.vetclinic.common.event.outbox.OutboxWriter;
+import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
@@ -26,7 +28,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -41,13 +42,16 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class VisitSupport {
 
+    /** aggregate_type của các dòng outbox gắn với một đợt khám (aggregate_id = id đợt khám). */
+    public static final String OUTBOX_AGGREGATE = "VISIT";
+
     private final PetVisitRepository visitRepository;
     private final PetVisitStatusHistoryRepository historyRepository;
     private final VisitServiceDetailRepository detailRepository;
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
     private final ServiceInvoiceRepository invoiceRepository;
     private final TicketIssuer ticketIssuer;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxWriter outboxWriter;
     private final Clock clock;
 
     /** Khóa dòng đợt khám (SELECT ... FOR UPDATE). Bắt buộc dùng trước mọi thao tác ghi. */
@@ -200,7 +204,7 @@ public class VisitSupport {
         // Phiếu phòng còn chờ (dịch vụ đã bị hủy hết) đóng lại; phiếu DOCTOR ưu tiên mới cho Bác sĩ khám chính
         ticketIssuer.issueResultsReady(visit);
         Long petId = visit.getPet().getId();
-        eventPublisher.publishEvent(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), clock.instant(), null,
+        outboxWriter.write(OUTBOX_AGGREGATE, visit.getId(), new ParaclinicalResultsReadyEvent(UuidV7.generate(clock), clock.instant(), null,
                 visit.getId(), visit.getVisitCode(), doctorId, petId));
         log.info("Đợt khám {} đã có đủ kết quả cận lâm sàng (RESULTS_READY), đã phát phiếu ưu tiên cho bác sĩ", visit.getVisitCode());
     }

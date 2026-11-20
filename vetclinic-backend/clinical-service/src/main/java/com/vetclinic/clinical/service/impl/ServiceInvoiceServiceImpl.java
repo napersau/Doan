@@ -23,12 +23,13 @@ import com.vetclinic.clinical.service.ServiceInvoiceService;
 import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitSupport;
+import com.vetclinic.common.event.outbox.OutboxWriter;
+import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.SecurityUtils;
 import java.util.concurrent.ThreadLocalRandom;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -61,14 +62,14 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
     private final VisitSupport support;
     private final TicketIssuer ticketIssuer;
     private final VisitAssembler assembler;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxWriter outboxWriter;
     private final Clock clock;
     private final TransactionTemplate tx;
 
     public ServiceInvoiceServiceImpl(PetVisitRepository visitRepository, VisitServiceDetailRepository detailRepository,
                                      ServiceInvoiceRepository invoiceRepository, QueueTicketRepository ticketRepository,
                                      VisitSupport support, TicketIssuer ticketIssuer, VisitAssembler assembler,
-                                     ApplicationEventPublisher eventPublisher, Clock clock,
+                                     OutboxWriter outboxWriter, Clock clock,
                                      PlatformTransactionManager transactionManager) {
         this.visitRepository = visitRepository;
         this.detailRepository = detailRepository;
@@ -77,7 +78,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
         this.support = support;
         this.ticketIssuer = ticketIssuer;
         this.assembler = assembler;
-        this.eventPublisher = eventPublisher;
+        this.outboxWriter = outboxWriter;
         this.clock = clock;
         this.tx = new TransactionTemplate(transactionManager);
     }
@@ -242,7 +243,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
         if (!anyPending && visit.getStatus() == VisitStatus.WAITING_PAYMENT) {
             // T10: mọi hóa đơn PAID / CANCELLED / REFUNDED -> hoàn tất ca, người đổi trạng thái = thu ngân; ca COMPLETED do khách bỏ về thì giữ nguyên
             support.transition(visit, VisitStatus.COMPLETED, cashierId, "Đã thu đủ hóa đơn dịch vụ, hoàn tất đợt khám");
-            eventPublisher.publishEvent(new VisitCompletedEvent(UUID.randomUUID(), clock.instant(), cashierId, visit.getId(),
+            outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new VisitCompletedEvent(UuidV7.generate(clock), clock.instant(), cashierId, visit.getId(),
                     visit.getVisitCode(), visit.getPet().getId(), false));
         }
         return buildStatement(visit);

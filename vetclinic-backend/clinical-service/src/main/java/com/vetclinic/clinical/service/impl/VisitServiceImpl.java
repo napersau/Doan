@@ -32,6 +32,8 @@ import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.clinical.service.VisitSupport;
+import com.vetclinic.common.event.outbox.OutboxWriter;
+import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.event.VisitCheckedInEvent;
@@ -46,7 +48,6 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -86,7 +87,7 @@ public class VisitServiceImpl implements VisitService {
     private final TicketIssuer ticketIssuer;
     private final VisitAssembler assembler;
     private final NamedLockService lockService;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxWriter outboxWriter;
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
 
@@ -95,7 +96,7 @@ public class VisitServiceImpl implements VisitService {
                             VisitServiceDetailRepository detailRepository, ClinicServiceRepository serviceRepository,
                             AuthClient authClient, AppointmentClient appointmentClient,
                             VisitSupport support, TicketIssuer ticketIssuer, VisitAssembler assembler,
-                            NamedLockService lockService, ApplicationEventPublisher eventPublisher, Clock clock,
+                            NamedLockService lockService, OutboxWriter outboxWriter, Clock clock,
                             PlatformTransactionManager transactionManager) {
         this.visitRepository = visitRepository;
         this.petRepository = petRepository;
@@ -108,7 +109,7 @@ public class VisitServiceImpl implements VisitService {
         this.ticketIssuer = ticketIssuer;
         this.assembler = assembler;
         this.lockService = lockService;
-        this.eventPublisher = eventPublisher;
+        this.outboxWriter = outboxWriter;
         this.clock = clock;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -216,7 +217,7 @@ public class VisitServiceImpl implements VisitService {
             ticketIssuer.issueForPaidServices(visit, List.of(examDetail), null);
         }
         // Chỉ được gửi sang RabbitMQ SAU KHI commit (DomainEventRabbitPublisher): appointment-service sẽ chuyển lịch hẹn sang CHECKED_IN
-        eventPublisher.publishEvent(new VisitCheckedInEvent(UUID.randomUUID(), now, receptionistId, visit.getId(),
+        outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new VisitCheckedInEvent(UuidV7.generate(clock), now, receptionistId, visit.getId(),
                 visit.getVisitCode(), pet.getId(), appointmentId, emergency, doctorId));
         return assembler.detail(visit);   // kèm phí khám vừa lập và phiếu (ca cấp cứu) để màn hình tiếp đón hiển thị
     }
@@ -619,7 +620,7 @@ public class VisitServiceImpl implements VisitService {
         ticketIssuer.cancelActiveTickets(visit.getId());   // phiếu phòng / phiếu ưu tiên đang chờ -> CANCELLED
         support.transition(visit, VisitStatus.COMPLETED, actor.id(),
                 "Khách bỏ về: đóng ca, lưu kết quả vào bệnh án và ghi nợ viện phí (EX-11)");
-        eventPublisher.publishEvent(new VisitCompletedEvent(UUID.randomUUID(), clock.instant(), actor.id(), visit.getId(),
+        outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new VisitCompletedEvent(UuidV7.generate(clock), clock.instant(), actor.id(), visit.getId(),
                 visit.getVisitCode(), visit.getPet().getId(), true));
         return assembler.detail(visit);
     }

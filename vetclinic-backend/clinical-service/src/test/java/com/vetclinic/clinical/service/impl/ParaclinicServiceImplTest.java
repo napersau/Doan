@@ -1,5 +1,7 @@
 package com.vetclinic.clinical.service.impl;
 
+import com.vetclinic.common.event.DomainEvent;
+import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.clinical.constant.LabEvaluation;
 import com.vetclinic.clinical.constant.PaymentStatus;
 import com.vetclinic.clinical.constant.QueueType;
@@ -61,7 +63,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -86,6 +87,7 @@ import static com.vetclinic.clinical.testsupport.TestData.service;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.lenient;
@@ -125,7 +127,7 @@ class ParaclinicServiceImplTest {
     @Mock
     private ImagingStorage storage;
     @Mock
-    private ApplicationEventPublisher publisher;
+    private OutboxWriter outboxWriter;
     @Mock
     private QueueTicketRepository ticketRepository;
     @Mock
@@ -138,7 +140,7 @@ class ParaclinicServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, invoiceRepository, ticketIssuer, publisher, CLOCK);
+                detailHistoryRepository, invoiceRepository, ticketIssuer, outboxWriter, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, labResultRepository, imagingResultRepository,
                 attachmentRepository, invoiceRepository, new VisitTimeline(historyRepository), ticketRepository);
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
@@ -349,7 +351,7 @@ class ParaclinicServiceImplTest {
 
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
         assertThat(invoice.getPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
-        verify(publisher, never()).publishEvent(any(Object.class));   // dịch vụ tại phòng không ảnh hưởng RESULTS_READY
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));   // dịch vụ tại phòng không ảnh hưởng RESULTS_READY
     }
 
     @Test
@@ -495,8 +497,8 @@ class ParaclinicServiceImplTest {
 
         assertThat(history.getValue().getChangedByUserId()).isNull();   // T06: hệ thống tự chuyển
 
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher, Mockito.times(1)).publishEvent(event.capture());   // chỉ visit.results_ready (v3.0)
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter, Mockito.times(1)).write(eq("VISIT"), any(), event.capture());   // chỉ visit.results_ready (v3.0)
         ParaclinicalResultsReadyEvent ready = event.getAllValues().stream().filter(ParaclinicalResultsReadyEvent.class::isInstance)
                 .map(ParaclinicalResultsReadyEvent.class::cast).findFirst().orElseThrow();
         assertThat(ready.visitId()).isEqualTo(100L);
@@ -535,7 +537,7 @@ class ParaclinicServiceImplTest {
         service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
 
         verify(historyRepository, never()).save(any());
-        verify(publisher, never()).publishEvent(any(Object.class));
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
     }
 
     @Test
@@ -592,7 +594,7 @@ class ParaclinicServiceImplTest {
         assertThat(response.status()).isEqualTo(ServiceDetailStatus.CANCELLED);
         assertThat(lastDetailHistory().getReason()).isEqualTo("Thú cưng quá hung dữ");
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
-        verify(publisher).publishEvent(any(ParaclinicalResultsReadyEvent.class));
+        verify(outboxWriter).write(eq("VISIT"), any(), any(ParaclinicalResultsReadyEvent.class));
     }
 
     @Test
@@ -603,7 +605,7 @@ class ParaclinicServiceImplTest {
 
         service.cancel(1L, "Đổi phác đồ", null);
 
-        verify(publisher, never()).publishEvent(any(Object.class));
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
     }
 
     @Test
@@ -710,7 +712,7 @@ class ParaclinicServiceImplTest {
 
         assertThat(response.status()).isEqualTo(ServiceDetailStatus.COMPLETED);
         verify(attachmentRepository).saveAll(anyList());
-        verify(publisher).publishEvent(any(ParaclinicalResultsReadyEvent.class));
+        verify(outboxWriter).write(eq("VISIT"), any(), any(ParaclinicalResultsReadyEvent.class));
         verify(storage, never()).deleteQuietly(any());
     }
 

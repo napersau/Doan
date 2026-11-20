@@ -1,5 +1,7 @@
 package com.vetclinic.clinical.service.impl;
 
+import com.vetclinic.common.event.DomainEvent;
+import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.clinical.client.AppointmentClient;
 import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.constant.PaymentStatus;
@@ -54,7 +56,6 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -83,6 +84,7 @@ import static com.vetclinic.clinical.testsupport.TestData.service;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.lenient;
@@ -118,7 +120,7 @@ class VisitServiceImplTest {
     @Mock
     private NamedLockService lockService;
     @Mock
-    private ApplicationEventPublisher publisher;
+    private OutboxWriter outboxWriter;
     @Mock
     private TicketIssuer ticketIssuer;
 
@@ -127,7 +129,7 @@ class VisitServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, invoiceRepository, ticketIssuer, publisher, CLOCK);
+                detailHistoryRepository, invoiceRepository, ticketIssuer, outboxWriter, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, mock(LabTestResultRepository.class),
                 mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), invoiceRepository,
                 new VisitTimeline(historyRepository),
@@ -154,7 +156,7 @@ class VisitServiceImplTest {
                 ((Supplier<?>) inv.getArgument(1)).get());
         service = new VisitServiceImpl(visitRepository, petRepository, historyRepository, detailRepository,
                 serviceRepository, authClient, appointmentClient, support, ticketIssuer, assembler,
-                lockService, publisher, CLOCK, tm);
+                lockService, outboxWriter, CLOCK, tm);
     }
 
     @AfterEach
@@ -185,8 +187,8 @@ class VisitServiceImplTest {
         assertThat(history.getToStatus()).isEqualTo(VisitStatus.WAITING);
         assertThat(history.getNotes()).contains("vãng lai").contains("CẤP CỨU");
 
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(event.capture());
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
         VisitCheckedInEvent checkedIn = (VisitCheckedInEvent) event.getValue();
         assertThat(checkedIn.visitId()).isEqualTo(100L);
         assertThat(checkedIn.appointmentId()).isNull();
@@ -206,8 +208,8 @@ class VisitServiceImplTest {
         assertThat(response.petId()).isEqualTo(11L);
         assertThat(response.appointmentId()).isEqualTo(7L);
         assertThat(response.initialSymptoms()).isEqualTo("Khám tổng quát");
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(event.capture());
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
         assertThat(((VisitCheckedInEvent) event.getValue()).appointmentId()).isEqualTo(7L);
     }
 
@@ -299,7 +301,7 @@ class VisitServiceImplTest {
 
         assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(11L, null, null, false, null)));
         verify(visitRepository, never()).saveAndFlush(any());
-        verify(publisher, never()).publishEvent(any(Object.class));
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
     }
 
     @Test
@@ -397,8 +399,8 @@ class VisitServiceImplTest {
         VisitResponse response = service.checkIn(new CheckInRequest(11L, null, null, false, DOCTOR));
 
         assertThat(response.doctorId()).isEqualTo(DOCTOR);
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(event.capture());
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
         assertThat(((VisitCheckedInEvent) event.getValue()).doctorId()).isEqualTo(DOCTOR);
         assertThat(lastHistory().getNotes()).contains("chọn Bác sĩ #" + DOCTOR);   // vào hàng đợi Bác sĩ này khi đã nộp phí khám
     }
@@ -704,7 +706,7 @@ class VisitServiceImplTest {
             assertError(ErrorCode.DIAGNOSIS_REQUIRED, () -> service.closeVisit(100L, new CloseVisitRequest(blank, null, null, null)));
         }
         verify(visitRepository, never()).findByIdForUpdate(any());
-        verify(publisher, never()).publishEvent(any(Object.class));
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
     }
 
     @Test
@@ -723,7 +725,7 @@ class VisitServiceImplTest {
         assertThat(response.locked()).isTrue();
         assertThat(response.diagnosis()).isEqualTo("Viêm dạ dày ruột");
         assertThat(exam.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // hóa đơn của dịch vụ khám giữ PENDING cho thu ngân
-        verify(publisher, never()).publishEvent(any(Object.class));   // v3.0: không còn event "đóng ca" sang billing
+        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));   // v3.0: không còn event "đóng ca" sang billing
     }
 
     @Test
@@ -763,8 +765,8 @@ class VisitServiceImplTest {
 
         assertThat(response.status()).isEqualTo(VisitStatus.COMPLETED);
         assertThat(lastHistory().getChangedByUserId()).isEqualTo(RECEPTIONIST);
-        ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
-        verify(publisher).publishEvent(event.capture());
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
         VisitCompletedEvent completed = (VisitCompletedEvent) event.getValue();
         assertThat(completed.abandoned()).isTrue();
         assertThat(completed.visitId()).isEqualTo(100L);

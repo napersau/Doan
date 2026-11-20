@@ -502,6 +502,29 @@ INSERT INTO lab_test_reference_ranges (lab_test_item_id, species_id, min_value, 
 (4, 2, 300.00, 700.00);
 
 
+-- 17. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 36): sự kiện được ghi cùng giao dịch với nghiệp vụ, OutboxRelay gửi sang RabbitMQ.
+-- clinical phát qua outbox: VisitCheckedInEvent, ParaclinicalResultsReadyEvent, VisitCompletedEvent.
+-- QueueTicketIssuedEvent và PatientCalledEvent gửi thẳng (quyết định D9: thông báo tức thời, mất cũng không sai dữ liệu).
+-- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
+-- (processed_events của clinical sẽ thêm khi clinical bắt đầu NHẬN sự kiện – chưa có listener nào.)
+CREATE TABLE IF NOT EXISTS outbox_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_id BINARY(16) NOT NULL UNIQUE,
+    aggregate_type VARCHAR(50) NOT NULL,
+    aggregate_id VARCHAR(36) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    routing_key VARCHAR(100) NOT NULL,
+    payload JSON NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_at TIMESTAMP NULL
+);
+CREATE INDEX idx_outbox_pending ON outbox_events(status, next_attempt_at, id);
+
+
 -- ==============================================================================
 -- PHẦN 4: PET_CLINIC_BILLING_PHARMACY_DB (BILLING-PHARMACY-SERVICE :8084)
 -- ==============================================================================
