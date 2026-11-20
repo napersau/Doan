@@ -216,7 +216,7 @@ public class VisitServiceImpl implements VisitService {
         if (emergency || !exam.isRequiresPrepayment()) {   // chính sách thu trước đọc từ danh mục, không suy ra từ nhóm dịch vụ
             ticketIssuer.issueForPaidServices(visit, List.of(examDetail), null);
         }
-        // Chỉ được gửi sang RabbitMQ SAU KHI commit (DomainEventRabbitPublisher): appointment-service sẽ chuyển lịch hẹn sang CHECKED_IN
+        // Ghi vào outbox cùng giao dịch; OutboxRelay gửi sang RabbitMQ sau khi commit: appointment-service sẽ chuyển lịch hẹn sang CHECKED_IN
         outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new VisitCheckedInEvent(UuidV7.generate(clock), now, receptionistId, visit.getId(),
                 visit.getVisitCode(), pet.getId(), appointmentId, emergency, doctorId));
         return assembler.detail(visit);   // kèm phí khám vừa lập và phiếu (ca cấp cứu) để màn hình tiếp đón hiển thị

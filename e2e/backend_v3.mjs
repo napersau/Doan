@@ -266,6 +266,22 @@ async function main() {
   check('bác sĩ không thu tiền thuốc (403)', (await call('POST', `${BILL}/medicine-invoices/${mi.data.id}/confirm-payment`, { token: T.doc2 })).status === 403);
   check('không token → 401 SYS_1002', (await call('GET', `${CLIN}/pet-visits/queue`)).code === 'SYS_1002');
 
+  step('I. Transactional Outbox (v4 Phase 1): sự kiện nghiệp vụ đi qua outbox_events và đều được OutboxRelay gửi đi');
+  const outboxDbs = ['pet_clinic_auth_db', 'pet_clinic_appointment_db', 'pet_clinic_clinical_db', 'pet_clinic_billing_pharmacy_db'];
+  const unpublished = () => outboxDbs.reduce((sum, db) => sum + Number(sql(`SELECT COUNT(*) FROM ${db}.outbox_events WHERE status <> 'PUBLISHED'`)), 0);
+  let notPublished = unpublished();
+  for (let i = 0; i < 20 && notPublished > 0; i += 1) { await sleep(1000); notPublished = unpublished(); }   // relay chạy mỗi 500 ms
+  check('cả 4 CSDL của service phát sự kiện đều có bảng outbox_events',
+    Number(sql(`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'outbox_events' AND table_schema IN (${outboxDbs.map((d) => `'${d}'`).join(',')})`)) === 4);
+  check('mọi dòng outbox của luồng chuẩn đều PUBLISHED (không còn PENDING / FAILED)', notPublished === 0, `${notPublished} dòng chưa gửi`);
+  const outboxTypes = sql(['pet_clinic_appointment_db', 'pet_clinic_clinical_db', 'pet_clinic_billing_pharmacy_db']
+    .map((db) => `SELECT event_type FROM ${db}.outbox_events`).join(' UNION ')).split('\n').filter(Boolean).sort();
+  const expectedTypes = ['AppointmentBookedEvent', 'MedicineInvoicePaidEvent', 'MedicineLowStockEvent', 'ParaclinicalResultsReadyEvent', 'VisitCheckedInEvent', 'VisitCompletedEvent'];
+  check('6 loại sự kiện đã đi qua outbox: đặt lịch, tiếp nhận, có kết quả CLS, hoàn tất ca, thu tiền thuốc, tồn kho thấp',
+    expectedTypes.every((type) => outboxTypes.includes(type)), outboxTypes.join(','));
+  check('phiếu xếp hàng và gọi số gửi thẳng, không qua outbox (D9)',
+    Number(sql("SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type IN ('QueueTicketIssuedEvent', 'PatientCalledEvent')")) === 0);
+
   finish();
 }
 

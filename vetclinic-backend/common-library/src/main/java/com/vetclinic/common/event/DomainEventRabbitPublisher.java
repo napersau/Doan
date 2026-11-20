@@ -9,12 +9,15 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Cầu nối "sự kiện nội bộ -> RabbitMQ" chỉ chạy SAU KHI transaction commit.
- * Service nghiệp vụ KHÔNG gọi rabbitTemplate trực tiếp; chỉ cần:
+ * Cầu nối "sự kiện nội bộ -> RabbitMQ" chạy SAU KHI transaction commit, dành cho các sự kiện KHÔNG đi qua outbox.
+ * Từ v4.0 (quyết định D9), mọi sự kiện nghiệp vụ đi qua Transactional Outbox ({@code OutboxWriter}); chỉ còn hai sự kiện thông báo
+ * tức thời được gửi thẳng bằng cách này vì mất cũng không sai dữ liệu (Kiến trúc v4.0 mục 5.2):
+ * {@code QueueTicketIssuedEvent} và {@code PatientCalledEvent} (clinical-service).
  * <pre>
- * eventPublisher.publishEvent(new VisitClosedToPaymentEvent(...)); // trong method @Transactional
+ * eventPublisher.publishEvent(new PatientCalledEvent(...)); // trong method @Transactional
  * </pre>
- * Nếu transaction rollback, sự kiện bị bỏ. Nếu không có transaction (fallbackExecution) thì gửi ngay.
+ * Nếu transaction rollback, sự kiện bị bỏ. Nếu không có transaction (fallbackExecution) thì gửi ngay. Service nghiệp vụ KHÔNG
+ * gọi rabbitTemplate trực tiếp.
  */
 @Slf4j
 @Component

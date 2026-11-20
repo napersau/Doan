@@ -85,7 +85,7 @@ Cấu trúc thư mục: `vetclinic-backend/` (Maven multi-module, parent `spring
 URI prefix (Gateway, Controller, Feign phải khớp): `/api/v1/auth/**` · `/api/v1/appointments/**` · `/api/v1/clinical/**`, `/api/v1/pets/**`, `/api/v1/species/**` · `/api/v1/pharmacy/**`, `/api/v1/billing/**` · `/api/v1/notifications/**`, `/ws/**`. Endpoint nội bộ `/internal/**`: Gateway **không định tuyến** (chặn từ ngoài), service cho qua không cần header.
 
 Thành phần dùng chung trong `common-library` (dùng lại): `ApiResponse`/`PageResponse`, `ErrorCode`/`AppException` + advice bắt lỗi, `CommonSecurityConfig` + `HeaderAuthenticationFilter` + `SecurityUtils`, `RoleCode`, Feign (`FeignClientInterceptor`, `CustomFeignErrorDecoder`), sự kiện (`EventRouting`, record event, `RabbitCommonConfig.durableQueueWithDlq(...)`, `DomainEventRabbitPublisher`), `NamedLockService`.
-- **Phát event:** trong method `@Transactional` chỉ `applicationEventPublisher.publishEvent(new XxxEvent(...))`; `DomainEventRabbitPublisher` gửi RabbitMQ sau commit (`AFTER_COMMIT`). Không gọi `rabbitTemplate` trực tiếp.
+- **Phát event (v4.0, Phase 1):** trong method `@Transactional` gọi `outboxWriter.write("<AGGREGATE>", id, new XxxEvent(UuidV7.generate(clock), ...))` (`@EnableOutbox` trên class Application; `OutboxRelay` gửi RabbitMQ sau commit). Ngoại lệ D9: `QueueTicketIssuedEvent`, `PatientCalledEvent` vẫn `applicationEventPublisher.publishEvent(...)` → `DomainEventRabbitPublisher` (`AFTER_COMMIT`). Không gọi `rabbitTemplate` trực tiếp.
 - **Endpoint public riêng của service:** `vetclinic.security.public-paths` (yml); ở Gateway: `vetclinic.gateway.public-paths`.
 - **Feign khi không có người dùng** (consumer, scheduler): gọi `/internal/**`.
 

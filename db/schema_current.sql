@@ -100,6 +100,26 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
 
+-- 4. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 9): hạ tầng sẵn sàng cho các sự kiện UserProfileUpdatedEvent /
+-- UserStatusChangedEvent của Phase 2; auth-service CHƯA phát sự kiện nào ở thời điểm này nên bảng còn trống.
+-- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
+CREATE TABLE IF NOT EXISTS outbox_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_id BINARY(16) NOT NULL UNIQUE,
+    aggregate_type VARCHAR(50) NOT NULL,
+    aggregate_id VARCHAR(36) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    routing_key VARCHAR(100) NOT NULL,
+    payload JSON NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_at TIMESTAMP NULL
+);
+CREATE INDEX idx_outbox_pending ON outbox_events(status, next_attempt_at, id);
+
 INSERT INTO roles (code, name, description) VALUES
 ('ADMIN', 'Quản trị viên', 'Toàn quyền cấu hình hệ thống, quản lý danh mục và xem báo cáo'),
 ('VETERINARIAN', 'Bác sĩ thú y khám chính', 'Khám lâm sàng, chỉ định xét nghiệm, chẩn đoán xác định và kê đơn'),
