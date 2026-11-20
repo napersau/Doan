@@ -7,6 +7,7 @@ import { appointmentsApi, visitsApi } from '../../api/endpoints';
 import useAction from '../../hooks/useAction';
 import useAsync from '../../hooks/useAsync';
 import { formatTime, todayIso } from '../../lib/format';
+import { idOrNull, sameId } from '../../lib/ids';
 
 /** Chọn bác sĩ ngay lúc tiếp nhận (tùy chọn). Hệ thống gợi ý bác sĩ ít người chờ nhất; không chọn thì ca vào danh sách chờ phân công. */
 function DoctorPick({ value, onChange }) {
@@ -47,7 +48,7 @@ function Appointments({ onDone }) {
   const [doctorId, setDoctorId] = useState('');
   const action = useAction();
   const checkIn = async () => {
-    const visit = await action.run(() => visitsApi.checkIn({ appointmentId: selected.id, isEmergency: emergency, initialSymptoms: symptoms.trim() || null, doctorId: doctorId ? Number(doctorId) : null }));
+    const visit = await action.run(() => visitsApi.checkIn({ appointmentId: selected.id, isEmergency: emergency, initialSymptoms: symptoms.trim() || null, doctorId: idOrNull(doctorId) }));
     if (visit && visit !== true) { onDone(visit); list.refresh(); }
   };
   return <div className="ui-cols">
@@ -56,7 +57,7 @@ function Appointments({ onDone }) {
         {(data) => <Table caption="Lịch hẹn hôm nay" onRowClick={setSelected} rows={data.items} columns={[
           { title: 'Giờ', render: (row) => <strong>{formatTime(row.startTime)}</strong> },
           { title: 'Thú cưng / chủ nuôi', render: (row) => <>{row.petName || `#${row.petId}`}<small>{row.ownerName} · {row.ownerPhone}</small></> },
-          { title: '', align: 'right', render: (row) => <Button className={`small ${selected?.id === row.id ? 'primary' : ''}`} onClick={() => setSelected(row)}>{selected?.id === row.id ? 'Đã chọn' : 'Chọn'}</Button> }]} />}
+          { title: '', align: 'right', render: (row) => <Button className={`small ${sameId(selected?.id, row.id) ? 'primary' : ''}`} onClick={() => setSelected(row)}>{sameId(selected?.id, row.id) ? 'Đã chọn' : 'Chọn'}</Button> }]} />}
       </AsyncView>
     </Panel>
     <Panel title="Thông tin tiếp nhận">
@@ -86,7 +87,7 @@ function WalkIn({ onDone }) {
     else if (!picked.pet) found.pet = 'Chọn hoặc thêm thú cưng.';
     setErrors(found);
     if (Object.keys(found).length) return;
-    const visit = await action.run(() => visitsApi.checkIn({ petId: picked.pet.id, isEmergency: emergency, initialSymptoms: symptoms.trim() || null, doctorId: doctorId ? Number(doctorId) : null }));
+    const visit = await action.run(() => visitsApi.checkIn({ petId: picked.pet.id, isEmergency: emergency, initialSymptoms: symptoms.trim() || null, doctorId: idOrNull(doctorId) }));
     if (visit && visit !== true) onDone(visit);
   };
   return <Panel title="Khách vãng lai" subtitle="Không cần đặt lịch trước. Khách chưa có hồ sơ có thể tạo ngay tại quầy.">

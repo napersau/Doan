@@ -5,6 +5,7 @@ import useDebounced from '../../hooks/useDebounced';
 import { Button, Field, Select, SearchBox } from '../ui';
 import CustomerFormDialog from './CustomerFormDialog';
 import PetFormDialog from './PetFormDialog';
+import { sameId } from '../../lib/ids';
 
 /**
  * Chọn chủ nuôi (tìm theo tên / SĐT) rồi chọn thú cưng của họ; có thể tạo mới ngay tại chỗ.
@@ -39,7 +40,7 @@ export default function OwnerPetPicker({ value, onChange, errors = {} }) {
       <Button className="small" onClick={() => { setKeyword(''); onChange({ owner: null, pet: null }); }}>Đổi chủ nuôi</Button></li></div>}
     {value.owner && <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
       <div style={{ flex: 1, minWidth: 220 }}><Field label="Thú cưng *" error={errors.pet}>
-        <Select value={value.pet?.id || ''} onChange={(event) => onChange({ owner: value.owner, pet: petItems.find((pet) => String(pet.id) === event.target.value) || null })}>
+        <Select value={value.pet?.id || ''} onChange={(event) => onChange({ owner: value.owner, pet: petItems.find((pet) => sameId(pet.id, event.target.value)) || null })}>
           <option value="">{pets.loading ? 'Đang tải…' : petItems.length ? 'Chọn thú cưng' : 'Chưa có thú cưng — hãy thêm mới'}</option>
           {petItems.map((pet) => <option key={pet.id} value={pet.id}>{pet.name} ({pet.speciesName}, {pet.petCode})</option>)}
         </Select></Field></div>

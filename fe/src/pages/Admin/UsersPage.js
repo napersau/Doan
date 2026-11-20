@@ -11,6 +11,7 @@ import useAction from '../../hooks/useAction';
 import useAsync from '../../hooks/useAsync';
 import useDebounced from '../../hooks/useDebounced';
 import { blankToNull, formatDateTime } from '../../lib/format';
+import { sameId } from '../../lib/ids';
 import { ACCOUNT_STATUS } from '../../lib/labels';
 
 const PASSWORD_RULE = /^(?=.*[A-Za-z])(?=.*\d).{8,72}$/;
@@ -115,7 +116,7 @@ export default function UsersPage() {
             { title: 'Tạo lúc', render: (row) => formatDateTime(row.createdAt) },
             { title: 'Trạng thái', render: (row) => <Badge map={ACCOUNT_STATUS} value={row.status} /> },
             { title: '', align: 'right', render: (row) => {
-              const staff = STAFF_ROLES.includes(row.role); const self = String(row.id) === String(me.id);
+              const staff = STAFF_ROLES.includes(row.role); const self = sameId(row.id, me.id);
               return <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
                 {staff && <Button className="small" onClick={() => setDialog({ type: 'edit', user: row })}>Sửa</Button>}
                 {staff && !self && <Button className="small" onClick={() => setDialog({ type: 'role', user: row })}>Đổi vai trò</Button>}

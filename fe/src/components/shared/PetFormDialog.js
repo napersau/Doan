@@ -30,7 +30,7 @@ export default function PetFormDialog({ pet, ownerId, onClose, onSaved }) {
       weight: toNumber(form.weight), neutered: Boolean(form.neutered), identifyingCharacteristics: blankToNull(form.identifyingCharacteristics), notes: blankToNull(form.notes),
     };
     try {
-      const saved = pet ? await petsApi.update(pet.id, body) : await petsApi.create({ ...body, speciesId: Number(form.speciesId), ...(ownerId ? { ownerId: Number(ownerId) } : {}) });
+      const saved = pet ? await petsApi.update(pet.id, body) : await petsApi.create({ ...body, speciesId: form.speciesId, ...(ownerId ? { ownerId } : {}) });
       onSaved(saved);
     } catch (problem) {
       setErrors(mapFieldErrors(problem));

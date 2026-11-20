@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { notificationsApi } from '../api/endpoints';
 import { connectNotifications } from '../api/stomp';
 import { useAuth } from './AuthContext';
+import { sameId } from '../lib/ids';
 
 const NotificationContext = createContext(null);
 const MAX_ITEMS = 100;
@@ -24,7 +25,7 @@ export function NotificationProvider({ children }) {
 
   const push = useCallback((incoming, live) => {
     setItems((current) => {
-      if (current.some((item) => item.id === incoming.id)) return current;
+      if (current.some((item) => sameId(item.id, incoming.id))) return current;
       return [incoming, ...current].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, MAX_ITEMS);
     });
     if (live) {

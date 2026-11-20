@@ -43,7 +43,6 @@ export default function InvoiceDetailPage() {
 
   const reloadAll = () => { visit.refresh(); statement.refresh(); };
   const done = (text) => { setDialog(null); action.setNotice({ type: 'success', text }); reloadAll(); };
-  const chosenIds = Object.entries(selected).filter(([, checked]) => checked).map(([id]) => Number(id));
 
   return <StaffLayout area="reception" title="Thu tiền">
     <AsyncView state={statement}>
@@ -54,7 +53,7 @@ export default function InvoiceDetailPage() {
         const collectable = (invoice) => invoice.paymentStatus === 'PENDING' && status !== 'CANCELLED' && (invoice.requiresPrepayment || closed);
         const pending = st.invoices.filter((invoice) => invoice.paymentStatus === 'PENDING');
         const chosenTotal = pending.filter((invoice) => selected[invoice.id] && collectable(invoice)).reduce((sum, invoice) => sum + Number(invoice.payableAmount), 0);
-        const chosen = chosenIds.filter((id) => pending.some((invoice) => invoice.id === id && collectable(invoice)));
+        const chosen = pending.filter((invoice) => selected[invoice.id] && collectable(invoice)).map((invoice) => invoice.id);
         const waitingInRoom = pending.filter((invoice) => !collectable(invoice));
         return <>
           <PageHead eyebrow="THU NGÂN" title={`Đợt khám ${st.visitCode}`} actions={<><Link className="ui-button" to="/reception/invoices">← Danh sách</Link><Button onClick={() => window.print()}>In bảng kê</Button></>}>
@@ -90,7 +89,7 @@ export default function InvoiceDetailPage() {
             <p className="ui-muted ui-no-print" style={{ marginBottom: 0 }}>Muốn bỏ một khoản: hủy dịch vụ tương ứng (hóa đơn chưa thu tự hủy theo). Phí khám đã nộp không hoàn; tiền XN / CĐHA chỉ hoàn khi phòng khám không thực hiện được.</p>
           </Panel>
 
-          <MedicineSale visitId={Number(visitId)} visitStatus={status} />
+          <MedicineSale visitId={visitId} visitStatus={status} />
 
           {dialog?.type === 'discount' && <DiscountDialog invoice={dialog.invoice} onClose={() => setDialog(null)} onDone={done} />}
           {dialog?.type === 'finish' && <ConfirmDialog title="Hoàn tất ca" confirmLabel="Hoàn tất" onClose={() => setDialog(null)} onConfirm={async () => {

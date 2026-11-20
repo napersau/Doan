@@ -8,6 +8,7 @@ import useAsync from '../../hooks/useAsync';
 import useAction from '../../hooks/useAction';
 import usePolling from '../../hooks/usePolling';
 import { formatDateTime, formatTimeOfInstant } from '../../lib/format';
+import { sameId } from '../../lib/ids';
 import { DOCTOR_STATUS, TICKET_PRIORITY, VISIT_STATUS } from '../../lib/labels';
 
 const waitedMinutes = (instant) => Math.max(0, Math.floor((Date.now() - new Date(instant).getTime()) / 60000));
@@ -25,15 +26,15 @@ function AssignDialog({ visit, doctors, suggestedDoctorId, onClose, onDone }) {
   const change = Boolean(visit.doctorId);
   const submit = async () => {
     if (!doctorId) throw new Error('Chọn bác sĩ phụ trách.');
-    await visitsApi.assignDoctor(visit.id, Number(doctorId));
+    await visitsApi.assignDoctor(visit.id, doctorId);
     onDone(`Đã ${change ? 'đổi bác sĩ' : 'phân công bác sĩ'} cho ${visit.petName} (${visit.visitCode}).`);
   };
   return <FormDialog title={`${change ? 'Đổi bác sĩ' : 'Phân công bác sĩ'} — ${visit.petName}`} onClose={onClose} onSubmit={submit} submitLabel={change ? 'Đổi bác sĩ' : 'Phân công'}>
     <p className="ui-confirm-text">Chọn bác sĩ bất kỳ, kể cả bác sĩ đang khám ca khác — ca (khi đã có phiếu) vào hàng đợi riêng của bác sĩ đó{change ? ', phiếu giữ nguyên số và giờ phát' : ''}. Bác sĩ có ít phiếu chờ nhất được gợi ý.</p>
     <Field label="Bác sĩ *"><select className="ui-input" value={doctorId} onChange={(event) => setDoctorId(event.target.value)} autoFocus>
       <option value="">Chọn bác sĩ</option>
-      {doctors.map((doctor) => <option key={doctor.doctorId} value={doctor.doctorId} disabled={doctor.doctorId === visit.doctorId}>
-        {doctor.fullName} — phòng {doctor.roomNumber || '?'} — {doctor.waitingCount} phiếu chờ{doctor.doctorId === suggestedDoctorId ? ' — gợi ý' : ''}{doctor.doctorId === visit.doctorId ? ' — đang được phân công ca này' : ''}</option>)}
+      {doctors.map((doctor) => <option key={doctor.doctorId} value={doctor.doctorId} disabled={sameId(doctor.doctorId, visit.doctorId)}>
+        {doctor.fullName} — phòng {doctor.roomNumber || '?'} — {doctor.waitingCount} phiếu chờ{sameId(doctor.doctorId, suggestedDoctorId) ? ' — gợi ý' : ''}{sameId(doctor.doctorId, visit.doctorId) ? ' — đang được phân công ca này' : ''}</option>)}
     </select></Field>
   </FormDialog>;
 }
@@ -83,7 +84,7 @@ export default function QueuePage() {
     <Notice notice={action.notice} onClose={action.clear} />
     <AsyncView state={board}>
       {({ board: d, active }) => {
-        const doctorName = (id) => d.doctors.find((doctor) => doctor.doctorId === id)?.fullName || (id ? `#${id}` : '—');
+        const doctorName = (id) => d.doctors.find((doctor) => sameId(doctor.doctorId, id))?.fullName || (id ? `#${id}` : '—');
         const waitingTotal = d.unassigned.length + d.doctors.reduce((sum, doctor) => sum + doctor.waitingCount, 0);
         const emergencies = [...d.unassigned, ...d.doctors.flatMap((doctor) => doctor.visits)].filter((visit) => visit.emergency).length;
         const awaiting = d.awaitingPayment || [];

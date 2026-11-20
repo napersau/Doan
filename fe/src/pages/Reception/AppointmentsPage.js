@@ -21,7 +21,7 @@ function CreateDialog({ onClose, onDone }) {
     if (!picked.owner || !picked.pet) throw new Error('Chọn chủ nuôi và thú cưng.');
     if (!startTime) throw new Error('Chọn khung giờ còn trống.');
     if (!reason.trim()) throw new Error('Nhập lý do khám.');
-    const created = await appointmentsApi.create({ ownerId: Number(picked.owner.id), petId: Number(picked.pet.id), appointmentDate: date, startTime, reason: reason.trim(), bookingChannel: channel });
+    const created = await appointmentsApi.create({ ownerId: picked.owner.id, petId: picked.pet.id, appointmentDate: date, startTime, reason: reason.trim(), bookingChannel: channel });
     onDone(`Đã tạo lịch ${created.appointmentCode} (đã xác nhận).`);
   };
   return <FormDialog title="Đặt lịch hộ khách" onClose={onClose} onSubmit={submit} submitLabel="Tạo lịch hẹn" wide>

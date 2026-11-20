@@ -10,6 +10,7 @@ import useAction from '../../hooks/useAction';
 import useAsync from '../../hooks/useAsync';
 import usePolling from '../../hooks/usePolling';
 import { blankToNull, formatDateTime, formatMoney, formatNumber } from '../../lib/format';
+import { sameId } from '../../lib/ids';
 import { SERVICE_CATEGORY, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
 
 const PARACLINICAL = ['LABORATORY', 'IMAGING'];
@@ -101,11 +102,11 @@ function ServicesTab({ visit, onChanged }) {
   const chosen = (picked) => Object.entries(picked).filter(([, value]) => value.checked);
 
   const orderInRoom = async () => {
-    const services = chosen(inRoomPicked).map(([id, value]) => ({ serviceId: Number(id), quantity: Number(value.quantity) || 1, notes: blankToNull(value.notes) }));
+    const services = chosen(inRoomPicked).map(([id, value]) => ({ serviceId: id, quantity: Number(value.quantity) || 1, notes: blankToNull(value.notes) }));
     if (await action.run(() => visitsApi.inRoomServices(visit.id, services), 'Đã chỉ định dịch vụ tại phòng. Bấm “Đã thực hiện” khi làm xong.')) { setInRoomPicked({}); onChanged(); }
   };
   const orderParaclinical = async () => {
-    const result = await action.run(() => visitsApi.paraclinicalOrders(visit.id, chosen(labPicked).map(([id]) => Number(id)), null));
+    const result = await action.run(() => visitsApi.paraclinicalOrders(visit.id, chosen(labPicked).map(([id]) => id), null));
     if (result) { setLabPicked({}); navigate('/vet/today', { replace: true }); }
   };
   const perform = async (row) => { if (await action.run(() => paraclinicApi.perform(row.id), `Đã ghi nhận thực hiện ${row.serviceName}.`)) onChanged(); };
@@ -169,7 +170,7 @@ function PrescriptionTab({ visit }) {
     if (!items.length) { action.setNotice({ type: 'error', text: 'Chọn ít nhất một loại thuốc.' }); return; }
     if (items.some((line) => !line.dosage.trim() || !line.frequency.trim())) { action.setNotice({ type: 'error', text: 'Mỗi thuốc cần có liều dùng và tần suất.' }); return; }
     if (new Set(items.map((line) => line.medicineId)).size !== items.length) { action.setNotice({ type: 'error', text: 'Mỗi thuốc chỉ một dòng — hãy gộp các dòng trùng.' }); return; }
-    const payload = { doctorNotes: blankToNull(notes), items: items.map((line) => ({ medicineId: Number(line.medicineId), quantity: Number(line.quantity), dosage: line.dosage.trim(), frequency: line.frequency.trim(), durationDays: Number(line.durationDays), instructions: blankToNull(line.instructions) })) };
+    const payload = { doctorNotes: blankToNull(notes), items: items.map((line) => ({ medicineId: line.medicineId, quantity: Number(line.quantity), dosage: line.dosage.trim(), frequency: line.frequency.trim(), durationDays: Number(line.durationDays), instructions: blankToNull(line.instructions) })) };
     const saved = await action.run(() => (current ? pharmacyApi.updatePrescription(current.id, payload) : pharmacyApi.createPrescription({ ...payload, visitId: visit.id })), 'Đã lưu đơn thuốc. Kho chỉ bị trừ khi khách mua tại phòng khám.');
     if (saved && saved !== true) { setWarnings(saved.stockWarnings || []); existing.refresh(); }
   };
@@ -281,7 +282,7 @@ export default function VisitPage() {
   return <StaffLayout area="vet" title="Hồ sơ khám">
     <AsyncView state={visit}>
       {(v) => {
-        const mine = String(v.doctorId) === String(user.id);
+        const mine = sameId(v.doctorId, user.id);
         const hasResults = v.labResults?.length > 0 || v.imagingResults?.length > 0;
         const conclusion = draft || loadDraft(v);
         return <>
