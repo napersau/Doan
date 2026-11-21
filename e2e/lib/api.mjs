@@ -58,6 +58,12 @@ export async function login(username, password = PASSWORD) {
   return res.data;
 }
 
+// ---------- Redis (hàng đợi, bước 6.2) ----------
+/** Chạy một lệnh redis-cli trong container Redis của docker compose (đọc phiếu xếp hàng: ticket:{id}, queue:..., queue:visit:{id}). */
+export function redis(...args) {
+  return execSync(`docker compose exec -T redis redis-cli ${args.join(' ')}`, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+}
+
 // ---------- CSDL ----------
 /** Truy vấn MySQL trong container (đối chiếu VIEW, bất biến kho...). Cần docker compose và .env ở thư mục gốc. */
 export function sql(query) {

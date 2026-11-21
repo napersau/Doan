@@ -18,7 +18,7 @@ public record PatientCalledEvent(
         String visitCode,
         UUID petId,
         UUID doctorId,           // Bác sĩ của hàng đợi (null nếu gọi ở Lab/CĐHA cho ca chưa có bác sĩ)
-        Long ticketId,           // phiếu xếp hàng được gọi (queue_tickets.id)
+        UUID ticketId,           // phiếu xếp hàng được gọi (UUIDv7, ticket:{id} trên Redis)
         Integer ticketNo,        // số in trên phiếu (đánh lại từ 1 mỗi ngày theo loại hàng đợi)
         String roomNumber        // số phòng hiển thị cho khách (users.room_number của bác sĩ/KTV), có thể null
 ) implements DomainEvent {

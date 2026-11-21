@@ -8,7 +8,7 @@ import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.entity.Pet;
 import com.vetclinic.clinical.entity.PetVisit;
-import com.vetclinic.clinical.entity.QueueTicket;
+import com.vetclinic.clinical.queue.TicketView;
 import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.entity.ServicePrice;
 import com.vetclinic.clinical.entity.Species;
@@ -133,13 +133,20 @@ public final class TestData {
                 .quantity(1).status(status).createdAt(createdAt).build();
     }
 
-    /** Phiếu xếp hàng phát lúc 09:00 + id giây (thứ tự phát = thứ tự id). */
-    public static QueueTicket ticket(long id, QueueType type,
-                                                                   long visitId, UUID doctorId, int ticketNo, int priority,
-                                                                   TicketStatus status) {
-        return QueueTicket.builder().id(id).queueType(type)
-                .serviceDate(LocalDate.of(2026, 10, 30)).ticketNo(ticketNo).visitId(lid(visitId)).doctorId(doctorId)
-                .priority(priority).status(status).issuedAt(Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
+    /** UUID cố định của phiếu xếp hàng thử (019a9442-d850-7000-8000-0000000000NN). */
+    public static UUID tid(long n) {
+        return UUID.fromString(String.format("019a9442-d850-7000-8000-%012d", n));
+    }
+
+    /** Phiếu xếp hàng (đọc từ Redis) phát lúc 09:00 + id giây (thứ tự phát = thứ tự id). */
+    public static TicketView ticket(long id, QueueType type, long visitId, UUID doctorId, int ticketNo, int priority, TicketStatus status) {
+        return ticket(id, type, visitId, doctorId, ticketNo, priority, status, List.of());
+    }
+
+    public static TicketView ticket(long id, QueueType type, long visitId, UUID doctorId, int ticketNo, int priority, TicketStatus status,
+                                    List<UUID> vsdIds) {
+        return new TicketView(tid(id), type, LocalDate.of(2026, 10, 30), ticketNo, lid(visitId), doctorId, priority, status,
+                Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id), null, 0, null, null, vsdIds, "Lu", "Hoàng Thị Lan", null);
     }
 
     public static void loginAs(UUID userId, RoleCode role) {

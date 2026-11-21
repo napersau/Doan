@@ -8,7 +8,7 @@ import java.time.Instant;
 
 /** Kết quả thao tác trên một phiếu xếp hàng (Gọi / Gọi số tiếp theo / Bắt đầu): phiếu + ca khám + số phòng của người gọi. */
 public record QueueTicketResponse(
-        Long id,
+        UUID id,
         QueueType queueType,
         int ticketNo,
         int priority,

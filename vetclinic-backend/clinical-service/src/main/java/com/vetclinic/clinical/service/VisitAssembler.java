@@ -3,13 +3,14 @@ package com.vetclinic.clinical.service;
 import java.util.UUID;
 import com.vetclinic.clinical.constant.LabEvaluation;
 import com.vetclinic.clinical.constant.QueueType;
-import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.dto.response.AttachmentResponse;
 import com.vetclinic.clinical.dto.response.ImagingResultResponse;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.MedicalRecordResponse;
 import com.vetclinic.clinical.dto.response.ServiceDetailResponse;
 import com.vetclinic.clinical.dto.response.TicketInfo;
+import com.vetclinic.clinical.queue.QueueCoordinator;
+import com.vetclinic.clinical.queue.TicketView;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.dto.response.VitalSignResponse;
 import com.vetclinic.clinical.entity.ImagingAttachment;
@@ -23,7 +24,6 @@ import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
 import com.vetclinic.clinical.repository.ImagingResultRepository;
 import com.vetclinic.clinical.repository.LabTestResultRepository;
 import com.vetclinic.clinical.repository.MedicalRecordRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.repository.VitalSignRepository;
@@ -53,7 +53,7 @@ public class VisitAssembler {
     private final ImagingAttachmentRepository attachmentRepository;
     private final ServiceInvoiceRepository invoiceRepository;
     private final VisitTimeline timeline;
-    private final QueueTicketRepository ticketRepository;
+    private final QueueCoordinator queue;
     private final VitalSignRepository vitalSignRepository;
     private final MedicalRecordRepository medicalRecordRepository;
 
@@ -87,9 +87,7 @@ public class VisitAssembler {
                 labs,
                 imagingResults.stream().map(r -> toImaging(r, attachments.getOrDefault(r.getId(), List.of()))).toList())
                 // Phiếu DOCTOR còn hiệu lực (nếu có): giao diện hồ sơ ca hiện số phiếu, Bác sĩ chỉ "Bắt đầu" được khi có phiếu
-                .withTicket(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatusIn(visit.getId(),
-                                QueueType.DOCTOR, TicketStatus.ACTIVE)
-                        .map(TicketInfo::of).orElse(null))
+                .withTicket(doctorTicketOf(visit.getId()))
                 .withClinical(vitalSignRepository.findByVisitIdOrderByRecordedAtAscIdAsc(visit.getId()).stream()
                                 .map(VitalSignResponse::of).toList(),
                         medicalRecordRepository.findById(visit.getId())
@@ -156,5 +154,17 @@ public class VisitAssembler {
                 v.getReceptionistId(), null, v.isEmergency(), v.getStatus(), isLocked(v.getStatus()), null,
                 v.getReasonForVisit(), times.cancelReason(), v.getCheckedInAt(), times.startedAt(),
                 times.closedAt(), times.completedAt(), services, labs, imaging, null, null);
+    }
+
+    /**
+     * Phiếu DOCTOR còn hiệu lực lấy từ Redis. Redis chưa sẵn sàng thì BỎ QUA phiếu (null) chứ không làm hỏng việc xem hồ sơ ca: hồ sơ vẫn đọc được
+     * từ MySQL khi hàng đợi gặp sự cố (EX-18).
+     */
+    private TicketInfo doctorTicketOf(java.util.UUID visitId) {
+        try {
+            return queue.activeDoctorTicket(visitId).map(TicketView::info).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 }

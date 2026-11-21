@@ -16,6 +16,8 @@ import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
+import com.vetclinic.common.event.ServiceInvoiceRefundedEvent;
+import com.vetclinic.common.security.SecurityUtils;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.clinical.constant.PaymentStatus;
@@ -53,7 +55,6 @@ public class VisitSupport {
     private final VisitServiceDetailRepository detailRepository;
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
     private final ServiceInvoiceRepository invoiceRepository;
-    private final TicketIssuer ticketIssuer;
     private final ServicePriceBook priceBook;
     private final OutboxWriter outboxWriter;
     private final Clock clock;
@@ -148,10 +149,42 @@ public class VisitSupport {
                     }
                     invoice.setPaymentStatus(PaymentStatus.REFUNDED);
                     invoiceRepository.save(invoice);
+                    // reporting ghi dòng hoàn tiền (âm) vào doanh thu: sự kiện đi qua outbox cùng giao dịch hủy dịch vụ
+                    ClinicService service = detail.getService();
+                    String visitCode = visitRepository.findById(detail.getVisitId()).map(PetVisit::getVisitCode).orElse(null);
+                    outboxWriter.write(OUTBOX_AGGREGATE, detail.getVisitId(), new ServiceInvoiceRefundedEvent(UuidV7.generate(clock), clock.instant(),
+                            currentUserOrNull(), detail.getVisitId(), visitCode, invoice.getId(), invoice.getInvoiceCode(), detail.getId(), service.getId(),
+                            service.getName(), service.getCategory().getCode(), InvoiceAmounts.payable(detail.getQuantity(), invoice.getUnitPrice(),
+                            invoice.getVatRate(), invoice.getDiscountAmount()), "Phòng khám không thực hiện được dịch vụ"));
                 }
                 default -> { }   // đã CANCELLED / REFUNDED: không đổi
             }
         });
+    }
+
+    private static UUID currentUserOrNull() {
+        try {
+            return SecurityUtils.getCurrentUserId();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Ca WAITING còn hóa đơn phí khám PENDING (chưa nộp phí khám, không phải cấp cứu): mục "chờ thu phí khám" của bảng điều phối. Đọc từ MySQL (nguồn sự thật),
+     * không dựa vào việc đã có phiếu trên Redis hay chưa: phiếu phát sau khi thu tiền vài trăm ms, và Redis có thể đang sự cố.
+     */
+    public java.util.Set<UUID> visitsAwaitingExamFee(Collection<PetVisit> visits) {
+        List<UUID> ids = visits.stream().filter(v -> !v.isEmergency()).map(PetVisit::getId).toList();
+        if (ids.isEmpty()) {
+            return java.util.Set.of();
+        }
+        List<VisitServiceDetail> details = detailRepository.findByVisitIdInOrderByIdAsc(ids);
+        Map<UUID, ServiceInvoice> invoices = invoicesOf(details.stream().map(VisitServiceDetail::getId).toList());
+        return details.stream()
+                .filter(d -> d.getStatus() == ServiceDetailStatus.PENDING && d.getService().getCategory().is(ServiceCategory.EXAMINATION))
+                .filter(d -> invoices.containsKey(d.getId()) && invoices.get(d.getId()).getPaymentStatus() == PaymentStatus.PENDING)
+                .map(VisitServiceDetail::getVisitId).collect(Collectors.toSet());
     }
 
     /**
@@ -205,8 +238,7 @@ public class VisitSupport {
         UUID doctorId = visit.getDoctorId();
         transition(visit, VisitStatus.RESULTS_READY, null,
                 "Đã có đủ kết quả cận lâm sàng: hệ thống tự chuyển và phát phiếu ưu tiên vào hàng đợi Bác sĩ");
-        // Phiếu phòng còn chờ (dịch vụ đã bị hủy hết) đóng lại; phiếu DOCTOR ưu tiên mới cho Bác sĩ khám chính
-        ticketIssuer.issueResultsReady(visit);
+        // Phiếu DOCTOR ưu tiên (priority 1) do QueueIssuerListener phát khi nhận ParaclinicalResultsReadyEvent bên dưới; phiếu phòng đã đóng ở refreshRoomTicketOf
         UUID petId = visit.getPet().getId();
         outboxWriter.write(OUTBOX_AGGREGATE, visit.getId(), new ParaclinicalResultsReadyEvent(UuidV7.generate(clock), clock.instant(), null,
                 visit.getId(), visit.getVisitCode(), doctorId, petId));

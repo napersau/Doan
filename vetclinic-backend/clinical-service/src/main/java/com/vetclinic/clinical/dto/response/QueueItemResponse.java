@@ -32,7 +32,7 @@ public record QueueItemResponse(
         String labStatus,
         String notes,
         Instant orderedAt,
-        Long ticketId,
+        UUID ticketId,
         int ticketNo,
         int ticketPriority,
         TicketStatus ticketStatus,

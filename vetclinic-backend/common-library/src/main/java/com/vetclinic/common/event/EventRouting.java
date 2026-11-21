@@ -30,6 +30,10 @@ public final class EventRouting {
     public static final String PET_UPDATED = "pet.updated";
     // Thêm 21/11/2026 (v4.0, bước 5.2): chốt ca có đơn thuốc -> billing tạo hóa đơn thuốc nháp
     public static final String PRESCRIPTION_CREATED = "prescription.created";
+    // Thêm 21/11/2026 (v4.0, bước 6.2): thu tiền / hoàn tiền dịch vụ -> phát phiếu xếp hàng, báo cáo; hủy ca
+    public static final String INVOICE_SERVICE_PAID = "invoice.service_paid";
+    public static final String INVOICE_SERVICE_REFUNDED = "invoice.service_refunded";
+    public static final String VISIT_CANCELLED = "visit.cancelled";
 
     public static String queueName(String serviceName, String routingKey) {
         return serviceName + "." + routingKey;

@@ -32,8 +32,17 @@ export default function InvoiceDetailPage() {
   const statement = useAsync(() => visitsApi.serviceInvoices(visitId), [visitId]);
   const [selected, setSelected] = useState({});
   const [dialog, setDialog] = useState(null);
+  const [issuing, setIssuing] = useState(null);   // { before: số phiếu đã có lúc thu, until: hạn chờ }: phiếu phát SAU khi thu tiền (qua sự kiện, thường dưới 1 giây)
   const action = useAction();
   const data = statement.data;
+
+  // Hàng đợi chạy trên Redis: thu tiền chỉ ghi hóa đơn + sự kiện, phiếu xuất hiện ngay sau đó. Tải lại bảng kê cho tới khi thấy phiếu mới (tối đa 20 giây).
+  useEffect(() => {
+    if (!issuing) return undefined;
+    if ((data?.tickets?.length || 0) > issuing.before || Date.now() > issuing.until) { setIssuing(null); return undefined; }
+    const timer = setInterval(() => statement.refresh(), 1500);
+    return () => clearInterval(timer);
+  }, [issuing, data, statement]);
 
   // Mặc định chọn mọi hóa đơn đang chờ thu; giữ lựa chọn của thu ngân khi dữ liệu làm mới
   useEffect(() => {
@@ -60,6 +69,7 @@ export default function InvoiceDetailPage() {
             {visit.data ? `${visit.data.petName} (${visit.data.speciesName})` : ''}{visit.data?.checkedInAt ? ` · Tiếp nhận ${formatDateTime(visit.data.checkedInAt)}` : ''}
           </PageHead>
           <Notice notice={action.notice} onClose={action.clear} />
+          {issuing && <div className="ui-alert" role="status"><span>Đã thu tiền. Đang cấp số thứ tự…</span></div>}
           {st.tickets?.length > 0 && <Panel title="Phiếu xếp hàng của ca" subtitle="In / đọc số cho khách. Khách chờ gọi số tại phòng tương ứng.">
             <div className="ui-actions">{st.tickets.map((ticket) => <div key={ticket.id} className="ui-ticket-card">
               <small>{QUEUE_TYPE[ticket.queueType]}</small><strong>Số {ticket.ticketNo}</strong>
@@ -100,8 +110,12 @@ export default function InvoiceDetailPage() {
             const before = new Set((st.tickets || []).map((ticket) => ticket.id));
             const result = await visitsApi.confirmServicePayment(visitId, chosen);
             const issued = (result?.tickets || []).filter((ticket) => !before.has(ticket.id));
+            // Phiếu phát sau khi thu tiền (sự kiện + Redis): chưa thấy phiếu mới thì hiển thị "Đang cấp số thứ tự…" và tải lại tới khi có
+            const expectsTicket = pending.some((invoice) => chosen.includes(invoice.id) && invoice.requiresPrepayment);
+            if (expectsTicket && !issued.length) setIssuing({ before: before.size, until: Date.now() + 20000 });
             done(result?.visitStatus === 'COMPLETED' && status === 'WAITING_PAYMENT' ? 'Đã thu tiền. Mọi hóa đơn dịch vụ đã xử lý xong — ca khám hoàn tất.'
-              : issued.length ? `Đã thu tiền và phát phiếu: ${issued.map((ticket) => `${QUEUE_TYPE[ticket.queueType]} số ${ticket.ticketNo}`).join(', ')}.` : 'Đã ghi nhận thanh toán.');
+              : issued.length ? `Đã thu tiền và phát phiếu: ${issued.map((ticket) => `${QUEUE_TYPE[ticket.queueType]} số ${ticket.ticketNo}`).join(', ')}.`
+                : expectsTicket ? 'Đã thu tiền. Hệ thống đang cấp số thứ tự…' : 'Đã ghi nhận thanh toán.');
           }}>
             Thu <strong>{formatMoney(chosenTotal)}</strong> cho {chosen.length} hóa đơn dịch vụ. Không thể hoàn tác sau khi xác nhận.</ConfirmDialog>}
         </>;

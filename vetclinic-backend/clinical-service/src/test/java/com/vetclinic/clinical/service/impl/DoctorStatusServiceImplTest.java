@@ -6,13 +6,14 @@ import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.DoctorStatusResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.repository.PetVisitRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
+import com.vetclinic.clinical.queue.QueueRedisRepository;
+import com.vetclinic.clinical.constant.QueueType;
+import org.junit.jupiter.api.BeforeEach;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -32,11 +33,15 @@ class DoctorStatusServiceImplTest {
     @Mock
     private PetVisitRepository visitRepository;
     @Mock
-    private QueueTicketRepository ticketRepository;
+    private QueueRedisRepository redis;
     @Mock
     private AuthClient authClient;
-    @InjectMocks
     private DoctorStatusServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        service = new DoctorStatusServiceImpl(visitRepository, redis, authClient, com.vetclinic.clinical.testsupport.TestData.CLOCK);
+    }
 
     @Test
     void statusOf_isBusyWhenExaminingAPatient() {
@@ -77,8 +82,10 @@ class DoctorStatusServiceImplTest {
         when(authClient.getActiveDoctors()).thenReturn(ApiResponse.success(List.of(
                 doctor(1L, "BS A", "P01"), doctor(2L, "BS B", "P02"), doctor(3L, "BS C", "P03"))));
         when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS))).thenReturn(Set.of(uid(1)));
-        when(ticketRepository.countWaitingByDoctor())   // số phiếu DOCTOR đang chờ
-               .thenReturn(List.of(new Object[]{uid(1), 2L}, new Object[]{uid(2), 3L}));
+        java.time.LocalDate today = java.time.LocalDate.of(2026, 10, 30);   // CLOCK cố định 30/10/2026
+        when(redis.waitingCount(today, QueueType.DOCTOR, uid(1))).thenReturn(2L);   // ZCARD số phiếu DOCTOR đang chờ
+        when(redis.waitingCount(today, QueueType.DOCTOR, uid(2))).thenReturn(3L);
+        when(redis.waitingCount(today, QueueType.DOCTOR, uid(3))).thenReturn(0L);
 
         List<DoctorStatusResponse> board = service.board();
 

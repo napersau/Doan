@@ -16,12 +16,10 @@ import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.dto.response.QueueItemResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.entity.PetVisitStatusHistory;
-import com.vetclinic.clinical.entity.QueueTicket;
-import com.vetclinic.clinical.entity.QueueTicketItem;
-import com.vetclinic.clinical.repository.QueueTicketItemRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
+import com.vetclinic.clinical.queue.QueueCoordinator;
+import com.vetclinic.clinical.queue.QueueRedisRepository;
+import com.vetclinic.clinical.queue.TicketView;
 import com.vetclinic.clinical.repository.ServiceLabTestItemRepository;
-import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.testsupport.TestData;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.PatientCalledEvent;
@@ -137,11 +135,9 @@ class ParaclinicServiceImplTest {
     @Mock
     private OutboxWriter outboxWriter;
     @Mock
-    private QueueTicketRepository ticketRepository;
+    private QueueRedisRepository redis;
     @Mock
-    private QueueTicketItemRepository ticketItemRepository;
-    @Mock
-    private TicketIssuer ticketIssuer;
+    private QueueCoordinator ticketIssuer;   // phiếu xếp hàng (QueueCoordinator, bước 6.2)
 
     private ParaclinicServiceImpl service;
     private final FileUrlSigner urlSigner = new FileUrlSigner(new com.vetclinic.clinical.config.StorageProperties("./uploads",
@@ -150,14 +146,13 @@ class ParaclinicServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, invoiceRepository, ticketIssuer, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
+                detailHistoryRepository, invoiceRepository, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, labResultRepository, imagingResultRepository,
-                attachmentRepository, invoiceRepository, new VisitTimeline(historyRepository), ticketRepository,
+                attachmentRepository, invoiceRepository, new VisitTimeline(historyRepository), ticketIssuer,
                 mock(com.vetclinic.clinical.repository.VitalSignRepository.class), mock(com.vetclinic.clinical.repository.MedicalRecordRepository.class));
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new ParaclinicServiceImpl(detailRepository, detailHistoryRepository, ticketRepository, ticketItemRepository,
-                ticketIssuer, visitRepository,
+        service = new ParaclinicServiceImpl(detailRepository, detailHistoryRepository, redis, ticketIssuer, CLOCK, visitRepository,
                 labTestItemRepository, rangeRepository, serviceLabItemRepository, labResultRepository, imagingResultRepository,
                 attachmentRepository, support, assembler, storage, urlSigner, tm);
     }
@@ -169,16 +164,12 @@ class ParaclinicServiceImplTest {
 
     // ================================================================== hàng đợi (phiếu xếp hàng, 17/11/2026)
 
-    private static QueueTicket ticket(long id, QueueType type,
-                                                                    long visitId, int no, int priority,
-                                                                    TicketStatus status) {
-        return QueueTicket.builder().id(id).queueType(type).serviceDate(LocalDate.of(2026, 10, 30))
-                .ticketNo(no).visitId(lid(visitId)).priority(priority).status(status)
-                .issuedAt(Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
-    }
+    private static final LocalDate TODAY = LocalDate.of(2026, 10, 30);   // CLOCK cố định
 
-    private static QueueTicketItem item(long ticketId, long detailId) {
-        return QueueTicketItem.of(ticketId, lid(detailId));
+    /** Phiếu phòng đọc từ Redis, chứa các dịch vụ {@code detailIds} (vsdIds trong Hash phiếu). */
+    private static TicketView ticket(long id, QueueType type, long visitId, int no, int priority, TicketStatus status, long... detailIds) {
+        return com.vetclinic.clinical.testsupport.TestData.ticket(id, type, visitId, null, no, priority, status,
+                java.util.Arrays.stream(detailIds).mapToObj(com.vetclinic.clinical.testsupport.TestData::lid).toList());
     }
 
     @Test
@@ -195,13 +186,12 @@ class ParaclinicServiceImplTest {
 
         var lab = QueueType.LABORATORY;
         var waiting = TicketStatus.WAITING;
-        // Thứ tự do truy vấn phiếu quyết định (priority DESC, issued_at, id): service giữ nguyên, không tự sắp lại
-        when(ticketRepository.findRoomQueue(lab, TicketStatus.ACTIVE)).thenReturn(List.of(
-                ticket(71L, lab, 11L, 2, 2, waiting),
-                ticket(70L, lab, 10L, 1, 0, TicketStatus.IN_SERVICE),
-                ticket(72L, lab, 12L, 3, 0, waiting)));
-        when(ticketItemRepository.findByTicketIdIn(anyCollection())).thenReturn(List.of(
-                item(70L, 1L), item(71L, 2L), item(72L, 3L), item(72L, 4L)));
+        // Phiếu CHỜ từ Sorted Set của Redis; phiếu ĐANG PHỤC VỤ (đã rời Sorted Set) tìm qua dịch vụ đang thực hiện của phòng; gộp rồi sắp priority DESC, giờ phát
+        when(redis.waitingViews(TODAY, lab, null)).thenReturn(List.of(
+                ticket(71L, lab, 11L, 2, 2, waiting, 2L),
+                ticket(72L, lab, 12L, 3, 0, waiting, 3L, 4L)));
+        when(detailRepository.findInProgressByQueueType("LABORATORY")).thenReturn(List.of(d1));
+        when(ticketIssuer.openTicketsOf(lid(10L))).thenReturn(List.of(ticket(70L, lab, 10L, 1, 0, TicketStatus.IN_SERVICE, 1L)));
         when(detailRepository.findAllById(anyCollection())).thenReturn(List.of(d1, d2, d3, d4));
         when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(normal, emergency, other));
         when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(d1, d2, d3, d4));
@@ -214,7 +204,7 @@ class ParaclinicServiceImplTest {
 
         assertThat(queue).extracting(QueueItemResponse::serviceDetailId).containsExactly(lid(2L), lid(1L), lid(3L));
         assertThat(queue).extracting(QueueItemResponse::ticketNo).containsExactly(2, 1, 3);
-        assertThat(queue).extracting(QueueItemResponse::ticketId).containsExactly(71L, 70L, 72L);
+        assertThat(queue).extracting(QueueItemResponse::ticketId).containsExactly(com.vetclinic.clinical.testsupport.TestData.tid(71L), com.vetclinic.clinical.testsupport.TestData.tid(70L), com.vetclinic.clinical.testsupport.TestData.tid(72L));
         assertThat(queue.get(0).emergency()).isTrue();
         assertThat(queue.get(0).ticketPriority()).isEqualTo(2);
         assertThat(queue).extracting(QueueItemResponse::stage).containsExactly("QUEUED", "ANALYZING", "QUEUED");
@@ -223,8 +213,7 @@ class ParaclinicServiceImplTest {
 
     @Test
     void queue_isEmptyWhenNoTicketHasBeenIssued_unpaidServicesNeverShowUp() {
-        when(ticketRepository.findRoomQueue(QueueType.IMAGING,
-                TicketStatus.ACTIVE)).thenReturn(List.of());
+        when(redis.waitingViews(TODAY, QueueType.IMAGING, null)).thenReturn(List.of());
         assertThat(service.queue(QueueType.IMAGING)).isEmpty();
         verify(detailRepository, never()).findAllById(anyCollection());
     }
@@ -246,9 +235,8 @@ class ParaclinicServiceImplTest {
         VisitServiceDetail lab2 = detail(5L, 11L, CBC, ServiceDetailStatus.IN_PROGRESS);
         var img = QueueType.IMAGING;
         var waiting = TicketStatus.WAITING;
-        when(ticketRepository.findRoomQueue(img, TicketStatus.ACTIVE)).thenReturn(List.of(
-                ticket(80L, img, 10L, 1, 0, waiting), ticket(81L, img, 11L, 2, 0, waiting), ticket(82L, img, 12L, 3, 0, waiting)));
-        when(ticketItemRepository.findByTicketIdIn(anyCollection())).thenReturn(List.of(item(80L, 1L), item(81L, 2L), item(82L, 3L)));
+        when(redis.waitingViews(TODAY, img, null)).thenReturn(List.of(
+                ticket(80L, img, 10L, 1, 0, waiting, 1L), ticket(81L, img, 11L, 2, 0, waiting, 2L), ticket(82L, img, 12L, 3, 0, waiting, 3L)));
         when(detailRepository.findAllById(anyCollection())).thenReturn(List.of(img1, img2, img3));
         when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(sampling, collected, noLab));
         when(detailRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(img1, img2, img3, lab1, lab2));
@@ -532,8 +520,8 @@ class ParaclinicServiceImplTest {
         service.submitLabResults(lid(1L), new LabResultRequest(List.of(new LabResultItemRequest((short) 1, new BigDecimal("10.00"), null))));
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.RESULTS_READY);
-        verify(ticketIssuer).refreshRoomTicketOf(lid(1L));       // phiếu phòng Lab -> DONE
-        verify(ticketIssuer).issueResultsReady(visit);      // phiếu DOCTOR priority 1, không thu tiền
+        verify(ticketIssuer).refreshRoomTicketOf(lid(100L), lid(1L));       // phiếu phòng Lab -> DONE
+        // phiếu DOCTOR priority 1 do QueueIssuerListener phát khi nhận ParaclinicalResultsReadyEvent (đã ghi vào outbox ở dòng trên)
     }
 
     @Test
@@ -663,7 +651,7 @@ class ParaclinicServiceImplTest {
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.CANCELLED);
         assertThat(paid.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);   // khách tự hủy: không hoàn tiền
         verify(invoiceRepository, never()).save(paid);
-        verify(ticketIssuer).refreshRoomTicketOf(lid(1L));
+        verify(ticketIssuer).refreshRoomTicketOf(lid(100L), lid(1L));
     }
 
     @Test

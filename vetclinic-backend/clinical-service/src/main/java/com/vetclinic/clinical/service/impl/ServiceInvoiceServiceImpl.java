@@ -1,36 +1,33 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.constant.PaymentStatus;
-import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
-import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.InvoiceStatementResponse;
 import com.vetclinic.clinical.dto.response.ServiceInvoiceResponse;
 import com.vetclinic.clinical.dto.response.TicketInfo;
+import com.vetclinic.clinical.queue.QueueCoordinator;
+import com.vetclinic.clinical.queue.TicketView;
+import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.entity.PetVisit;
-import com.vetclinic.clinical.entity.QueueTicket;
 import com.vetclinic.clinical.entity.ServiceInvoice;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.repository.PetVisitRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.service.InvoiceAmounts;
 import com.vetclinic.clinical.service.ServiceInvoiceService;
-import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.common.util.UuidV7;
+import com.vetclinic.common.event.ServiceInvoicePaidEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.SecurityUtils;
-import java.util.concurrent.ThreadLocalRandom;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,32 +48,26 @@ import java.util.stream.Collectors;
 @Service
 public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
 
-    /** Hai quầy thu cùng lúc có thể tính trùng số phiếu (MAX + 1): UNIQUE chặn lại, thử lại tối đa chừng này lần. */
-    /** Số lần thử khi nhiều quầy cùng phát một số phiếu (mỗi lần thua chỉ có một người thắng, nên cần nhiều hơn số quầy). */
-    static final int MAX_TICKET_ATTEMPTS = 8;
-
     private final PetVisitRepository visitRepository;
     private final VisitServiceDetailRepository detailRepository;
     private final ServiceInvoiceRepository invoiceRepository;
-    private final QueueTicketRepository ticketRepository;
     private final VisitSupport support;
-    private final TicketIssuer ticketIssuer;
+    private final QueueCoordinator queue;
     private final VisitAssembler assembler;
     private final OutboxWriter outboxWriter;
     private final Clock clock;
     private final TransactionTemplate tx;
 
     public ServiceInvoiceServiceImpl(PetVisitRepository visitRepository, VisitServiceDetailRepository detailRepository,
-                                     ServiceInvoiceRepository invoiceRepository, QueueTicketRepository ticketRepository,
-                                     VisitSupport support, TicketIssuer ticketIssuer, VisitAssembler assembler,
+                                     ServiceInvoiceRepository invoiceRepository,
+                                     VisitSupport support, QueueCoordinator queue, VisitAssembler assembler,
                                      OutboxWriter outboxWriter, Clock clock,
                                      PlatformTransactionManager transactionManager) {
         this.visitRepository = visitRepository;
         this.detailRepository = detailRepository;
         this.invoiceRepository = invoiceRepository;
-        this.ticketRepository = ticketRepository;
         this.support = support;
-        this.ticketIssuer = ticketIssuer;
+        this.queue = queue;
         this.assembler = assembler;
         this.outboxWriter = outboxWriter;
         this.clock = clock;
@@ -99,10 +90,21 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
                 .filter(d -> invoices.containsKey(d.getId()))
                 .map(d -> toResponse(invoices.get(d.getId()), d))
                 .toList();
-        List<TicketInfo> tickets = ticketRepository.findByVisitIdAndStatusIn(visit.getId(), TicketStatus.ACTIVE).stream()
-                .map(TicketInfo::of).toList();
+        List<TicketInfo> tickets = ticketsOf(visit.getId());
         return new InvoiceStatementResponse(visit.getId(), visit.getVisitCode(), visit.getStatus(), items,
                 sum(items, PaymentStatus.PENDING), sum(items, PaymentStatus.PAID), sum(items, PaymentStatus.REFUNDED), tickets);
+    }
+
+    /**
+     * Phiếu đang mở của ca, đọc từ Redis. Phiếu phát SAU khi thu tiền (qua sự kiện, thường dưới 1 giây) nên ngay sau khi thu có thể chưa thấy; màn hình
+     * hiển thị "Đang cấp số thứ tự…" rồi tải lại. Redis lỗi thì trả rỗng chứ không làm hỏng bảng kê hóa đơn (hóa đơn nằm ở MySQL).
+     */
+    private List<TicketInfo> ticketsOf(UUID visitId) {
+        try {
+            return queue.openTicketsOf(visitId).stream().map(TicketView::info).toList();
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     private static BigDecimal sum(List<ServiceInvoiceResponse> items, PaymentStatus status) {
@@ -159,36 +161,13 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
     // ================================================================== thu tiền + phát phiếu + hoàn tất ca (T10) trong MỘT giao dịch
 
     /**
-     * KHÔNG @Transactional: chạy giao dịch trong TransactionTemplate để thử lại khi hai quầy thu cùng lúc tính trùng số phiếu
-     * (UNIQUE queue_type, service_date, ticket_no). Mỗi lần thử là một giao dịch mới, lần trước đã rollback toàn bộ.
+     * Giao dịch chỉ ghi hóa đơn PAID + outbox {@code ServiceInvoicePaidEvent} (và hoàn tất ca nếu hết khoản chờ). KHÔNG phát phiếu ở đây: số phiếu do Redis
+     * cấp bằng {@code INCR} nên hai quầy thu cùng lúc không còn tranh số (không còn vòng thử lại); {@code QueueIssuerListener} phát phiếu khi nhận sự kiện.
      */
     @Override
     public InvoiceStatementResponse confirmPayment(UUID visitId, List<UUID> invoiceIds) {
         UUID cashierId = SecurityUtils.getCurrentUserId();
-        for (int attempt = 1; ; attempt++) {
-            try {
-                return tx.execute(s -> doConfirmPayment(visitId, invoiceIds, cashierId));
-            } catch (DataIntegrityViolationException e) {
-                if (attempt >= MAX_TICKET_ATTEMPTS || !isTicketNumberClash(e)) {
-                    throw e;
-                }
-                backOff(attempt);
-            }
-        }
-    }
-
-    /** Chờ ngẫu nhiên tăng dần trước khi thử lại, để các quầy đang tranh cùng một số phiếu tách nhau ra. */
-    static void backOff(int attempt) {
-        try {
-            Thread.sleep(ThreadLocalRandom.current().nextLong(5, 20L * attempt));
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    static boolean isTicketNumberClash(DataIntegrityViolationException e) {
-        String message = e.getMostSpecificCause().getMessage();
-        return message != null && message.contains("uq_qt_number");
+        return tx.execute(s -> doConfirmPayment(visitId, invoiceIds, cashierId));
     }
 
     private InvoiceStatementResponse doConfirmPayment(UUID visitId, List<UUID> invoiceIds, UUID cashierId) {
@@ -224,7 +203,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
             }
         }
         var now = clock.instant();
-        List<VisitServiceDetail> prepaidJustPaid = new ArrayList<>();
+        List<ServiceInvoicePaidEvent.Line> paidLines = new ArrayList<>();
         for (UUID id : wanted) {
             ServiceInvoice invoice = byInvoiceId.get(id);
             invoice.setPaymentStatus(PaymentStatus.PAID);
@@ -232,12 +211,14 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
             invoice.setPaidAt(now);
             invoiceRepository.saveAndFlush(invoice);   // @Version chống thu trùng
             VisitServiceDetail detail = detailById.get(invoice.getVisitServiceDetailId());
-            if (detail.getService().isRequiresPrepayment()) {
-                prepaidJustPaid.add(detail);
-            }
+            paidLines.add(lineOf(invoice, detail));
         }
-        // Q1: thu tiền xong thì phát phiếu xếp hàng, cùng giao dịch: phí khám -> phiếu DOCTOR; XN / CĐHA -> phiếu phòng
-        ticketIssuer.issueForPaidServices(visit, prepaidJustPaid, cashierId);
+        if (!paidLines.isEmpty()) {
+            // Q1 (v4.0): thu tiền xong thì sự kiện đi qua outbox CÙNG giao dịch; QueueIssuerListener phát phiếu: phí khám -> DOCTOR; XN / CĐHA -> phiếu phòng
+            outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new ServiceInvoicePaidEvent(UuidV7.generate(clock), now, cashierId,
+                    visit.getId(), visit.getVisitCode(), visit.getPet().getId(), visit.getPet().getName(), visit.getPet().getOwnerNameSnapshot(),
+                    visit.getDoctorId(), visit.isEmergency(), cashierId, now, paidLines));
+        }
 
         boolean anyPending = byInvoiceId.values().stream().anyMatch(i -> i.getPaymentStatus() == PaymentStatus.PENDING);
         if (!anyPending && visit.getStatus() == VisitStatus.WAITING_PAYMENT) {
@@ -247,6 +228,15 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
                     visit.getVisitCode(), visit.getPet().getId(), false));
         }
         return buildStatement(visit);
+    }
+
+    private static ServiceInvoicePaidEvent.Line lineOf(ServiceInvoice invoice, VisitServiceDetail detail) {
+        ClinicService service = detail.getService();
+        var queueType = service.getCategory().queueTypeOrNull();
+        return new ServiceInvoicePaidEvent.Line(invoice.getId(), invoice.getInvoiceCode(), detail.getId(), service.getId(), service.getCode(),
+                service.getName(), service.getCategory().getCode(), queueType == null ? null : queueType.name(), detail.getQuantity(),
+                invoice.getUnitPrice(), invoice.getVatRate(), invoice.getDiscountAmount(),
+                InvoiceAmounts.payable(detail.getQuantity(), invoice.getUnitPrice(), invoice.getVatRate(), invoice.getDiscountAmount()));
     }
 
     // ================================================================== màn hình Thu ngân (3 mục)
@@ -263,16 +253,16 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
             return assembler.summaries(visits);
         }
         List<UUID> ids = visits.stream().map(PetVisit::getId).toList();
+        // Ca cấp cứu khám trước, thu sau: không nằm ở mục "chờ nộp phí khám" (đã có phiếu ngay khi tiếp đón)
+        Set<UUID> emergency = visits.stream().filter(PetVisit::isEmergency).map(PetVisit::getId).collect(Collectors.toSet());
         List<VisitServiceDetail> details = detailRepository.findByVisitIdInOrderByIdAsc(ids);
         Map<UUID, ServiceInvoice> invoices = support.invoicesOf(details.stream().map(VisitServiceDetail::getId).toList());
-        Set<UUID> withDoctorTicket = ticketRepository.findByVisitIdInAndQueueTypeAndStatusIn(ids, QueueType.DOCTOR, TicketStatus.ACTIVE)
-                .stream().map(QueueTicket::getVisitId).collect(Collectors.toSet());
 
         Set<UUID> chosen = details.stream()
                 .filter(d -> d.getStatus() == ServiceDetailStatus.PENDING && invoices.containsKey(d.getId())
                         && invoices.get(d.getId()).getPaymentStatus() == PaymentStatus.PENDING)
                 .filter(d -> section == CashierSection.EXAM_FEE
-                        ? d.getService().getCategory().is(ServiceCategory.EXAMINATION) && !withDoctorTicket.contains(d.getVisitId())
+                        ? d.getService().getCategory().is(ServiceCategory.EXAMINATION) && !emergency.contains(d.getVisitId())
                         : d.getService().getCategory().isParaclinical())
                 .map(VisitServiceDetail::getVisitId)
                 .collect(Collectors.toSet());

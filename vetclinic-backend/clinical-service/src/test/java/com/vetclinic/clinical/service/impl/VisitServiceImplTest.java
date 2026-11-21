@@ -41,12 +41,12 @@ import com.vetclinic.clinical.repository.LabTestResultRepository;
 import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
+import com.vetclinic.clinical.queue.QueueCoordinator;
+import com.vetclinic.common.event.VisitCancelledEvent;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.service.VisitAssembler;
-import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.clinical.service.VisitTimeline;
 import com.vetclinic.common.dto.ApiResponse;
@@ -143,7 +143,7 @@ class VisitServiceImplTest {
     @Mock
     private OutboxWriter outboxWriter;
     @Mock
-    private TicketIssuer ticketIssuer;
+    private QueueCoordinator ticketIssuer;   // phiếu xếp hàng: Redis qua QueueCoordinator (bước 6.2)
 
     private VisitServiceImpl service;
     /** Đợt khám đã có lần đo đủ cân nặng + thân nhiệt (dùng cho vitalSignRepository.existsCompleteMeasurement). */
@@ -152,11 +152,11 @@ class VisitServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, invoiceRepository, ticketIssuer, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
+                detailHistoryRepository, invoiceRepository, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, mock(LabTestResultRepository.class),
                 mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), invoiceRepository,
                 new VisitTimeline(historyRepository),
-                mock(QueueTicketRepository.class), vitalSignRepository, medicalRecordRepository);
+                ticketIssuer, vitalSignRepository, medicalRecordRepository);
         // Mỗi dòng chỉ định được lập hóa đơn riêng ngay khi tạo (BR-19): giả lập INSERT hóa đơn có id
         lenient().when(invoiceRepository.saveAndFlush(any(ServiceInvoice.class))).thenAnswer(inv -> {
             ServiceInvoice saved = inv.getArgument(0);
@@ -251,6 +251,12 @@ class VisitServiceImplTest {
         return saved.getValue();
     }
 
+    /** Không phát phiếu: cả {@code issue} (ngay) lẫn {@code issueAfterCommit}; VisitAssembler vẫn được phép ĐỌC phiếu khi dựng phản hồi. */
+    private void verifyNoTicketIssued() {
+        verify(ticketIssuer, never()).issue(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(), any(), any(), any(), any(), any());
+        verify(ticketIssuer, never()).issueAfterCommit(any(), any(), org.mockito.ArgumentMatchers.anyInt(), any(), any(), any());
+    }
+
     @Test
     void checkIn_createsTheExamFeeAndItsPendingInvoice_butNoTicketUntilTheFeeIsPaid() {
         PetVisit visit = checkInWithSlot(LocalTime.of(9, 0), LocalTime.of(9, 30));
@@ -265,24 +271,27 @@ class VisitServiceImplTest {
         assertThat(invoice.getValue().getUnitPrice()).isEqualByComparingTo("100000.00");
         assertThat(invoice.getValue().getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
         // BR-35: chưa nộp phí khám thì chưa có phiếu, chưa vào hàng đợi Bác sĩ
-        verify(ticketIssuer, never()).issueForPaidServices(any(), anyCollection(), any());
+        verifyNoTicketIssued();   // phiếu không do giao dịch tiếp đón phát: QueueIssuerListener phát khi thu phí / khi nhận VisitCheckedInEvent
         assertThat(lastHistory().getNotes()).contains("lịch hẹn #" + apid(7));
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);
     }
 
     @Test
-    void checkIn_emergency_issuesTheDoctorTicketImmediately_andCollectsTheFeeLater() {
+    void checkIn_emergency_carriesTheEmergencyFlagInTheEvent_soTheListenerIssuesTheTicketImmediately() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
         stubSaveVisit();
 
         service.checkIn(new CheckInRequest(pid(11), null, "Co giật", true, null));
 
-        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), ArgumentMatchers.isNull());
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
+        assertThat(((VisitCheckedInEvent) event.getValue()).emergency()).isTrue();   // QueueIssuerListener phát phiếu priority 2 từ sự kiện này
+        verifyNoTicketIssued();   // không phát phiếu trong giao dịch tiếp đón
     }
 
     @Test
-    void checkIn_whenTheExamServiceNeedsNoPrepayment_issuesTheTicketAtOnce() {
+    void checkIn_whenTheExamServiceNeedsNoPrepayment_stillIssuesNoTicketInTheTransaction_theListenerDecides() {
         // Chính sách thu trước đọc từ nhóm dịch vụ (service_categories.requires_prepayment), không suy ra từ tên nhóm
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         ClinicService freeExam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
@@ -293,7 +302,7 @@ class VisitServiceImplTest {
 
         service.checkIn(new CheckInRequest(pid(11), null, "Khám", false, null));
 
-        verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), ArgumentMatchers.isNull());
+        verifyNoTicketIssued();   // listener đọc lại danh mục (phí khám không thu trước) và phát phiếu từ VisitCheckedInEvent
     }
 
     @Test
@@ -1008,6 +1017,10 @@ class VisitServiceImplTest {
         assertThat(vaccineInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(lastHistory().getNotes()).isEqualTo("Chuyển viện cấp cứu");   // lý do ghi nguyên văn vào lịch sử
         assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.CANCELLED);
+        verify(ticketIssuer).cancelActiveTickets(lid(100L), "Chuyển viện cấp cứu");   // phiếu -> CANCELLED (lịch sử trong giao dịch, xóa Redis sau commit)
+        ArgumentCaptor<DomainEvent> cancelled = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), eq(lid(100L)), cancelled.capture());
+        assertThat(((VisitCancelledEvent) cancelled.getValue()).reason()).isEqualTo("Chuyển viện cấp cứu");   // reporting tăng cancelled_visits
     }
 
     @Test
@@ -1044,6 +1057,10 @@ class VisitServiceImplTest {
         // Không còn cột cancel_reason: lý do ghi nguyên văn vào notes của dòng lịch sử, VisitTimeline suy ra khi hiển thị
         assertThat(lastHistory().getNotes()).isEqualTo("Khách bận việc xin về");
         assertThat(lastHistory().getToStatus()).isEqualTo(VisitStatus.CANCELLED);
+        verify(ticketIssuer).cancelActiveTickets(lid(100L), "Khách bận việc xin về");
+        ArgumentCaptor<DomainEvent> cancelled = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), eq(lid(100L)), cancelled.capture());
+        assertThat(cancelled.getValue()).isInstanceOf(VisitCancelledEvent.class);
     }
 
     @Test

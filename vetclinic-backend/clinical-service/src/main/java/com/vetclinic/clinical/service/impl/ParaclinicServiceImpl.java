@@ -3,12 +3,10 @@ package com.vetclinic.clinical.service.impl;
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
-import com.vetclinic.clinical.entity.QueueTicket;
-import com.vetclinic.clinical.entity.QueueTicketItem;
-import com.vetclinic.clinical.repository.QueueTicketItemRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceLabTestItemRepository;
-import com.vetclinic.clinical.service.TicketIssuer;
+import com.vetclinic.clinical.queue.QueueCoordinator;
+import com.vetclinic.clinical.queue.QueueRedisRepository;
+import com.vetclinic.clinical.queue.TicketView;
 import com.vetclinic.clinical.dto.response.ReferenceRangeResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.LabEvaluation;
@@ -82,9 +80,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     private final VisitServiceDetailRepository detailRepository;
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
-    private final QueueTicketRepository ticketRepository;
-    private final QueueTicketItemRepository ticketItemRepository;
-    private final TicketIssuer ticketIssuer;
+    private final QueueRedisRepository redis;
+    private final QueueCoordinator queue;
+    private final java.time.Clock clock;
     private final PetVisitRepository visitRepository;
     private final LabTestItemRepository labTestItemRepository;
     private final LabTestReferenceRangeRepository rangeRepository;
@@ -100,8 +98,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     public ParaclinicServiceImpl(VisitServiceDetailRepository detailRepository,
                                  VisitServiceDetailHistoryRepository detailHistoryRepository,
-                                 QueueTicketRepository ticketRepository, QueueTicketItemRepository ticketItemRepository,
-                                 TicketIssuer ticketIssuer,
+                                 QueueRedisRepository redis, QueueCoordinator queue, java.time.Clock clock,
                                  PetVisitRepository visitRepository, LabTestItemRepository labTestItemRepository,
                                  LabTestReferenceRangeRepository rangeRepository,
                                  ServiceLabTestItemRepository serviceLabItemRepository,
@@ -112,9 +109,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                                  PlatformTransactionManager transactionManager) {
         this.detailRepository = detailRepository;
         this.detailHistoryRepository = detailHistoryRepository;
-        this.ticketRepository = ticketRepository;
-        this.ticketItemRepository = ticketItemRepository;
-        this.ticketIssuer = ticketIssuer;
+        this.redis = redis;
+        this.queue = queue;
+        this.clock = clock;
         this.visitRepository = visitRepository;
         this.labTestItemRepository = labTestItemRepository;
         this.rangeRepository = rangeRepository;
@@ -136,28 +133,34 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     // ================================================================== hàng đợi
 
     /**
-     * Hàng đợi phòng (cập nhật 17/11/2026) đọc từ PHIẾU XẾP HÀNG của phòng đang WAITING / IN_SERVICE, thứ tự
-     * {@code priority DESC, issued_at, id}; mỗi phiếu bung ra các dịch vụ còn mở của nó (đứng liền nhau). Dịch vụ chưa nộp tiền
-     * không có phiếu nên không xuất hiện. Gọi số / bắt đầu phiếu ở QueueTicketService.
+     * Hàng đợi phòng đọc từ PHIẾU XẾP HÀNG trên Redis: phiếu đang chờ lấy từ Sorted Set (thứ tự theo score: priority rồi giờ thu tiền), phiếu đang
+     * phục vụ (đã rời Sorted Set) tìm qua các dịch vụ đang thực hiện của phòng; mỗi phiếu bung ra các dịch vụ còn mở của nó (đứng liền nhau). Dịch vụ chưa
+     * nộp tiền không có phiếu nên không xuất hiện. Gọi số / bắt đầu phiếu ở QueueTicketService.
      */
     @Override
     @Transactional(readOnly = true)
     public List<QueueItemResponse> queue(QueueType queueType) {
         requireParaclinical(queueType);
-        List<QueueTicket> tickets = ticketRepository.findRoomQueue(queueType, TicketStatus.ACTIVE);
+        List<TicketView> tickets = new ArrayList<>(redis.waitingViews(java.time.LocalDate.now(clock), queueType, null));
+        Set<UUID> seen = tickets.stream().map(TicketView::id).collect(Collectors.toCollection(HashSet::new));
+        for (UUID visitId : detailRepository.findInProgressByQueueType(queueType.name()).stream().map(VisitServiceDetail::getVisitId).distinct().toList()) {
+            for (TicketView t : queue.openTicketsOf(visitId)) {
+                if (t.queueType() == queueType && seen.add(t.id())) {
+                    tickets.add(t);   // phiếu IN_SERVICE của phòng
+                }
+            }
+        }
         if (tickets.isEmpty()) {
             return List.of();
         }
-        Map<Long, List<UUID>> detailIdsByTicket = ticketItemRepository
-                .findByTicketIdIn(tickets.stream().map(QueueTicket::getId).toList()).stream()
-                .collect(Collectors.groupingBy(QueueTicketItem::getTicketId,
-                        Collectors.mapping(QueueTicketItem::getVisitServiceDetailId, Collectors.toList())));
-        Map<UUID, VisitServiceDetail> details = detailRepository.findAllById(detailIdsByTicket.values().stream()
-                        .flatMap(List::stream).toList()).stream()
+        tickets.sort(java.util.Comparator.comparingInt(TicketView::priority).reversed()
+                .thenComparing(TicketView::issuedAt, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()))
+                .thenComparingInt(TicketView::ticketNo));
+        Map<UUID, VisitServiceDetail> details = detailRepository.findAllById(tickets.stream().flatMap(t -> t.vsdIds().stream()).toList()).stream()
                 .collect(Collectors.toMap(VisitServiceDetail::getId, d -> d));
         List<Row> rows = new ArrayList<>();
-        for (QueueTicket t : tickets) {
-            detailIdsByTicket.getOrDefault(t.getId(), List.of()).stream().sorted()
+        for (TicketView t : tickets) {
+            t.vsdIds().stream().sorted()
                     .map(details::get)
                     .filter(d -> d != null && ServiceDetailStatus.OPEN.contains(d.getStatus()))
                     .forEach(d -> rows.add(new Row(d, t)));
@@ -165,7 +168,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         return toItems(queueType, rows);
     }
 
-    private record Row(VisitServiceDetail detail, QueueTicket ticket) {
+    private record Row(VisitServiceDetail detail, TicketView ticket) {
     }
 
     private static void requireParaclinical(QueueType queueType) {
@@ -191,7 +194,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                 .filter(r -> visits.containsKey(r.detail().getVisitId()))
                 .map(r -> {
                     VisitServiceDetail d = r.detail();
-                    QueueTicket t = r.ticket();
+                    TicketView t = r.ticket();
                     PetVisit v = visits.get(d.getVisitId());
                     return new QueueItemResponse(d.getId(), v.getId(), v.getVisitCode(), v.getPet().getId(),
                             v.getPet().getName(), v.getPet().getSpecies().getName(), d.getService().getId(),
@@ -199,8 +202,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                             queueType == QueueType.LABORATORY ? labStage(d, latestAction.get(d.getId())) : null,
                             queueType == QueueType.IMAGING
                                     ? labBadge(siblings.getOrDefault(d.getVisitId(), List.of()), latestAction) : null,
-                            d.getNotes(), d.getCreatedAt(), t.getId(), t.getTicketNo(), t.getPriority(), t.getStatus(),
-                            t.getIssuedAt(), t.getLastCalledAt());
+                            d.getNotes(), d.getCreatedAt(), t.id(), t.ticketNo(), t.priority(), t.status(),
+                            t.issuedAt(), t.lastCalledAt());
                 })
                 .toList();
     }
@@ -305,7 +308,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         setStatus(c.detail(), ServiceDetailStatus.CANCELLED, "CANCELLED", actor, reason.trim());
         // BR-33 / EX-08: chưa thu -> CANCELLED; đã thu + lỗi phòng khám -> REFUNDED; đã thu + khách tự hủy -> giữ PAID
         support.settleInvoiceOfCancelled(c.detail(), refund);
-        ticketIssuer.refreshRoomTicketOf(detailId);   // phiếu phòng không còn dịch vụ chờ -> đóng
+        queue.refreshRoomTicketOf(c.visit().getId(), detailId);   // phiếu phòng không còn dịch vụ chờ -> đóng
         // EX-08: dịch vụ này là dịch vụ cuối còn dở dang thì ca chuyển sang RESULTS_READY với kết quả đã có
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
@@ -420,7 +423,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         labResultRepository.saveAll(results);
 
         setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
-        ticketIssuer.refreshRoomTicketOf(detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
+        queue.refreshRoomTicketOf(c.visit().getId(), detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
     }
@@ -480,7 +483,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                 .fileSize(f.size()).contentType(f.contentType()).uploadedBy(actor).build()).toList());
 
         setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
-        ticketIssuer.refreshRoomTicketOf(detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
+        queue.refreshRoomTicketOf(c.visit().getId(), detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
     }

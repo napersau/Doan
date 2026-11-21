@@ -5,7 +5,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { API, APPT, AUTH, BILL, CLIN, PHARM, ROOT, RUN, brief, call, check, finish, login, loginRes, run, sleep, sql, step } from './lib/api.mjs';
+import { API, APPT, AUTH, BILL, CLIN, PHARM, ROOT, RUN, brief, call, check, finish, login, loginRes, redis, run, sleep, sql, step } from './lib/api.mjs';
 import { seedIds, uuidSql } from './lib/ids.mjs';
 
 const WebSocket = createRequire(path.join(ROOT, 'fe', 'package.json'))('ws');
@@ -43,8 +43,27 @@ async function payWhere(v, filter) {
   const st = (await call('GET', `${CLIN}/pet-visits/${v}/service-invoices`, { token: T.rec })).data;
   return call('POST', `${CLIN}/pet-visits/${v}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: st.invoices.filter((i) => i.paymentStatus === 'PENDING' && filter(i)).map((i) => i.id) } });
 }
-const payExam = (v) => payWhere(v, (i) => i.category === 'EXAMINATION');
-const payCls = (v) => payWhere(v, (i) => i.category === 'LABORATORY' || i.category === 'IMAGING');
+// Từ v4.0 phiếu xếp hàng phát SAU khi thu tiền / tiếp đón cấp cứu (sự kiện qua outbox + RabbitMQ + Redis, thường dưới 1 giây): chờ có thời hạn, không đọc ngay
+async function waitTickets(visitId, predicate, ms = 20000) {
+  for (let t = 0; t < ms; t += 300) {
+    const tickets = (await call('GET', `${CLIN}/pet-visits/${visitId}/service-invoices`, { token: T.rec })).data?.tickets || [];
+    if (predicate(tickets)) return tickets;
+    await sleep(300);
+  }
+  return [];
+}
+async function payExam(v) {
+  const res = await payWhere(v, (i) => i.category === 'EXAMINATION');
+  if (res.status === 200) await waitTickets(v, (ts) => ts.some((t) => t.queueType === 'DOCTOR'));
+  return res;
+}
+async function payCls(v) {
+  const types = [...new Set((await call('GET', `${CLIN}/pet-visits/${v}/service-invoices`, { token: T.rec })).data.invoices
+    .filter((i) => i.paymentStatus === 'PENDING' && (i.category === 'LABORATORY' || i.category === 'IMAGING')).map((i) => i.category))];
+  const res = await payWhere(v, (i) => i.category === 'LABORATORY' || i.category === 'IMAGING');
+  if (res.status === 200) await waitTickets(v, (ts) => types.every((q) => ts.some((t) => t.queueType === q)));
+  return res;
+}
 async function roomRows(kind, v) {   // kind: 'lab' | 'imaging'
   const items = (await call('GET', `${CLIN}/${kind}-queue`, { token: kind === 'lab' ? T.lab : T.img })).data;
   return items.filter((i) => i.visitId === v);
@@ -313,6 +332,7 @@ async function main() {
   step('E. Quản lý đợt khám: phân công, hủy, dịch vụ tại phòng, mở lại hồ sơ, bỏ về, cấp cứu, quyền, giảm giá');
   const qa = await newPet('Q-A'); const qb = await newPet('Q-B');
   const va = (await checkIn(qa, undefined)).data; const vb = (await checkIn(qb, undefined, { isEmergency: true })).data;
+  await waitTickets(vb.id, (ts) => ts.some((t) => t.priority === 2));   // ca cấp cứu: phiếu phát từ VisitCheckedInEvent
   const board0 = (await call('GET', `${CLIN}/pet-visits/queue`, { token: T.rec })).data;
   check('ca thường chưa nộp phí khám nằm ở mục "chờ thu phí", chưa vào danh sách chờ phân công', board0.awaitingPayment.some((v) => v.id === va.id) && !board0.unassigned.some((v) => v.id === va.id));
   check('ca cấp cứu có phiếu ngay (vào danh sách chờ phân công dù chưa nộp phí)', board0.unassigned.some((v) => v.id === vb.id && v.ticket?.priority === 2));
@@ -464,7 +484,13 @@ async function main() {
   // EX-17: Bác sĩ bị khóa khi còn ca đang chờ (BR-39): phân công mới hỏi auth-service ngay lúc ghi, ca chờ về danh sách chờ phân công
   const ex1 = (await checkIn(await newPet('Ex17a'), DOC4)).data.id; await payExam(ex1);
   const ex2 = (await checkIn(await newPet('Ex17b'), DOC4)).data.id; await payExam(ex2);
-  const ticketRow = (v) => sql(`SELECT CONCAT(ticket_no, '|', status, '|', IFNULL(HEX(doctor_id), 'NULL')) FROM pet_clinic_clinical_db.queue_tickets WHERE visit_id=${uuidSql(v)} AND queue_type='DOCTOR'`);
+  // phiếu nằm trên Redis (bước 6.2): đọc Hash của phiếu DOCTOR đang mở của ca (tập queue:visit:{visitId})
+  const ticketRow = (v) => {
+    const id = redis('smembers', `queue:visit:${v}`).split('\n')[0];
+    if (!id) return '';
+    const [no, status, doctor] = redis('hmget', `ticket:${id}`, 'ticketNo', 'status', 'doctorId').split('\n');
+    return `${no}|${status}|${doctor || 'NULL'}`;
+  };
   const ex17Before = [ticketRow(ex1), ticketRow(ex2)];
   const exWorking = await inProgress('Ex17c', DOC4);
   check('EX-17: dựng hàng đợi Bác sĩ Mai: 2 phiếu chờ + 1 ca đang khám', ex17Before.every((r) => r.includes('|WAITING|')) && (await visitOf(exWorking.v)).status === 'IN_PROGRESS', ex17Before.join(' ; '));

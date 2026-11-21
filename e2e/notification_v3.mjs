@@ -43,7 +43,12 @@ async function main() {
   await expectType('lễ tân nhận VISIT_CHECKED_IN (kênh vai trò)', T.rec, 'VISIT_CHECKED_IN');
   const fee = (await call('GET', `${CLIN}/pet-visits/${visit}/service-invoices`, { token: T.rec })).data.invoices.find((i) => i.category === 'EXAMINATION');
   const paidFee = await call('POST', `${CLIN}/pet-visits/${visit}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: [fee.id] } });
-  const ticketId = paidFee.data.tickets.find((t) => t.queueType === 'DOCTOR').id;
+  let ticketId;   // phiếu phát SAU khi thu tiền (sự kiện + Redis): chờ có thời hạn
+  for (let i = 0; i < 60 && !ticketId; i += 1) {
+    ticketId = (await call('GET', `${CLIN}/pet-visits/${visit}/service-invoices`, { token: T.rec })).data.tickets.find((t) => t.queueType === 'DOCTOR')?.id;
+    if (!ticketId) await sleep(300);
+  }
+  check('nộp phí khám → phát phiếu DOCTOR (UUID từ Redis)', paidFee.status === 200 && /^[0-9a-f-]{36}$/.test(ticketId || ''), ticketId);
   await expectType('nộp phí khám → chủ nuôi nhận số phiếu (TICKET_ISSUED)', T.owner, 'TICKET_ISSUED', { contains: '"DOCTOR"' });
   await expectType('bác sĩ được làm mới hàng đợi khi có phiếu mới (TICKET_ISSUED)', T.doc, 'TICKET_ISSUED');
   await call('POST', `${CLIN}/queue-tickets/call-next?queueType=DOCTOR`, { token: T.doc });

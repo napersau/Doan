@@ -17,6 +17,7 @@ import uuid
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 JAVA = os.path.join(os.environ.get("JAVA_HOME", "C:/Program Files/Java/jdk-21.0.6"), "bin", "java")
 MYSQL, RABBIT, RABBIT_PORT = "vetclinic-check-mysql", "vetclinic-check-rabbit", "5673"
+REDIS, REDIS_PORT = "vetclinic-check-redis", "6391"   # hàng đợi trên Redis (bước 6.2): phiếu phát sau khi thu phí khám
 PORTS = {"auth-service": 18081, "clinical-service": 18083}
 SUFFIX = str(int(time.time()))[-6:]
 STORE = tempfile.mkdtemp(prefix="vetclinic-storage-")
@@ -24,6 +25,16 @@ FAILS, PROCS = [], []
 TIEN = "019a9442-d810-7000-8000-000000000002"   # bs_tien
 BASE = "/api/v1/clinical/pet-visits"
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def wait_for(fn, seconds=25):
+    end = time.time() + seconds
+    while time.time() < end:
+        value = fn()
+        if value:
+            return value
+        time.sleep(0.4)
+    return None
 
 
 def check(name, ok, detail=""):
@@ -101,7 +112,7 @@ def start_jar(module):
         sys.exit(f"KHÔNG THẤY {jar}: chạy 'cd vetclinic-backend && mvn -o -pl {module} install -DskipTests' trước")
     log = os.path.join(tempfile.gettempdir(), f"imaging-check-{module}.log")
     env = dict(os.environ, DB_HOST="localhost", DB_PORT="3399", DB_USERNAME="root", DB_PASSWORD="check", TZ="UTC", STORAGE_ROOT=STORE,
-               JWT_SECRET="check-secret-check-secret-check-secret-0123456789", RABBITMQ_HOST="localhost", RABBITMQ_PORT=RABBIT_PORT)
+               JWT_SECRET="check-secret-check-secret-check-secret-0123456789", RABBITMQ_HOST="localhost", RABBITMQ_PORT=RABBIT_PORT, REDIS_HOST="localhost", REDIS_PORT=REDIS_PORT)
     args = [JAVA, "-Duser.timezone=UTC", "-jar", jar, f"--server.port={PORTS[module]}", "--eureka.client.enabled=false"]
     for name, port in PORTS.items():
         args.append(f"--spring.cloud.discovery.client.simple.instances.{name}[0].uri=http://localhost:{port}")
@@ -119,7 +130,8 @@ def start_jar(module):
 try:
     if MYSQL not in sh("docker", "ps", "--format", "{{.Names}}").split():
         sys.exit("Chưa có MySQL tạm: chạy 'bash scripts/service_check.sh clinical-service --reset' trước")
-    sh("docker", "rm", "-f", RABBIT)
+    sh("docker", "rm", "-f", RABBIT, REDIS)
+    sh("docker", "run", "-d", "--name", REDIS, "-p", f"{REDIS_PORT}:6379", "redis:7-alpine")
     sh("docker", "run", "-d", "--name", RABBIT, "-p", f"{RABBIT_PORT}:5672", "-e", "RABBITMQ_DEFAULT_USER=vetclinic",
        "-e", "RABBITMQ_DEFAULT_PASS=vetclinic_dev", "rabbitmq:3.12-management")
     for _ in range(40):
@@ -130,6 +142,7 @@ try:
     for module in ("clinical-service", "auth-service"):
         start_jar(module)
 
+    sql("DELETE FROM pet_clinic_clinical_db.queue_ticket_histories")   # Redis tạm đếm số phiếu lại từ 1: bỏ lịch sử của lần chạy trước (UNIQUE loại + ngày + số)
     sql(f"UPDATE pet_clinic_clinical_db.pet_visits SET status = 'CANCELLED' WHERE doctor_id = {b(TIEN)} AND status IN ('IN_PROGRESS', 'WAITING', 'RESULTS_READY')")
     rec, tien, img = login("letan_hoa"), login("bs_tien"), login("ktv_cdha_dung")
     lan, nam = login("khach_lan"), login("khach_nam")
@@ -145,7 +158,10 @@ try:
     def pay(vid):
         st, res = call("GET", f"{BASE}/{vid}/service-invoices", rec)
         ids = [i["id"] for i in res["data"]["invoices"] if i["paymentStatus"] == "PENDING" and i["id"]]
-        return call("POST", f"{BASE}/{vid}/service-invoices/confirm-payment", rec, {"invoiceIds": ids})
+        res = call("POST", f"{BASE}/{vid}/service-invoices/confirm-payment", rec, {"invoiceIds": ids})
+        if res[0] == 200:   # phiếu phát SAU khi thu tiền (ServiceInvoicePaidEvent -> Redis): chờ có thời hạn
+            wait_for(lambda: call("GET", f"{BASE}/{vid}/service-invoices", rec)[1]["data"]["tickets"], 30)
+        return res
 
     check("tiếp đón + thu phí khám", pay(visit)[0] == 200)
     check("bắt đầu khám (có cân nặng + thân nhiệt)", call("POST", f"{BASE}/{visit}/start-exam", tien, {"vitalSigns": {"weightKg": 5, "temperatureC": 38.5}})[0] == 200)
@@ -215,7 +231,7 @@ try:
 finally:
     for proc in PROCS:
         proc.terminate()
-    sh("docker", "rm", "-f", RABBIT)
+    sh("docker", "rm", "-f", RABBIT, REDIS)
     shutil.rmtree(STORE, ignore_errors=True)
 
 if FAILS:

@@ -9,13 +9,14 @@ import com.vetclinic.clinical.dto.response.DoctorQueueResponse;
 import com.vetclinic.clinical.dto.response.QueueBoardResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
-import com.vetclinic.clinical.entity.QueueTicket;
+import com.vetclinic.clinical.queue.QueueRedisRepository;
+import com.vetclinic.clinical.queue.TicketView;
+import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
 import com.vetclinic.clinical.repository.ImagingResultRepository;
 import com.vetclinic.clinical.repository.LabTestResultRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.service.VisitAssembler;
@@ -59,7 +60,9 @@ class DoctorQueueServiceImplTest {
     @Mock
     private PetVisitRepository visitRepository;
     @Mock
-    private QueueTicketRepository ticketRepository;
+    private QueueRedisRepository redis;
+    @Mock
+    private VisitSupport support;
     @Mock
     private AuthClient authClient;
 
@@ -69,11 +72,11 @@ class DoctorQueueServiceImplTest {
     void setUp() {
         VisitAssembler assembler = new VisitAssembler(mock(VisitServiceDetailRepository.class), mock(LabTestResultRepository.class),
                 mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), mock(ServiceInvoiceRepository.class),
-                new VisitTimeline(mock(PetVisitStatusHistoryRepository.class)), ticketRepository,
+                new VisitTimeline(mock(PetVisitStatusHistoryRepository.class)), mock(com.vetclinic.clinical.queue.QueueCoordinator.class),
                 mock(com.vetclinic.clinical.repository.VitalSignRepository.class), mock(com.vetclinic.clinical.repository.MedicalRecordRepository.class));
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new DoctorQueueServiceImpl(visitRepository, ticketRepository, authClient, assembler, tm);
+        service = new DoctorQueueServiceImpl(visitRepository, redis, support, authClient, assembler, com.vetclinic.clinical.testsupport.TestData.CLOCK, tm);
     }
 
     @AfterEach
@@ -85,7 +88,9 @@ class DoctorQueueServiceImplTest {
         return new UserSummaryResponse(id, "BS " + id, "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), room, "ACTIVE");
     }
 
-    private static QueueTicket doctorTicket(long id, long visitId, UUID doctorId, int no, int priority) {
+    private static final java.time.LocalDate TODAY = java.time.LocalDate.of(2026, 10, 30);   // CLOCK cố định
+
+    private static TicketView doctorTicket(long id, long visitId, UUID doctorId, int no, int priority) {
         return ticket(id, QueueType.DOCTOR, visitId, doctorId, no, priority, TicketStatus.WAITING);
     }
 
@@ -94,16 +99,16 @@ class DoctorQueueServiceImplTest {
         when(authClient.getActiveDoctors()).thenReturn(ApiResponse.success(List.of(
                 doctor(DOCTOR, "P101"), doctor(OTHER_DOCTOR, "P102"))));
         // Phiếu chưa có Bác sĩ (đã nộp phí, chờ Lễ tân phân công)
-        when(ticketRepository.findDoctorQueue(null)).thenReturn(List.of(doctorTicket(61L, 1L, null, 1, 0)));
-        // Hàng đợi DOCTOR: phiếu ưu tiên của ca có kết quả (priority 1) đứng trước phiếu thường; OTHER_DOCTOR trống
-        when(ticketRepository.findDoctorQueues(Set.of(DOCTOR, OTHER_DOCTOR))).thenReturn(List.of(
+        when(redis.waitingViews(TODAY, QueueType.DOCTOR, null)).thenReturn(List.of(doctorTicket(61L, 1L, null, 1, 0)));
+        // Hàng đợi DOCTOR (Sorted Set theo score): phiếu ưu tiên của ca có kết quả (priority 1) đứng trước phiếu thường; OTHER_DOCTOR trống
+        when(redis.waitingViews(TODAY, QueueType.DOCTOR, DOCTOR)).thenReturn(List.of(
                 doctorTicket(63L, 3L, DOCTOR, 3, 1), doctorTicket(62L, 4L, DOCTOR, 2, 0)));
+        when(redis.waitingViews(TODAY, QueueType.DOCTOR, OTHER_DOCTOR)).thenReturn(List.of());
         when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS))).thenReturn(Set.of(DOCTOR));
-        // Ca 1 và 5 đang WAITING; ca 5 chưa có phiếu -> chờ thu phí khám
+        // Ca 1, 4, 5 đang WAITING; ca 5 còn hóa đơn phí khám PENDING (MySQL) -> chờ thu phí khám
         when(visitRepository.findByStatusOrderByIdAsc(VisitStatus.WAITING)).thenReturn(List.of(
                 visit(1L, VisitStatus.WAITING, null), visit(4L, VisitStatus.WAITING, DOCTOR), visit(5L, VisitStatus.WAITING, null)));
-        when(ticketRepository.findByVisitIdInAndQueueTypeAndStatusIn(anyCollection(), any(), anyCollection())).thenReturn(List.of(
-                doctorTicket(61L, 1L, null, 1, 0), doctorTicket(62L, 4L, DOCTOR, 2, 0)));
+        when(support.visitsAwaitingExamFee(anyCollection())).thenReturn(Set.of(lid(5L)));
         when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(
                 visit(1L, VisitStatus.WAITING, null), visit(3L, VisitStatus.RESULTS_READY, DOCTOR), visit(4L, VisitStatus.WAITING, DOCTOR)));
 
@@ -147,7 +152,7 @@ class DoctorQueueServiceImplTest {
     @Test
     void myQueue_isTheCurrentDoctorsWaitingTickets_inTicketOrder() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(ticketRepository.findDoctorQueue(DOCTOR)).thenReturn(List.of(
+        when(redis.waitingViews(TODAY, QueueType.DOCTOR, DOCTOR)).thenReturn(List.of(
                 doctorTicket(70L, 9L, DOCTOR, 7, 2), doctorTicket(63L, 3L, DOCTOR, 3, 1), doctorTicket(62L, 4L, DOCTOR, 2, 0)));
         when(visitRepository.findWithPetByIdIn(anyCollection())).thenReturn(List.of(
                 visit(3L, VisitStatus.RESULTS_READY, DOCTOR), visit(4L, VisitStatus.WAITING, DOCTOR), visit(9L, VisitStatus.WAITING, DOCTOR)));

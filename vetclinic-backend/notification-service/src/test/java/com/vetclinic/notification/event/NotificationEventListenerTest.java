@@ -311,7 +311,7 @@ class NotificationEventListenerTest {
 
     private static PatientCalledEvent called(String action, String station, UUID doctorId, String room) {
         return new PatientCalledEvent(UUID.randomUUID(), NOW, DOCTOR, action, station, VISIT_ID, "VIS-2026-7", PET, doctorId,
-                60L, 12, room);
+                uid(60), 12, room);
     }
 
     @Test
@@ -326,7 +326,7 @@ class NotificationEventListenerTest {
         assertThat(forOwner.title()).contains("phòng khám bác sĩ", "P101");
         assertThat(forOwner.body()).contains("Mời số 12", "Lu");   // gọi theo số phiếu
         assertThat(forOwner.data()).containsEntry("station", "DOCTOR_ROOM").containsEntry("roomNumber", "P101")
-                .containsEntry("ticketNo", 12).containsEntry("ticketId", 60L);
+                .containsEntry("ticketNo", 12).containsEntry("ticketId", uid(60));
         verify(dispatcher).toUser(eq(DOCTOR), any());
     }
 
@@ -367,7 +367,7 @@ class NotificationEventListenerTest {
     // ================================================================== queue.ticket_issued
 
     private static QueueTicketIssuedEvent issued(String type, UUID doctorId, int priority) {
-        return new QueueTicketIssuedEvent(UUID.randomUUID(), NOW, uid(5), 60L, type, 8, VISIT_ID, "VIS-2026-7",
+        return new QueueTicketIssuedEvent(UUID.randomUUID(), NOW, uid(5), uid(60), type, 8, VISIT_ID, "VIS-2026-7",
                 PET, doctorId, priority);
     }
 

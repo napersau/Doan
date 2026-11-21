@@ -28,6 +28,11 @@ public interface VisitServiceDetailRepository extends JpaRepository<VisitService
     @EntityGraph(attributePaths = "service")
     List<VisitServiceDetail> findByVisitIdOrderByIdAsc(UUID visitId);
 
+    /** Dịch vụ XN / CĐHA đang thực hiện của một phòng (theo queue_type của nhóm dịch vụ): tìm phiếu IN_SERVICE của phòng, vì phiếu đang phục vụ đã rời hàng đợi chờ trên Redis. */
+    @Query("select d from VisitServiceDetail d where d.status = com.vetclinic.clinical.constant.ServiceDetailStatus.IN_PROGRESS "
+            + "and d.service.category.queueType = :queueType")
+    List<VisitServiceDetail> findInProgressByQueueType(@Param("queueType") String queueType);
+
     @EntityGraph(attributePaths = "service")
     List<VisitServiceDetail> findByVisitIdInOrderByIdAsc(Collection<UUID> visitIds);
 

@@ -16,6 +16,7 @@ import urllib.request
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 JAVA = os.path.join(os.environ.get("JAVA_HOME", "C:/Program Files/Java/jdk-21.0.6"), "bin", "java")
 MYSQL, RABBIT, RABBIT_PORT = "vetclinic-check-mysql", "vetclinic-check-rabbit", "5673"
+REDIS, REDIS_PORT = "vetclinic-check-redis", "6391"   # hàng đợi trên Redis (bước 6.2)
 PORTS = {"auth-service": 18081, "clinical-service": 18083}
 SUFFIX = str(int(time.time()))[-6:]
 FAILS, PROCS = [], []
@@ -92,7 +93,7 @@ def start_jar(module):
         sys.exit(f"KHÔNG THẤY {jar}: chạy 'cd vetclinic-backend && mvn -o -pl {module} install -DskipTests' trước")
     log = os.path.join(tempfile.gettempdir(), f"ex17-check-{module}.log")
     env = dict(os.environ, DB_HOST="localhost", DB_PORT="3399", DB_USERNAME="root", DB_PASSWORD="check", TZ="UTC",
-               JWT_SECRET="check-secret-check-secret-check-secret-0123456789", RABBITMQ_HOST="localhost", RABBITMQ_PORT=RABBIT_PORT)
+               JWT_SECRET="check-secret-check-secret-check-secret-0123456789", RABBITMQ_HOST="localhost", RABBITMQ_PORT=RABBIT_PORT, REDIS_HOST="localhost", REDIS_PORT=REDIS_PORT)
     args = [JAVA, "-Duser.timezone=UTC", "-jar", jar, f"--server.port={PORTS[module]}", "--eureka.client.enabled=false"]
     for name, port in PORTS.items():
         args.append(f"--spring.cloud.discovery.client.simple.instances.{name}[0].uri=http://localhost:{port}")
@@ -111,7 +112,8 @@ admin = None
 try:
     if MYSQL not in sh("docker", "ps", "--format", "{{.Names}}").split():
         sys.exit("Chưa có MySQL tạm: chạy 'bash scripts/service_check.sh clinical-service --reset' trước")
-    sh("docker", "rm", "-f", RABBIT)
+    sh("docker", "rm", "-f", RABBIT, REDIS)
+    sh("docker", "run", "-d", "--name", REDIS, "-p", f"{REDIS_PORT}:6379", "redis:7-alpine")
     sh("docker", "run", "-d", "--name", RABBIT, "-p", f"{RABBIT_PORT}:5672", "-e", "RABBITMQ_DEFAULT_USER=vetclinic",
        "-e", "RABBITMQ_DEFAULT_PASS=vetclinic_dev", "rabbitmq:3.12-management")
     for _ in range(40):
@@ -122,6 +124,7 @@ try:
     for module in ("clinical-service", "auth-service"):   # clinical khai báo queue trước khi auth phát sự kiện
         start_jar(module)
 
+    sql("DELETE FROM pet_clinic_clinical_db.queue_ticket_histories")   # Redis tạm đếm số phiếu lại từ 1: bỏ lịch sử của lần chạy trước (UNIQUE loại + ngày + số)
     # chạy lại được: mở khóa bs_an nếu lần trước dừng giữa chừng, đóng các ca còn dở của hai Bác sĩ
     sql(f"UPDATE pet_clinic_auth_db.users SET status = 'ACTIVE' WHERE id IN ({b(AN)}, {b(TIEN)})")
     sql(f"UPDATE pet_clinic_clinical_db.pet_visits SET status = 'CANCELLED' WHERE doctor_id IN ({b(TIEN)}, {b(AN)}) AND status IN ('IN_PROGRESS', 'WAITING', 'RESULTS_READY')")
@@ -137,12 +140,18 @@ try:
         st, res = clin("GET", f"{BASE}/{vid}/service-invoices", rec)
         ids = [i["id"] for i in res["data"]["invoices"] if i["paymentStatus"] == "PENDING"]
         assert clin("POST", f"{BASE}/{vid}/service-invoices/confirm-payment", rec, {"invoiceIds": ids})[0] == 200
+        # phiếu phát SAU khi thu tiền (ServiceInvoicePaidEvent -> QueueIssuerListener -> Redis): chờ có thời hạn
+        assert wait_for(lambda: clin("GET", f"{BASE}/{vid}/service-invoices", rec)[1]["data"]["tickets"], 30), "phiếu không xuất hiện sau khi thu phí"
         return vid
 
-    def ticket(vid):
-        row = sql(f"SELECT ticket_no, issued_at, status, IFNULL(HEX(doctor_id), 'NULL'), priority FROM pet_clinic_clinical_db.queue_tickets "
-                  f"WHERE visit_id = {b(vid)} AND queue_type = 'DOCTOR'").split("\t")
-        return row
+    def ticket(vid):   # [ticket_no, issued_at, status, doctor (hex in hoa không gạch / 'NULL'), priority] đọc từ Hash phiếu trên Redis
+        ids = sh("docker", "exec", REDIS, "redis-cli", "smembers", f"queue:visit:{vid}").splitlines()
+        if not ids:
+            return ["", "", "", "", ""]
+        raw = sh("docker", "exec", REDIS, "redis-cli", "hgetall", f"ticket:{ids[0]}").splitlines()
+        h = dict(zip(raw[0::2], raw[1::2]))
+        doctor = h.get("doctorId", "")
+        return [h.get("ticketNo"), h.get("issuedAt"), h.get("status"), doctor.replace("-", "").upper() if doctor else "NULL", h.get("priority")]
 
     # ================================================================== dựng hàng đợi của Bác sĩ An: 2 ca chờ + 1 ca đang khám
     v1, v2, v3 = new_visit("Chờ1"), new_visit("Chờ2"), new_visit("Khám")
@@ -166,6 +175,7 @@ try:
     released = wait_for(lambda: sql(f"SELECT COUNT(*) FROM pet_clinic_clinical_db.pet_visits WHERE id IN ({b(v1)}, {b(v2)}) AND doctor_id IS NULL") == "2")
     check("auth -> RabbitMQ -> clinical gỡ phân công 2 ca WAITING của Bác sĩ An", bool(released))
     check("bản chụp tên Bác sĩ của hai ca bị xóa cùng lúc", sql(f"SELECT COUNT(*) FROM pet_clinic_clinical_db.pet_visits WHERE id IN ({b(v1)}, {b(v2)}) AND doctor_name_snapshot IS NOT NULL") == "0")
+    wait_for(lambda: ticket(v1)[3] == "NULL" and ticket(v2)[3] == "NULL")   # move_ticket.lua chạy ngay sau commit của listener
     t1b, t2b = ticket(v1), ticket(v2)
     check("phiếu DOCTOR vẫn WAITING, về danh sách chờ phân công (doctor_id NULL)", t1b[2] == "WAITING" and t1b[3] == "NULL" and t2b[2] == "WAITING" and t2b[3] == "NULL", (t1b, t2b))
     check("GIỮ NGUYÊN số phiếu, giờ phát và mức ưu tiên (thứ tự không đổi)", t1b[0] == t1[0] and t1b[1] == t1[1] and t1b[4] == t1[4] and t2b[0] == t2[0] and t2b[1] == t2[1], (t1, t1b))
@@ -201,7 +211,7 @@ finally:
         call("auth-service", "POST", f"/api/v1/users/{AN}/unlock", admin)
     for proc in PROCS:
         proc.terminate()
-    sh("docker", "rm", "-f", RABBIT)
+    sh("docker", "rm", "-f", RABBIT, REDIS)
 
 if FAILS:
     print(f"\n{len(FAILS)} KIỂM TRA THẤT BẠI: {FAILS}")

@@ -14,7 +14,7 @@
 -- 4 Cơ sở dữ liệu logic:
 -- 1. pet_clinic_auth_db             : auth-service (:8081)             - 9 bảng (v4.0, bước 2.1)
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
--- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 24 bảng (v4.0, bước 3.1 + 4.1 processed_events + 4.2 vital_signs, medical_records + 5.2 prescriptions, prescription_items: + service_categories, service_prices, species/lab_test_items SMALLINT)
+-- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 24 bảng (v4.0, bước 3.1 + 4.1 processed_events + 4.2 vital_signs, medical_records + 5.2 prescriptions, prescription_items + 6.2 queue_ticket_histories/_history_items thay queue_tickets/_items: + service_categories, service_prices, species/lab_test_items SMALLINT)
 -- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 10 bảng (v4.0, bước 5.1 + 5.2: thuốc tách giá / tồn kho; đơn thuốc đã chuyển sang clinical)
 -- TỔNG CỘNG: 27 BẢNG
 --
@@ -37,7 +37,7 @@
 --     [Cập nhật 13/11/2026] Gọi theo từng dòng: bác sĩ / KTV bấm "Gọi" ở dòng bất kỳ, không đổi thứ tự (queue_order giữ nguyên).
 --     Đã BỎ cơ chế "Đẩy lùi 1 bậc" cùng cột skip_count và hành động SKIPPED (làm hai ca đầu hàng đổi chỗ mãi mãi).
 -- (8) [Cập nhật 16-17/11/2026 - góp ý GVHD lần 2] Tách hàng đợi khỏi hồ sơ khám:
---     bỏ queue_order ở pet_visits / visit_service_details; thêm queue_tickets + queue_ticket_items.
+--     bỏ queue_order ở pet_visits / visit_service_details; (v3.0 thêm queue_tickets + queue_ticket_items; từ bước 6.2 phiếu nằm trên Redis, MySQL chỉ giữ queue_ticket_histories + queue_ticket_history_items).
 --     Tách quy trình thanh toán khỏi quy trình khám: thu tiền xong mới phát phiếu xếp hàng.
 --     services.requires_prepayment: TRUE = khám, Xét nghiệm, CĐHA (thu trước);
 --     FALSE = dịch vụ làm tại phòng (tiêm, tẩy giun, thủ thuật...), thu khi chốt ca.
@@ -647,38 +647,43 @@ CREATE TABLE IF NOT EXISTS prescription_items (
 );
 CREATE INDEX idx_pi_medicine ON prescription_items(medicine_id);
 
--- 20. QUEUE_TICKETS (PHIẾU XẾP HÀNG - DỮ LIỆU VẬN HÀNH, TÁCH KHỎI HỒ SƠ KHÁM) - MỚI 16/11
--- Mỗi phiếu = một lượt chờ của một đợt khám tại hàng đợi Bác sĩ / phòng XN / phòng CĐHA.
--- Phát khi đã thu tiền dịch vụ cần thu trước (services.requires_prepayment = TRUE);
--- ca cấp cứu (priority = 2) và ca quay lại với kết quả CLS (priority = 1) phát ngay.
--- Thứ tự hàng đợi: ORDER BY priority DESC, issued_at, id. "Gọi" chỉ cập nhật last_called_at.
-CREATE TABLE IF NOT EXISTS queue_tickets (
+-- (Bước 6.2: phiếu xếp hàng đang chờ / đang phục vụ nằm trên Redis; bảng queue_tickets, queue_ticket_items của v3.0 đã BỎ)
+-- 34. QUEUE_TICKET_HISTORIES (LỊCH SỬ PHIẾU XẾP HÀNG ĐÃ KẾT THÚC)
+-- Phiếu WAITING / IN_SERVICE sống trong Redis. Khi phiếu DONE / CANCELLED, ghi 1 dòng ở đây trong
+-- cùng giao dịch với cập nhật trạng thái đợt khám / dịch vụ; ticket_id UNIQUE -> ghi trùng bị chặn.
+-- queue_type: DOCTOR | LABORATORY | IMAGING. final_status: DONE | CANCELLED.
+-- priority: 2 = cấp cứu, 1 = quay lại với kết quả CLS, 0 = thường.
+-- Dùng cho tra cứu, thống kê thời gian chờ (started_at - issued_at) và dựng lại Redis khi cần.
+CREATE TABLE IF NOT EXISTS queue_ticket_histories (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    queue_type ENUM('DOCTOR', 'LABORATORY', 'IMAGING') NOT NULL,
+    ticket_id BINARY(16) NOT NULL UNIQUE, -- UUIDv7 sinh lúc phát phiếu trên Redis
+    queue_type VARCHAR(20) NOT NULL,
     service_date DATE NOT NULL,
     ticket_no INT NOT NULL,
     visit_id BINARY(16) NOT NULL,
-    doctor_id BINARY(16) NULL, -- LFK: auth.users (chỉ phiếu DOCTOR; NULL = danh sách chờ phân công)
-    priority TINYINT NOT NULL DEFAULT 0, -- 2 = cấp cứu, 1 = quay lại với kết quả CLS, 0 = thường
-    status ENUM('WAITING', 'IN_SERVICE', 'DONE', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
-    issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    issued_by BINARY(16) NULL, -- LFK: auth.users (thu ngân phát phiếu; NULL = hệ thống tự phát)
-    last_called_at TIMESTAMP NULL,
-    version BIGINT NOT NULL DEFAULT 0,
-    CONSTRAINT fk_qt_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
-    CONSTRAINT uq_qt_number UNIQUE (queue_type, service_date, ticket_no),
-    CONSTRAINT chk_qt_priority CHECK (priority BETWEEN 0 AND 2)
+    doctor_id BINARY(16) NULL, -- LFK: auth.users (chỉ phiếu DOCTOR)
+    priority TINYINT NOT NULL DEFAULT 0,
+    final_status VARCHAR(20) NOT NULL,
+    issued_at TIMESTAMP NOT NULL,
+    issued_by BINARY(16) NULL, -- LFK: auth.users (NULL = hệ thống tự phát)
+    called_count SMALLINT NOT NULL DEFAULT 0,
+    started_at TIMESTAMP NULL, -- Thời điểm chuyển IN_SERVICE
+    ended_at TIMESTAMP NOT NULL,
+    cancel_reason VARCHAR(255) NULL,
+    CONSTRAINT fk_qth_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
+    CONSTRAINT uq_qth_number UNIQUE (queue_type, service_date, ticket_no),
+    CONSTRAINT chk_qth_priority CHECK (priority BETWEEN 0 AND 2)
 );
-CREATE INDEX idx_qt_queue ON queue_tickets(queue_type, status, doctor_id, priority, issued_at);
-CREATE INDEX idx_qt_visit ON queue_tickets(visit_id);
+CREATE INDEX idx_qth_visit ON queue_ticket_histories(visit_id);
+CREATE INDEX idx_qth_date ON queue_ticket_histories(service_date, queue_type);
 
--- 21. QUEUE_TICKET_ITEMS (CÁC DỊCH VỤ XN / CĐHA THUỘC MỘT PHIẾU - "MỘT CA") - MỚI 16/11
-CREATE TABLE IF NOT EXISTS queue_ticket_items (
-    ticket_id BIGINT NOT NULL,
-    visit_service_detail_id BINARY(16) NOT NULL UNIQUE,
-    PRIMARY KEY (ticket_id, visit_service_detail_id),
-    CONSTRAINT fk_qti_ticket FOREIGN KEY (ticket_id) REFERENCES queue_tickets(id) ON DELETE CASCADE,
-    CONSTRAINT fk_qti_vsd FOREIGN KEY (visit_service_detail_id) REFERENCES visit_service_details(id)
+-- 35. QUEUE_TICKET_HISTORY_ITEMS (CÁC DỊCH VỤ XN / CĐHA THUỘC MỘT PHIẾU ĐÃ KẾT THÚC)
+CREATE TABLE IF NOT EXISTS queue_ticket_history_items (
+    history_id BIGINT NOT NULL,
+    visit_service_detail_id BINARY(16) NOT NULL,
+    PRIMARY KEY (history_id, visit_service_detail_id),
+    CONSTRAINT fk_qthi_history FOREIGN KEY (history_id) REFERENCES queue_ticket_histories(id) ON DELETE CASCADE,
+    CONSTRAINT fk_qthi_vsd FOREIGN KEY (visit_service_detail_id) REFERENCES visit_service_details(id)
 );
 
 -- VIEW tính tiền hóa đơn dịch vụ (không lưu giá trị dẫn xuất)

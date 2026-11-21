@@ -10,16 +10,17 @@ import com.vetclinic.clinical.dto.response.InvoiceStatementResponse;
 import com.vetclinic.clinical.dto.response.ServiceInvoiceResponse;
 import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.entity.PetVisit;
+import com.vetclinic.common.event.DomainEvent;
+import com.vetclinic.common.event.ServiceInvoicePaidEvent;
 import com.vetclinic.clinical.entity.PetVisitStatusHistory;
 import com.vetclinic.clinical.entity.ServiceInvoice;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
-import com.vetclinic.clinical.repository.QueueTicketRepository;
+import com.vetclinic.clinical.queue.QueueCoordinator;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
-import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.common.event.VisitCompletedEvent;
@@ -80,9 +81,7 @@ class ServiceInvoiceServiceImplTest {
     @Mock
     private VisitAssembler assembler;
     @Mock
-    private QueueTicketRepository ticketRepository;
-    @Mock
-    private TicketIssuer ticketIssuer;
+    private QueueCoordinator queue;
 
     private ServiceInvoiceServiceImpl service;
     private ServiceInvoice examInvoice;
@@ -92,11 +91,11 @@ class ServiceInvoiceServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository, detailHistoryRepository,
-                invoiceRepository, ticketIssuer, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
+                invoiceRepository, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new ServiceInvoiceServiceImpl(visitRepository, detailRepository, invoiceRepository, ticketRepository, support,
-                ticketIssuer, assembler, outboxWriter, CLOCK, tm);
+        service = new ServiceInvoiceServiceImpl(visitRepository, detailRepository, invoiceRepository, support,
+                queue, assembler, outboxWriter, CLOCK, tm);
         examInvoice = invoice(11L, 1L, "100000.00", "0.00");
         labInvoice = invoice(12L, 2L, "250000.00", "0.00");
         xrayInvoice = invoice(13L, 3L, "180000.00", "0.00");
@@ -270,8 +269,9 @@ class ServiceInvoiceServiceImplTest {
         assertThat(history.getValue().getToStatus()).isEqualTo(VisitStatus.COMPLETED);
         assertThat(history.getValue().getChangedByUserId()).isEqualTo(RECEPTIONIST);   // người đổi trạng thái = thu ngân
         ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
-        verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
-        assertThat(((VisitCompletedEvent) event.getValue()).abandoned()).isFalse();
+        verify(outboxWriter, org.mockito.Mockito.times(2)).write(eq("VISIT"), any(), event.capture());   // ServiceInvoicePaidEvent rồi VisitCompletedEvent
+        assertThat(event.getAllValues().get(0)).isInstanceOf(ServiceInvoicePaidEvent.class);
+        assertThat(((VisitCompletedEvent) event.getAllValues().get(1)).abandoned()).isFalse();
     }
 
     @Test
@@ -285,7 +285,7 @@ class ServiceInvoiceServiceImplTest {
         assertThat(xrayInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
         assertThat(result.totalPending()).isEqualByComparingTo("180000.00");
         verify(historyRepository, never()).save(any());
-        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
+        assertThat(paidEvent().lines()).hasSize(2);   // chỉ ServiceInvoicePaidEvent; chưa hoàn tất ca nên không có VisitCompletedEvent
     }
 
     @Test
@@ -300,7 +300,7 @@ class ServiceInvoiceServiceImplTest {
     }
 
     @Test
-    void confirmPayment_ofDebtOnACompletedVisit_collectsMoneyButKeepsTheStatusAndPublishesNothing() {
+    void confirmPayment_ofDebtOnACompletedVisit_collectsMoneyButKeepsTheStatusAndPublishesNoCompletion() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.COMPLETED);   // khách bỏ về trước đó: hóa đơn đã làm giữ PENDING
 
@@ -310,7 +310,7 @@ class ServiceInvoiceServiceImplTest {
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
         assertThat(result.totalPending()).isEqualByComparingTo("430000.00");
         verify(historyRepository, never()).save(any());
-        verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
+        assertThat(paidEvent().lines()).hasSize(1);   // tiền thu bù vẫn là doanh thu: chỉ có ServiceInvoicePaidEvent, ca COMPLETED không phát VisitCompletedEvent lần nữa
     }
 
     @Test
@@ -345,35 +345,69 @@ class ServiceInvoiceServiceImplTest {
         verify(invoiceRepository, never()).saveAndFlush(any());
     }
 
+    private ServiceInvoicePaidEvent paidEvent() {
+        ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter, org.mockito.Mockito.atLeastOnce()).write(ArgumentMatchers.eq("VISIT"), ArgumentMatchers.eq(lid(100L)), event.capture());
+        return event.getAllValues().stream().filter(ServiceInvoicePaidEvent.class::isInstance).map(ServiceInvoicePaidEvent.class::cast).findFirst()
+                .orElseThrow(() -> new AssertionError("không có ServiceInvoicePaidEvent trong outbox"));
+    }
+
     @Test
-    void confirmPayment_ofTheExamFee_rightAfterCheckIn_issuesTheDoctorTicketInTheSameTransaction() {
+    void confirmPayment_ofTheExamFee_writesServiceInvoicePaidEventToTheOutbox_andIssuesNoTicketInTheTransaction() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.WAITING);
 
         service.confirmPayment(lid(100L), List.of(lid(11L)));
 
         assertThat(examInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
-        assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);   // thu tiền không đổi trạng thái ca, chỉ phát phiếu
-        ArgumentCaptor<Collection<VisitServiceDetail>> paid = ArgumentCaptor.forClass(Collection.class);
-        verify(ticketIssuer).issueForPaidServices(ArgumentMatchers.eq(visit), paid.capture(),
-                ArgumentMatchers.eq(RECEPTIONIST));
-        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(lid(1L));
+        assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);   // thu tiền không đổi trạng thái ca; phiếu do QueueIssuerListener phát khi nhận sự kiện
+        ServiceInvoicePaidEvent event = paidEvent();
+        assertThat(event.visitId()).isEqualTo(lid(100L));
+        assertThat(event.cashierId()).isEqualTo(RECEPTIONIST);
+        assertThat(event.paidAt()).isEqualTo(CLOCK.instant());
+        assertThat(event.doctorId()).isEqualTo(DOCTOR);
+        assertThat(event.petName()).isEqualTo("Lu");
+        assertThat(event.ownerName()).isEqualTo("Hoàng Thị Lan");
+        assertThat(event.routingKey()).isEqualTo("invoice.service_paid");
+        assertThat(event.lines()).hasSize(1);
+        ServiceInvoicePaidEvent.Line line = event.lines().get(0);
+        assertThat(line.invoiceId()).isEqualTo(examInvoice.getId());
+        assertThat(line.visitServiceDetailId()).isEqualTo(lid(1L));
+        assertThat(line.queueType()).isEqualTo("DOCTOR");
+        assertThat(line.payableAmount()).isEqualByComparingTo("100000.00");
         verify(historyRepository, never()).save(any());
+        verify(queue, never()).issue(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(), any(), any(), any(), any(), any());   // phiếu không được phát trong giao dịch thu tiền (v4.0)
     }
 
     @Test
-    void confirmPayment_ofParaclinicalServices_whileWaitingForResults_issuesTheRoomTickets() {
+    void confirmPayment_ofParaclinicalServices_listsEachInvoiceWithItsRoom_forTheQueueIssuer() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.WAITING_RESULTS);
         examInvoice.setPaymentStatus(PaymentStatus.PAID);
 
         service.confirmPayment(lid(100L), List.of(lid(12L), lid(13L)));
 
-        ArgumentCaptor<Collection<VisitServiceDetail>> paid = ArgumentCaptor.forClass(Collection.class);
-        verify(ticketIssuer).issueForPaidServices(ArgumentMatchers.eq(visit), paid.capture(),
-                ArgumentMatchers.eq(RECEPTIONIST));
-        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(lid(2L), lid(3L));
+        ServiceInvoicePaidEvent event = paidEvent();
+        assertThat(event.lines()).extracting(ServiceInvoicePaidEvent.Line::queueType).containsExactly("LABORATORY", "IMAGING");
+        assertThat(event.lines()).extracting(ServiceInvoicePaidEvent.Line::visitServiceDetailId).containsExactly(lid(2L), lid(3L));
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING_RESULTS);
+    }
+
+    @Test
+    void confirmPayment_ofAnInRoomService_hasNoQueueType_soItGetsNoTicket() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+        stubVisit(VisitStatus.WAITING_PAYMENT);
+        VisitServiceDetail vaccine = detail(4L, 100L, service(8L, "VAC_5IN1", "VACCINATION", "200000.00"), ServiceDetailStatus.COMPLETED);
+        ServiceInvoice vaccineInvoice = invoice(14L, 4L, "200000.00", "0.00");
+        when(detailRepository.findByVisitIdOrderByIdAsc(lid(100L))).thenReturn(List.of(vaccine));
+        when(invoiceRepository.findByVisitServiceDetailIdIn(ArgumentMatchers.anyCollection())).thenReturn(List.of(vaccineInvoice));
+
+        service.confirmPayment(lid(100L), List.of(lid(14L)));
+
+        ServiceInvoicePaidEvent event = paidEvent();
+        assertThat(event.lines()).hasSize(1);
+        assertThat(event.lines().get(0).queueType()).isNull();   // dịch vụ làm tại phòng: không có phiếu
+        assertThat(event.lines().get(0).category()).isEqualTo("VACCINATION");
     }
 
     @Test
@@ -389,7 +423,7 @@ class ServiceInvoiceServiceImplTest {
     }
 
     @Test
-    void confirmPayment_withNothingLeftToPay_completesTheVisit_AD03_butAnEmptyListIsRefusedWhileSomethingIsPending() {
+    void confirmPayment_withNothingLeftToPay_completesTheVisit_AD03_butAnEmptyListIsRefusedWhileSomethingIsPending() {   // không có hóa đơn nào vừa thu: không phát ServiceInvoicePaidEvent
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
         assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.confirmPayment(lid(100L), List.of()));   // còn 3 hóa đơn PENDING
@@ -399,14 +433,6 @@ class ServiceInvoiceServiceImplTest {
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
         verify(invoiceRepository, never()).saveAndFlush(any());
-    }
-
-    @Test
-    void ticketNumberClash_isRecognisedByTheUniqueConstraintName() {
-        assertThat(ServiceInvoiceServiceImpl.isTicketNumberClash(new DataIntegrityViolationException(
-                "x", new RuntimeException("Duplicate entry '1-2026-10-30-5' for key 'queue_tickets.uq_qt_number'")))).isTrue();
-        assertThat(ServiceInvoiceServiceImpl.isTicketNumberClash(new DataIntegrityViolationException(
-                "x", new RuntimeException("Duplicate entry for key 'service_invoices.uq_x'")))).isFalse();
     }
 
     @Test

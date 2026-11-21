@@ -246,7 +246,7 @@ async function main() {
     await b.clickRow(owner.pet, 'Thu phí khám');
     check('màn hình thu ngân: phí khám thu trước', await b.hasText('Khám lâm sàng') && await b.hasText('thu trước'), (await b.text()).slice(0, 400));
     await b.click('hóa đơn đã chọn', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
-    check('thu phí khám → phát phiếu vào hàng đợi bác sĩ', await b.hasText('phát phiếu') && await b.hasText('Phiếu xếp hàng của ca'), (await b.text()).slice(0, 400));
+    check('thu phí khám → phiếu vào hàng đợi bác sĩ (hiện "Đang cấp số thứ tự…" rồi phiếu xuất hiện)', await b.hasText('Phiếu xếp hàng của ca', 20000), (await b.text()).slice(0, 400));
     await b.goto('/reception/queue');
     check('bảng điều phối: ca có số phiếu trong hàng đợi riêng của bác sĩ', await b.hasText(STAFF.vet.fullName) && await b.hasText(owner.pet) && await b.hasText('Số '), (await b.text()).slice(0, 400));
 
@@ -279,7 +279,7 @@ async function main() {
     await b.clickRow(owner.pet, 'Thu tiền XN / CĐHA');
     check('dịch vụ tại phòng (tẩy giun) chưa thu được trước khi chốt ca', await b.hasText('thu khi bác sĩ chốt ca'), (await b.text()).slice(0, 400));
     await b.click('hóa đơn đã chọn', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
-    check('thu XN + CĐHA → phát phiếu phòng xét nghiệm và CĐHA', await b.hasText('Phòng xét nghiệm số') && await b.hasText('Phòng CĐHA số'), (await b.text()).slice(0, 400));
+    check('thu XN + CĐHA → phát phiếu phòng xét nghiệm và CĐHA', await b.hasText('Phiếu xếp hàng của ca', 20000) && await b.hasText('Phòng xét nghiệm') && await b.hasText('Phòng CĐHA'), (await b.text()).slice(0, 400));
 
     step('4. KTV xét nghiệm và KTV CĐHA: gọi số, bắt đầu, lấy mẫu, nhập kết quả');
     check('KTV xét nghiệm đăng nhập', await b.login(STAFF.lab.phoneNumber, PASSWORD));

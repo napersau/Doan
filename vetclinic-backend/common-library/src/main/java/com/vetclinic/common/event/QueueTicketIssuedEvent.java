@@ -12,7 +12,7 @@ public record QueueTicketIssuedEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,        // thu ngân phát phiếu; null = hệ thống tự phát
-        Long ticketId,
+        UUID ticketId,           // UUIDv7 sinh lúc phát phiếu trên Redis
         String queueType,        // DOCTOR | LABORATORY | IMAGING
         int ticketNo,
         UUID visitId,

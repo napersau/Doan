@@ -17,6 +17,7 @@ from datetime import date, timedelta
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 JAVA = os.path.join(os.environ.get("JAVA_HOME", "C:/Program Files/Java/jdk-21.0.6"), "bin", "java")
 MYSQL, RABBIT, RABBIT_PORT = "vetclinic-check-mysql", "vetclinic-check-rabbit", "5673"
+REDIS, REDIS_PORT = "vetclinic-check-redis", "6391"   # hàng đợi trên Redis (bước 6.2): phiếu phát sau khi thu phí khám
 PORTS = {"auth-service": 18081, "clinical-service": 18083}
 SUFFIX = str(int(time.time()))[-6:]
 FAILS, PROCS = [], []
@@ -93,7 +94,7 @@ def start_jar(module):
         sys.exit(f"KHÔNG THẤY {jar}: chạy 'cd vetclinic-backend && mvn -o -pl {module} install -DskipTests' trước")
     log = os.path.join(tempfile.gettempdir(), f"visit-check-{module}.log")
     env = dict(os.environ, DB_HOST="localhost", DB_PORT="3399", DB_USERNAME="root", DB_PASSWORD="check", TZ="UTC",
-               JWT_SECRET="check-secret-check-secret-check-secret-0123456789", RABBITMQ_HOST="localhost", RABBITMQ_PORT=RABBIT_PORT)
+               JWT_SECRET="check-secret-check-secret-check-secret-0123456789", RABBITMQ_HOST="localhost", RABBITMQ_PORT=RABBIT_PORT, REDIS_HOST="localhost", REDIS_PORT=REDIS_PORT)
     args = [JAVA, "-Duser.timezone=UTC", "-jar", jar, f"--server.port={PORTS[module]}", "--eureka.client.enabled=false"]
     for name, port in PORTS.items():   # không có Eureka: Feign tìm service theo tên qua cấu hình tĩnh
         args.append(f"--spring.cloud.discovery.client.simple.instances.{name}[0].uri=http://localhost:{port}")
@@ -117,7 +118,10 @@ def new_pet(owner_token, name):
 def pay_exam_fee(visit_id, rec):
     st, res = clin("GET", f"{BASE}/{visit_id}/service-invoices", rec)
     ids = [i["id"] for i in res["data"]["invoices"] if i["paymentStatus"] == "PENDING"]
-    return clin("POST", f"{BASE}/{visit_id}/service-invoices/confirm-payment", rec, {"invoiceIds": ids})
+    res = clin("POST", f"{BASE}/{visit_id}/service-invoices/confirm-payment", rec, {"invoiceIds": ids})
+    if res[0] == 200:   # phiếu phát SAU khi thu tiền (ServiceInvoicePaidEvent -> Redis): chờ có thời hạn
+        wait_for(lambda: clin("GET", f"{BASE}/{visit_id}/service-invoices", rec)[1]["data"]["tickets"], 30)
+    return res
 
 
 def to_uuid(hexstr):
@@ -132,7 +136,8 @@ def code(res):
 try:
     if MYSQL not in sh("docker", "ps", "--format", "{{.Names}}").split():
         sys.exit("Chưa có MySQL tạm: chạy 'bash scripts/service_check.sh clinical-service --reset' trước")
-    sh("docker", "rm", "-f", RABBIT)
+    sh("docker", "rm", "-f", RABBIT, REDIS)
+    sh("docker", "run", "-d", "--name", REDIS, "-p", f"{REDIS_PORT}:6379", "redis:7-alpine")
     sh("docker", "run", "-d", "--name", RABBIT, "-p", f"{RABBIT_PORT}:5672", "-e", "RABBITMQ_DEFAULT_USER=vetclinic",
        "-e", "RABBITMQ_DEFAULT_PASS=vetclinic_dev", "rabbitmq:3.12-management")
     for _ in range(40):
@@ -144,6 +149,7 @@ try:
         start_jar(module)
 
     LAB_CBC = to_uuid(sql("SELECT HEX(id) FROM pet_clinic_clinical_db.services WHERE code = 'LAB_CBC'"))
+    sql("DELETE FROM pet_clinic_clinical_db.queue_ticket_histories")   # Redis tạm đếm số phiếu lại từ 1: bỏ lịch sử của lần chạy trước (UNIQUE loại + ngày + số)
     # chạy lại được trên cùng CSDL tạm: đóng các ca còn dở của hai Bác sĩ thử (lần chạy trước có ca "mở lại" để lại IN_PROGRESS)
     sql(f"UPDATE pet_clinic_clinical_db.pet_visits SET status = 'CANCELLED' WHERE doctor_id IN ({b(TIEN)}, {b(AN)}) AND status IN ('IN_PROGRESS', 'WAITING', 'RESULTS_READY')")
     admin, rec = login("admin"), login("letan_hoa")
@@ -172,7 +178,8 @@ try:
     st, res = clin("POST", f"{BASE}/{v1['id']}/start-exam", tien, {})
     check("chưa nộp phí khám -> start-exam bị từ chối CLIN_1314", st >= 400 and code(res) == "CLIN_1314", (st, res))
     st, res = pay_exam_fee(v1["id"], rec)
-    check("thu ngân thu phí khám -> 200, phát phiếu DOCTOR", st == 200 and any(t["queueType"] == "DOCTOR" for t in res["data"]["tickets"]), (st, res))
+    tickets_now = clin("GET", f"{BASE}/{v1['id']}/service-invoices", rec)[1]["data"]["tickets"]   # phiếu phát SAU khi thu tiền (sự kiện + Redis)
+    check("thu ngân thu phí khám -> 200, rồi phát phiếu DOCTOR (qua sự kiện)", st == 200 and any(t["queueType"] == "DOCTOR" for t in tickets_now), (st, tickets_now))
 
     # ================================================================== T02: tạo medical_records + lần đo đầu tiên
     st, res = clin("POST", f"{BASE}/{v1['id']}/start-exam", an, {})
@@ -287,7 +294,7 @@ try:
 finally:
     for proc in PROCS:
         proc.terminate()
-    sh("docker", "rm", "-f", RABBIT)
+    sh("docker", "rm", "-f", RABBIT, REDIS)
 
 if FAILS:
     print(f"\n{len(FAILS)} KIỂM TRA THẤT BẠI: {FAILS}")

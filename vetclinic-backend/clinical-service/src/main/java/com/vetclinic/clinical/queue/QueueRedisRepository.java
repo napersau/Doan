@@ -128,6 +128,20 @@ public class QueueRedisRepository {
         return Optional.of(fields);
     }
 
+    public Optional<TicketView> view(UUID ticketId) {
+        return ticket(ticketId).map(fields -> TicketView.from(ticketId, fields));
+    }
+
+    /** Phiếu CHỜ của một hàng đợi (đọc Hash từng phiếu), theo thứ tự phục vụ. */
+    public List<TicketView> waitingViews(LocalDate date, QueueType type, UUID doctorId) {
+        return waiting(date, type, doctorId).stream().map(this::view).flatMap(Optional::stream).toList();
+    }
+
+    /** Các phiếu đang mở (chờ hoặc đang phục vụ) của một đợt khám, đọc Hash từng phiếu; phiếu đã hết hạn / xóa bị bỏ qua. */
+    public List<TicketView> ticketsOf(UUID visitId) {
+        return openTicketsOf(visitId).stream().map(this::view).flatMap(Optional::stream).toList();
+    }
+
     /** Các phiếu đang mở của một đợt khám. */
     public List<UUID> openTicketsOf(UUID visitId) {
         java.util.Set<String> ids = guard(() -> redis.opsForSet().members(QueueKeys.visit(visitId)));

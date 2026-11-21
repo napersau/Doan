@@ -2,6 +2,7 @@ package com.vetclinic.clinical.service;
 
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.entity.PetVisit;
+import com.vetclinic.clinical.queue.QueueCoordinator;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,7 +29,7 @@ import java.util.UUID;
 public class DoctorAvailabilityService {
 
     private final PetVisitRepository visitRepository;
-    private final TicketIssuer ticketIssuer;
+    private final QueueCoordinator queue;
 
     /** @return số đợt khám đã gỡ phân công. */
     @Transactional
@@ -39,7 +40,7 @@ public class DoctorAvailabilityService {
             visit.setDoctorId(null);
             visit.setDoctorNameSnapshot(null);
             visitRepository.save(visit);
-            ticketIssuer.reassignDoctorTicket(visit.getId(), null);   // phiếu DOCTOR đang chờ về chờ phân công, giữ số + giờ phát
+            queue.reassignDoctorTicket(visit.getId(), null);   // move_ticket.lua sau commit: phiếu DOCTOR đang chờ về chờ phân công, giữ số + score
         }
         if (!waiting.isEmpty()) {
             log.info("EX-17: gỡ phân công {} đợt khám đang chờ của Bác sĩ {}", waiting.size(), doctorId);

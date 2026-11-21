@@ -29,7 +29,7 @@ class DoctorAvailabilityServiceTest {
     @Mock
     private PetVisitRepository visitRepository;
     @Mock
-    private TicketIssuer ticketIssuer;
+    private com.vetclinic.clinical.queue.QueueCoordinator ticketIssuer;
 
     @Test
     void releaseWaitingVisitsOf_unassignsEveryWaitingVisitAndMovesItsTicketToTheUnassignedList() {

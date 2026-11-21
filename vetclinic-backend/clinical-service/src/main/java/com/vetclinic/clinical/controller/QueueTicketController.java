@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
+
 /**
  * Phiếu xếp hàng (SM-07, BR-34): gọi / gọi số tiếp theo / bắt đầu phiếu phòng Xét nghiệm, CĐHA. "Gọi" chỉ cập nhật last_called_at
  * và phát PatientCalledEvent, không đổi trạng thái hay thứ tự. Phiếu phòng Bác sĩ bắt đầu bằng start-exam / start-phase2.
@@ -34,14 +36,14 @@ public class QueueTicketController {
     /** "Gọi" / "Gọi lại" một phiếu bất kỳ (khách vắng thì gọi phiếu khác, thứ tự giữ nguyên; khách quay lại thì gọi lại). */
     @PostMapping("/{id}/call")
     @PreAuthorize("hasAnyRole('VETERINARIAN','LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<QueueTicketResponse>> call(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<QueueTicketResponse>> call(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success("Đã gọi bệnh nhân", queueTicketService.call(id)));
     }
 
     /** Phòng XN / CĐHA: thú cưng đã vào phòng, bắt đầu mọi dịch vụ của phiếu. */
     @PostMapping("/{id}/start")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<QueueTicketResponse>> start(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<QueueTicketResponse>> start(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success("Đã bắt đầu thực hiện", queueTicketService.start(id)));
     }
 }

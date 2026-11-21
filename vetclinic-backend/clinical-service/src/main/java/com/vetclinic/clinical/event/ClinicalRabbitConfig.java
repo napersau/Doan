@@ -22,6 +22,10 @@ public class ClinicalRabbitConfig {
     // Hằng số compile-time (dùng trong @RabbitListener)
     public static final String USER_PROFILE_UPDATED_QUEUE = SERVICE_NAME + "." + EventRouting.USER_PROFILE_UPDATED;
     public static final String USER_STATUS_CHANGED_QUEUE = SERVICE_NAME + "." + EventRouting.USER_STATUS_CHANGED;
+    // Bước 6.2: clinical tự nhận sự kiện của chính mình để phát phiếu trên Redis (QueueIssuerListener)
+    public static final String INVOICE_PAID_QUEUE = SERVICE_NAME + "." + EventRouting.INVOICE_SERVICE_PAID;
+    public static final String VISIT_CHECKED_IN_QUEUE = SERVICE_NAME + "." + EventRouting.VISIT_CHECKED_IN;
+    public static final String RESULTS_READY_QUEUE = SERVICE_NAME + "." + EventRouting.VISIT_RESULTS_READY;
 
     @Bean
     public Queue userProfileUpdatedQueue() {
@@ -63,5 +67,65 @@ public class ClinicalRabbitConfig {
     public Binding userStatusChangedDeadLetterBinding(DirectExchange clinicEventsDeadLetterExchange) {
         return BindingBuilder.bind(userStatusChangedDeadLetterQueue()).to(clinicEventsDeadLetterExchange)
                 .with(USER_STATUS_CHANGED_QUEUE);
+    }
+
+    @Bean
+    public Queue invoicePaidQueue() {
+        return RabbitCommonConfig.durableQueueWithDlq(INVOICE_PAID_QUEUE);
+    }
+
+    @Bean
+    public Queue invoicePaidDeadLetterQueue() {
+        return RabbitCommonConfig.deadLetterQueue(INVOICE_PAID_QUEUE);
+    }
+
+    @Bean
+    public Binding invoicePaidBinding(TopicExchange clinicEventsExchange) {
+        return BindingBuilder.bind(invoicePaidQueue()).to(clinicEventsExchange).with(EventRouting.INVOICE_SERVICE_PAID);
+    }
+
+    @Bean
+    public Binding invoicePaidDeadLetterBinding(DirectExchange clinicEventsDeadLetterExchange) {
+        return BindingBuilder.bind(invoicePaidDeadLetterQueue()).to(clinicEventsDeadLetterExchange).with(INVOICE_PAID_QUEUE);
+    }
+
+    @Bean
+    public Queue visitCheckedInQueue() {
+        return RabbitCommonConfig.durableQueueWithDlq(VISIT_CHECKED_IN_QUEUE);
+    }
+
+    @Bean
+    public Queue visitCheckedInDeadLetterQueue() {
+        return RabbitCommonConfig.deadLetterQueue(VISIT_CHECKED_IN_QUEUE);
+    }
+
+    @Bean
+    public Binding visitCheckedInBinding(TopicExchange clinicEventsExchange) {
+        return BindingBuilder.bind(visitCheckedInQueue()).to(clinicEventsExchange).with(EventRouting.VISIT_CHECKED_IN);
+    }
+
+    @Bean
+    public Binding visitCheckedInDeadLetterBinding(DirectExchange clinicEventsDeadLetterExchange) {
+        return BindingBuilder.bind(visitCheckedInDeadLetterQueue()).to(clinicEventsDeadLetterExchange).with(VISIT_CHECKED_IN_QUEUE);
+    }
+
+    @Bean
+    public Queue resultsReadyQueue() {
+        return RabbitCommonConfig.durableQueueWithDlq(RESULTS_READY_QUEUE);
+    }
+
+    @Bean
+    public Queue resultsReadyDeadLetterQueue() {
+        return RabbitCommonConfig.deadLetterQueue(RESULTS_READY_QUEUE);
+    }
+
+    @Bean
+    public Binding resultsReadyBinding(TopicExchange clinicEventsExchange) {
+        return BindingBuilder.bind(resultsReadyQueue()).to(clinicEventsExchange).with(EventRouting.VISIT_RESULTS_READY);
+    }
+
+    @Bean
+    public Binding resultsReadyDeadLetterBinding(DirectExchange clinicEventsDeadLetterExchange) {
+        return BindingBuilder.bind(resultsReadyDeadLetterQueue()).to(clinicEventsDeadLetterExchange).with(RESULTS_READY_QUEUE);
     }
 }

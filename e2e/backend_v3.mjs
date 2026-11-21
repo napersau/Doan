@@ -2,7 +2,7 @@
 // Chạy: node e2e/backend_v3.mjs   (cần: stack đang chạy — `docker compose up -d --build` hoặc 6 service + hạ tầng ở dev — và dữ liệu seed
 //   `db/seed_current.sql` mới nạp (lộ trình v4), id tra theo mã ổn định qua e2e/lib/ids.mjs; luồng chuẩn cần Clavamox tồn ≥ 10 và Lu chưa có đợt khám mở)
 // CẢNH BÁO: tạo dữ liệu thật (đợt khám, hóa đơn, lịch hẹn). Chỉ chạy trên môi trường thử nghiệm; muốn chạy lại hãy `docker compose down -v`.
-import { BILL, CLIN, PHARM, brief, call, check, finish, login, run, sleep, sql, step } from './lib/api.mjs';
+import { BILL, CLIN, PHARM, brief, call, check, finish, login, redis, run, sleep, sql, step } from './lib/api.mjs';
 import { medicineIdSql, seedIds, uuidSql } from './lib/ids.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -46,9 +46,27 @@ async function payWhere(visitId, filter) {
   return pay(visitId, st.invoices.filter((i) => i.paymentStatus === 'PENDING' && filter(i)).map((i) => i.id));
 }
 const payAllServices = (visitId) => payWhere(visitId, () => true);
-// Thu trước (17/11/2026): phí khám thu xong mới có phiếu DOCTOR; tiền XN / CĐHA thu xong mới có phiếu phòng
-const payExamFee = (visitId) => payWhere(visitId, (i) => i.category === 'EXAMINATION');
-const payParaclinical = (visitId) => payWhere(visitId, (i) => i.category === 'LABORATORY' || i.category === 'IMAGING');
+// Từ v4.0 phiếu xếp hàng phát SAU khi thu tiền / tiếp đón cấp cứu (sự kiện qua outbox + RabbitMQ + Redis, thường dưới 1 giây): chờ có thời hạn, không đọc ngay
+async function waitTickets(visitId, predicate, ms = 20000) {
+  for (let t = 0; t < ms; t += 300) {
+    const tickets = (await call('GET', `${CLIN}/pet-visits/${visitId}/service-invoices`, { token: T.rec })).data?.tickets || [];
+    if (predicate(tickets)) return tickets;
+    await sleep(300);
+  }
+  return [];
+}
+// Thu trước (17/11/2026): phí khám thu xong mới có phiếu DOCTOR; tiền XN / CĐHA thu xong mới có phiếu phòng (phiếu phát sau thu tiền, nên chờ)
+async function payExamFee(visitId) {
+  const res = await payWhere(visitId, (i) => i.category === 'EXAMINATION');
+  if (res.status === 200) await waitTickets(visitId, (ts) => ts.some((t) => t.queueType === 'DOCTOR'));
+  return res;
+}
+async function payParaclinical(visitId) {
+  const types = [...new Set((await statementOf(visitId)).invoices.filter((i) => i.paymentStatus === 'PENDING' && (i.category === 'LABORATORY' || i.category === 'IMAGING')).map((i) => i.category))];
+  const res = await payWhere(visitId, (i) => i.category === 'LABORATORY' || i.category === 'IMAGING');
+  if (res.status === 200) await waitTickets(visitId, (ts) => types.every((q) => ts.some((t) => t.queueType === q)));
+  return res;
+}
 async function admit(petId, doctorId, emergency = false) {   // tiếp đón + nộp phí khám -> có phiếu, vào hàng đợi Bác sĩ
   const id = (await checkIn(petId, doctorId, emergency)).data.id;
   if (!emergency) await payExamFee(id);
@@ -77,8 +95,10 @@ async function main() {
   check('chưa nộp phí khám: bắt đầu khám bị từ chối CLIN_1314', noTicket.code === 'CLIN_1314', brief(noTicket));
   check('ca nằm ở mục thu ngân "phí khám"', (await call('GET', `${CLIN}/cashier/pending?section=EXAM_FEE`, { token: T.rec })).data.some((v) => v.id === v1));
   const fee = await payExamFee(v1);
-  const doctorTicket = fee.data?.tickets?.find((t) => t.queueType === 'DOCTOR');
-  check('thu phí khám → phát phiếu DOCTOR cùng giao dịch, ca vẫn WAITING', fee.status === 200 && doctorTicket && doctorTicket.ticketNo >= 1 && fee.data.visitStatus === 'WAITING', brief(fee));
+  const doctorTicket = (await statementOf(v1)).tickets.find((t) => t.queueType === 'DOCTOR');
+  check('thu phí khám → ServiceInvoicePaidEvent → phát phiếu DOCTOR (sau ~1 giây), ca vẫn WAITING', fee.status === 200 && doctorTicket && doctorTicket.ticketNo >= 1 && fee.data.visitStatus === 'WAITING', brief(fee));
+  check('phiếu nằm trên Redis (Hash ticket:{id}), không còn bảng queue_tickets trong MySQL', redis('hget', `ticket:${doctorTicket.id}`, 'status') === 'WAITING'
+    && Number(sql("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='pet_clinic_clinical_db' AND table_name IN ('queue_tickets','queue_ticket_items')")) === 0);
   check('thu phí khám lần hai → 409 BILL_1403', (await pay(v1, [st0.invoices[0].id])).code === 'BILL_1403');
   check('ca vào hàng đợi bác sĩ bs_tien kèm số phiếu', (await myQueue(T.doc2)).find((v) => v.id === v1)?.ticket?.ticketNo === doctorTicket.ticketNo);
   const called = await doctorCallNext(T.doc2);
@@ -89,10 +109,14 @@ async function main() {
   check('chưa nộp tiền XN/CĐHA: hàng đợi Lab và CĐHA chưa có ca này', !(await labQueue()).some((i) => i.visitId === v1) && !(await imagingQueue()).some((i) => i.visitId === v1));
   check('ca nằm ở mục thu ngân "XN / CĐHA"', (await call('GET', `${CLIN}/cashier/pending?section=PARACLINIC`, { token: T.rec })).data.some((v) => v.id === v1));
   const cls = await payParaclinical(v1);
-  check('thu CBC + X-quang → phát phiếu Lab và phiếu CĐHA', cls.status === 200 && ['LABORATORY', 'IMAGING'].every((q) => cls.data.tickets.some((t) => t.queueType === q)), brief(cls));
+  const statementTickets = (await statementOf(v1)).tickets;
+  check('thu CBC + X-quang → phát phiếu Lab và phiếu CĐHA (qua sự kiện)', cls.status === 200 && ['LABORATORY', 'IMAGING'].every((q) => (statementTickets).some((t) => t.queueType === q)), brief(cls));
   const labT = ticketOf(await labQueue(), v1);
   check('Lab gọi số → đúng phiếu', (await call('POST', `${CLIN}/queue-tickets/call-next?queueType=LABORATORY`, { token: T.lab })).data?.id === labT);
-  check('Lab bắt đầu phiếu', (await startTicket(T.lab, labT)).data?.status === 'IN_SERVICE');
+  const starts = await Promise.all(Array.from({ length: 10 }, () => startTicket(T.lab, labT)));
+  check('10 thao tác "Bắt đầu" đồng thời trên một phiếu: đúng 1 thành công (IN_SERVICE), 9 lần CLIN_1313, KHÔNG có SYS_1005',
+    starts.filter((r) => r.status === 200 && r.data?.status === 'IN_SERVICE').length === 1 && starts.filter((r) => r.code === 'CLIN_1313').length === 9 && !starts.some((r) => r.code === 'SYS_1005'),
+    starts.map((r) => `${r.status}/${r.code || ''}`).join(','));
   const labDetail = detailOf(await labQueue(), v1);
   await call('POST', `${CLIN}/service-details/${labDetail}/sample-collected`, { token: T.lab });
   check('nhập kết quả xét nghiệm', (await labResults(labDetail)).status === 200);
@@ -101,8 +125,9 @@ async function main() {
   await startTicket(T.img, imgT);
   const imgDetail = detailOf(await imagingQueue(), v1);
   check('nhập kết quả CĐHA kèm ảnh', (await call('POST', `${CLIN}/imaging-results/${imgDetail}`, { token: T.img, form: imagingForm() })).status === 200);
+  const resultsTicket = await waitTickets(v1, (ts) => ts.some((t) => t.queueType === 'DOCTOR' && t.priority === 1));
   const q2 = await myQueue(T.doc2);
-  check('đủ kết quả → RESULTS_READY (T06) + phiếu ưu tiên 1 đứng đầu hàng đợi bác sĩ', (await visitOf(v1)).status === 'RESULTS_READY' && q2[0]?.id === v1 && q2[0]?.ticket?.priority === 1);
+  check('đủ kết quả → RESULTS_READY (T06) + phiếu ưu tiên 1 (qua ParaclinicalResultsReadyEvent) đứng đầu hàng đợi bác sĩ', (await visitOf(v1)).status === 'RESULTS_READY' && resultsTicket.length > 0 && q2[0]?.id === v1 && q2[0]?.ticket?.priority === 1);
   check('phiếu phòng Lab / CĐHA đã DONE (không còn trong hàng đợi phòng)', !(await labQueue()).some((i) => i.visitId === v1) && !(await imagingQueue()).some((i) => i.visitId === v1));
   await doctorCallNext(T.doc2);
   check('bắt đầu giai đoạn 2 (T07)', (await call('POST', `${CLIN}/pet-visits/${v1}/start-phase2`, { token: T.doc2 })).status === 200);
@@ -138,10 +163,12 @@ async function main() {
 
   const pEm = await newPet('E2E-emergency');
   const vEm = (await checkIn(pEm, DOC3, true)).data.id;
+  await waitTickets(vEm, (ts) => ts.some((t) => t.priority === 2));
   const emQ = await myQueue(T.doc3);
-  check('ca cấp cứu: có phiếu ngay (priority 2) dù chưa nộp phí, đứng đầu hàng đợi', emQ[0]?.id === vEm && emQ[0]?.ticket?.priority === 2);
+  check('ca cấp cứu: có phiếu ngay (priority 2, từ VisitCheckedInEvent) dù chưa nộp phí, đứng đầu hàng đợi', emQ[0]?.id === vEm && emQ[0]?.ticket?.priority === 2);
   check('ca cấp cứu bắt đầu khám được ngay', (await startExam(T.doc3, vEm)).status === 200);
   await call('POST', `${CLIN}/pet-visits/${vEm}/paraclinical-orders`, { token: T.doc3, body: { serviceIds: [S.LAB_CBC] } });
+  await waitTickets(vEm, (ts) => ts.some((t) => t.queueType === 'LABORATORY'));
   const emLab = (await labQueue()).find((i) => i.visitId === vEm);
   check('ca cấp cứu: phiếu Lab phát ngay, priority 2, chưa thu tiền', emLab?.ticketPriority === 2);
   const cancelClinic = await call('POST', `${CLIN}/service-details/${emLab.serviceDetailId}/cancel`, { token: T.lab, body: { reason: 'Máy xét nghiệm hỏng', reasonType: 'CLINIC' } });
@@ -223,8 +250,9 @@ async function main() {
   const racePets = []; for (let i = 1; i <= 6; i += 1) racePets.push(await newPet(`E2E-fee-${i}`));
   const raceVisits = []; for (const pet of racePets) raceVisits.push((await checkIn(pet, null)).data.id);
   const fees = await Promise.all(raceVisits.map((id) => payExamFee(id)));
-  const numbers = fees.map((r) => r.data?.tickets?.find((t) => t.queueType === 'DOCTOR')?.ticketNo);
-  check('6 quầy thu phí khám cùng lúc: đều thành công, 6 số phiếu khác nhau', fees.every((r) => r.status === 200) && new Set(numbers).size === 6 && numbers.every(Boolean), numbers.join(',') + ' ' + fees.map(brief).join(' | '));
+  const numbers = [];
+  for (const id of raceVisits) numbers.push((await statementOf(id)).tickets.find((t) => t.queueType === 'DOCTOR')?.ticketNo);
+  check('6 quầy thu phí khám cùng lúc: đều thành công, 6 số phiếu khác nhau (Redis INCR, không tranh số)', fees.every((r) => r.status === 200) && new Set(numbers).size === 6 && numbers.every(Boolean), numbers.join(',') + ' ' + fees.map(brief).join(' | '));
   for (const id of raceVisits) await call('POST', `${CLIN}/pet-visits/${id}/cancel`, { token: T.rec, body: { reason: 'e2e dọn' } });
 
   step('D. Gọi theo từng phiếu (BR-34): phiếu vắng giữ nguyên vị trí, phiếu thứ 3, 4 vẫn gọi được');
@@ -245,7 +273,7 @@ async function main() {
   check('khách A quay lại: "Gọi lại" phiếu A được, thứ tự vẫn không đổi', callAgain.status === 200 && JSON.stringify(await order()) === JSON.stringify([A, B, C, D]));
   check('bác sĩ khác không gọi được phiếu của bác sĩ này → CLIN_1311', (await callTicket(T.doc2, tickets[A])).code === 'CLIN_1311');
   check('API gọi số cũ theo đợt khám đã bỏ', (await call('POST', `${CLIN}/pet-visits/call-next`, { token: T.doc3 })).status >= 400);
-  check('cột queue_order đã bị xóa khỏi lược đồ (hàng đợi ở bảng queue_tickets)', Number(sql("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='pet_clinic_clinical_db' AND column_name='queue_order'")) === 0);
+  check('cột queue_order đã bị xóa khỏi lược đồ (hàng đợi ở Redis)', Number(sql("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='pet_clinic_clinical_db' AND column_name='queue_order'")) === 0);
   for (const id of queue) await call('POST', `${CLIN}/pet-visits/${id}/cancel`, { token: T.rec, body: { reason: 'e2e dọn' } });
   check('hủy tiếp nhận: phiếu bị hủy, hàng đợi trống', (await order()).length === 0);
 
@@ -297,8 +325,8 @@ async function main() {
   check('mọi dòng outbox của luồng chuẩn đều PUBLISHED (không còn PENDING / FAILED)', notPublished === 0, `${notPublished} dòng chưa gửi`);
   const outboxTypes = sql(['pet_clinic_appointment_db', 'pet_clinic_clinical_db', 'pet_clinic_billing_pharmacy_db']
     .map((db) => `SELECT event_type FROM ${db}.outbox_events`).join(' UNION ')).split('\n').filter(Boolean).sort();
-  const expectedTypes = ['AppointmentBookedEvent', 'MedicineInvoicePaidEvent', 'PrescriptionCreatedEvent', 'MedicineLowStockEvent', 'ParaclinicalResultsReadyEvent', 'VisitCheckedInEvent', 'VisitCompletedEvent'];
-  check('7 loại sự kiện đã đi qua outbox: đặt lịch, tiếp nhận, có kết quả CLS, hoàn tất ca, đơn thuốc chốt ca, thu tiền thuốc, tồn kho thấp',
+  const expectedTypes = ['ServiceInvoicePaidEvent', 'VisitCancelledEvent', 'AppointmentBookedEvent', 'MedicineInvoicePaidEvent', 'PrescriptionCreatedEvent', 'MedicineLowStockEvent', 'ParaclinicalResultsReadyEvent', 'VisitCheckedInEvent', 'VisitCompletedEvent'];
+  check('9 loại sự kiện đã đi qua outbox: đặt lịch, tiếp nhận, thu tiền dịch vụ, hủy ca, có kết quả CLS, hoàn tất ca, đơn thuốc chốt ca, thu tiền thuốc, tồn kho thấp',
     expectedTypes.every((type) => outboxTypes.includes(type)), outboxTypes.join(','));
   check('phiếu xếp hàng và gọi số gửi thẳng, không qua outbox (D9)',
     Number(sql("SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type IN ('QueueTicketIssuedEvent', 'PatientCalledEvent')")) === 0);
