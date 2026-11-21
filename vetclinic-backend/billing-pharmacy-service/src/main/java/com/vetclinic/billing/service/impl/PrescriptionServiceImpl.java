@@ -136,16 +136,16 @@ public class PrescriptionServiceImpl implements PrescriptionService {
      * @return danh sách cảnh báo tồn kho
      */
     private List<String> mergeItems(Prescription prescription, List<PrescriptionItemRequest> requests) {
-        Set<Long> ids = new HashSet<>();
+        Set<UUID> ids = new HashSet<>();
         for (PrescriptionItemRequest r : requests) {
             if (!ids.add(r.medicineId())) {
                 throw new AppException(ErrorCode.INVALID_INPUT_DATA,
                         "Thuốc #" + r.medicineId() + " xuất hiện nhiều lần trong đơn, hãy gộp thành một dòng");
             }
         }
-        Map<Long, Medicine> medicines = medicineRepository.findAllById(ids).stream()
+        Map<UUID, Medicine> medicines = medicineRepository.findWithCategoryAndStockByIdIn(ids).stream()
                 .collect(Collectors.toMap(Medicine::getId, Function.identity()));
-        Map<Long, PrescriptionItem> current = new LinkedHashMap<>();
+        Map<UUID, PrescriptionItem> current = new LinkedHashMap<>();
         for (PrescriptionItem item : prescription.getItems()) {
             current.put(item.getMedicine().getId(), item);
         }

@@ -106,7 +106,7 @@ async function main() {
   check('hóa đơn thuốc 157.500đ (10 × 15.000 × 1,05)', mi.status === 201 && Number(mi.data.payableAmount) === 157500);
   check('VIEW v_medicine_invoice_amounts = 157.500', Number(sql(`SELECT payable_amount FROM pet_clinic_billing_pharmacy_db.v_medicine_invoice_amounts WHERE invoice_id=${mi.data.id}`)) === 157500);
   check('thu tiền thuốc: 200 → 190, trạng thái ca không đổi', (await call('POST', `${BILL}/medicine-invoices/${mi.data.id}/confirm-payment`, { token: T.rec })).status === 200 && (await stockOf(AMOX)) === stock0 - 10 && (await visitOf(v1)).status === 'WAITING_PAYMENT');
-  check('bất biến SUM(inventory_transactions.quantity) = stock_quantity', sql(`SELECT (SELECT SUM(quantity) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_id=${medicineIdSql('MED_AMOX')}) - stock_quantity FROM pet_clinic_billing_pharmacy_db.medicines WHERE code='MED_AMOX'`) === '0');
+  check('bất biến SUM(inventory_transactions.quantity) = medicine_stocks.quantity_on_hand', sql(`SELECT (SELECT SUM(quantity) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_id=${medicineIdSql('MED_AMOX')}) - (SELECT quantity_on_hand FROM pet_clinic_billing_pharmacy_db.medicine_stocks WHERE medicine_id=${medicineIdSql('MED_AMOX')})`) === '0');
   const finished = await pay(v1, []);
   check('không còn gì để thu: thu ngân xác nhận (danh sách rỗng) → COMPLETED (T10, AD-03)', finished.status === 200 && (await visitOf(v1)).status === 'COMPLETED', brief(finished));
 
@@ -156,7 +156,7 @@ async function main() {
   const stock4 = await stockOf(DRON);
   const mi2 = await call('POST', `${PHARM}/prescriptions/${rx2.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx2.data.items[0].id, quantity: 10 }] } });
   // kho giảm giữa lúc lập hóa đơn và lúc thu tiền (bán chỗ khác, kiểm kê...): lúc lập còn đủ nên được lập, lúc thu mới thiếu
-  await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: DRON, delta: -(stock4 - 5), reason: 'e2e đưa tồn về 5' } });
+  await call('POST', `${PHARM}/medicines/${DRON}/adjust`, { token: T.admin, body: { delta: -(stock4 - 5), reason: 'e2e đưa tồn về 5' } });
   const lack = await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec });
   check('EX-15: thiếu kho → 409 PHARM_1406', lack.status === 409 && lack.code === 'PHARM_1406');
   check('EX-15: tồn vẫn 5, không có dòng EXPORT_SALE, hóa đơn vẫn PENDING', (await stockOf(DRON)) === 5 && sql(`SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_invoice_id=${mi2.data.id}`) === '0' && (await call('GET', `${BILL}/medicine-invoices/${mi2.data.id}`, { token: T.rec })).data.paymentStatus === 'PENDING');
@@ -166,7 +166,7 @@ async function main() {
   check('EX-15: sửa về 5 viên rồi thu lại → PAID, tồn 0', (await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec })).status === 200 && (await stockOf(DRON)) === 0);
   check('EX-16: thu lần hai → 409 BILL_1403', (await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec })).code === 'BILL_1403');
   // thu đồng thời trên hóa đơn khác
-  await call('POST', `${PHARM}/inventory/import`, { token: T.admin, body: { medicineId: DRON, quantity: 50, notes: 'e2e' } });
+  await call('POST', `${PHARM}/medicines/${DRON}/import`, { token: T.admin, body: { quantity: 50, notes: 'e2e' } });
   const p3 = await newPet('E2E-ex16');
   const v3 = await admit(p3, DOC3);
   await doctorCallNext(T.doc3); await startExam(T.doc3, v3);
@@ -182,7 +182,7 @@ async function main() {
   const race = await Promise.all([1, 2, 3, 4, 5].map(() => call('POST', `${BILL}/medicine-invoices/${mi3.data.id}/confirm-payment`, { token: T.rec })));
   check('EX-16 đồng thời: đúng 1/5 yêu cầu thu được, 4 bị từ chối 409', race.filter((r) => r.status === 200).length === 1 && race.filter((r) => r.status === 409).length === 4, race.map((r) => r.status).join(','));
   check('EX-16 đồng thời: kho chỉ trừ đúng một lần', (await stockOf(DRON)) === before - 12);
-  check('bất biến kho giữ nguyên sau EX-15/16 (Drontal)', sql(`SELECT (SELECT SUM(quantity) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_id=${medicineIdSql('MED_DRON_DOG')}) - stock_quantity FROM pet_clinic_billing_pharmacy_db.medicines WHERE code='MED_DRON_DOG'`) === '0');
+  check('bất biến kho giữ nguyên sau EX-15/16 (Drontal)', sql(`SELECT (SELECT SUM(quantity) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_id=${medicineIdSql('MED_DRON_DOG')}) - (SELECT quantity_on_hand FROM pet_clinic_billing_pharmacy_db.medicine_stocks WHERE medicine_id=${medicineIdSql('MED_DRON_DOG')})`) === '0');
 
   step('C. Đua RESULTS_READY: hai KTV hoàn tất cùng lúc (không kẹt WAITING_RESULTS); thu phí khám đồng thời không phát trùng số');
   let stuck = 0;

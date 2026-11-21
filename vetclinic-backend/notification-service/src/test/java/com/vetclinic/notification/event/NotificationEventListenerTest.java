@@ -513,7 +513,7 @@ class NotificationEventListenerTest {
 
     @Test
     void lowStock_isARedAlertForAdmins() {
-        listener.onLowStock(new MedicineLowStockEvent(UUID.randomUUID(), NOW, uid(9), 1L, "MED_AMOX", "Clavamox 250mg", 8, 20));
+        listener.onLowStock(new MedicineLowStockEvent(UUID.randomUUID(), NOW, uid(9), uid(8), "MED_AMOX", "Clavamox 250mg", 8, 20));
 
         NotificationMessage alert = captureRole(RoleCode.ADMIN);
         assertThat(alert.type()).isEqualTo(NotificationType.LOW_STOCK);

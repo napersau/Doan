@@ -1,9 +1,11 @@
 package com.vetclinic.billing.dto.response;
 
+import java.util.UUID;
+
 /** Dòng thuốc trong đơn: chỉ định chuyên môn, không có giá. */
 public record PrescriptionItemResponse(
         Long id,
-        Long medicineId,
+        UUID medicineId,
         String medicineCode,
         String medicineName,
         String activeIngredient,

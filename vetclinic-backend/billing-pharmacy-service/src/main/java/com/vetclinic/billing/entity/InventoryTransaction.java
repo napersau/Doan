@@ -14,7 +14,7 @@ import java.time.Instant;
 
 /**
  * Nhật ký biến động kho (audit). {@code quantity} CÓ DẤU (+ nhập / - xuất), nên bất biến
- * {@code medicines.stock_quantity = SUM(inventory_transactions.quantity)}. Không lưu tồn sau giao dịch (tính bằng window function).
+ * {@code medicine_stocks.quantity_on_hand = SUM(inventory_transactions.quantity)}. Không lưu tồn sau giao dịch (tính bằng window function).
  * EXPORT_SALE bắt buộc có {@code medicineInvoiceId}.
  */
 @Entity
@@ -30,7 +30,7 @@ public class InventoryTransaction {
     private Long id;
 
     @Column(name = "medicine_id", nullable = false)
-    private Long medicineId;
+    private UUID medicineId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "transaction_type", nullable = false)
@@ -38,6 +38,10 @@ public class InventoryTransaction {
 
     @Column(name = "quantity", nullable = false)
     private int quantity;
+
+    /** Giá nhập một đơn vị (chỉ IMPORT). */
+    @Column(name = "unit_cost", precision = 12, scale = 2)
+    private java.math.BigDecimal unitCost;
 
     @Column(name = "medicine_invoice_id")
     private Long medicineInvoiceId;

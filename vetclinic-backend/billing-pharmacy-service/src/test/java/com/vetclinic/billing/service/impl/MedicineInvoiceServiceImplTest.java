@@ -15,7 +15,7 @@ import com.vetclinic.billing.entity.Prescription;
 import com.vetclinic.billing.entity.PrescriptionItem;
 import com.vetclinic.billing.repository.InventoryTransactionRepository;
 import com.vetclinic.billing.repository.MedicineInvoiceRepository;
-import com.vetclinic.billing.repository.MedicineRepository;
+import com.vetclinic.billing.repository.MedicineStockRepository;
 import com.vetclinic.billing.repository.PrescriptionRepository;
 import com.vetclinic.billing.service.BillingAssembler;
 import com.vetclinic.billing.service.StockAlertPublisher;
@@ -51,6 +51,7 @@ import static com.vetclinic.billing.testsupport.TestData.assertError;
 import static com.vetclinic.billing.testsupport.TestData.item;
 import static com.vetclinic.billing.testsupport.TestData.loginAs;
 import static com.vetclinic.billing.testsupport.TestData.medicine;
+import static com.vetclinic.billing.testsupport.TestData.mid;
 import static com.vetclinic.billing.testsupport.TestData.prescription;
 import static com.vetclinic.billing.testsupport.TestData.visit;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,7 +74,7 @@ class MedicineInvoiceServiceImplTest {
     @Mock
     private PrescriptionRepository prescriptionRepository;
     @Mock
-    private MedicineRepository medicineRepository;
+    private MedicineStockRepository stockRepository;
     @Mock
     private InventoryTransactionRepository inventoryRepository;
     @Mock
@@ -88,14 +89,15 @@ class MedicineInvoiceServiceImplTest {
     private MedicineInvoiceServiceImpl service;
 
     /** "CSDL" giả của kho: deductStock trừ thật vào đây và refresh() đọc lại từ đây, mô phỏng UPDATE nguyên tử. */
-    private final Map<Long, Integer> stockDb = new HashMap<>();
+    private final Map<java.util.UUID, Integer> stockDb = new HashMap<>();
+    private final com.vetclinic.billing.service.MedicinePriceBook priceBook = com.vetclinic.billing.testsupport.TestData.priceBook();
 
     @BeforeEach
     void setUp() {
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        lenient().when(medicineRepository.deductStock(anyLong(), anyInt())).thenAnswer(inv -> {
-            long id = inv.getArgument(0);
+        lenient().when(stockRepository.deduct(any(java.util.UUID.class), anyInt())).thenAnswer(inv -> {
+            java.util.UUID id = inv.getArgument(0);
             int quantity = inv.getArgument(1);
             if (stockDb.get(id) < quantity) {
                 return 0;
@@ -105,7 +107,7 @@ class MedicineInvoiceServiceImplTest {
         });
         lenient().doAnswer(inv -> {
             Medicine medicine = inv.getArgument(0);
-            medicine.setStockQuantity(stockDb.get(medicine.getId()));
+            com.vetclinic.billing.testsupport.TestData.setStock(medicine, stockDb.get(medicine.getId()));
             return null;
         }).when(entityManager).refresh(any(Medicine.class));
         lenient().when(invoiceRepository.saveAndFlush(any(MedicineInvoice.class))).thenAnswer(inv -> {
@@ -116,7 +118,7 @@ class MedicineInvoiceServiceImplTest {
             return invoice;
         });
         lenient().when(visitLookup.tryFind(any(java.util.UUID.class))).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
-        service = new MedicineInvoiceServiceImpl(invoiceRepository, prescriptionRepository, medicineRepository,
+        service = new MedicineInvoiceServiceImpl(invoiceRepository, prescriptionRepository, stockRepository, priceBook,
                 inventoryRepository, visitLookup, new BillingAssembler(), stockAlerts, outboxWriter, entityManager, CLOCK, tm);
     }
 
@@ -178,7 +180,7 @@ class MedicineInvoiceServiceImplTest {
         assertThat(response.payableAmount()).isEqualByComparingTo("157500");   // 10 x 15.000 x 1,05
         assertThat(response.visitCode()).isEqualTo("VIS-2026-7");
         verify(inventoryRepository, never()).save(any());   // lập hóa đơn không đụng kho
-        verify(medicineRepository, never()).deductStock(anyLong(), anyInt());
+        verify(stockRepository, never()).deduct(any(java.util.UUID.class), anyInt());
     }
 
     @Test
@@ -281,6 +283,20 @@ class MedicineInvoiceServiceImplTest {
         assertError(ErrorCode.MEDICINE_NOT_FOUND, () -> service.create(3L, buy(null, 10, 1)));
     }
 
+    @Test
+    void create_medicineWithoutAnEffectivePrice_isRefused_PHARM_1412() {
+        // thuốc không có dòng giá đang hiệu lực trong medicine_prices (không đăng ký vào bảng giá thử)
+        com.vetclinic.billing.entity.Medicine unpriced = com.vetclinic.billing.entity.Medicine.builder().id(mid(900L))
+                .category(com.vetclinic.billing.testsupport.TestData.category()).code("MED_900").name("Chưa có giá").dosageForm("Viên").baseUnit("Viên")
+                .packagingSpec("Hộp").build();
+        unpriced.setStock(com.vetclinic.billing.entity.MedicineStock.builder().quantityOnHand(50).build());
+        Prescription prescription = prescription(3L, 7L, item(10L, unpriced, 5));
+        prescriptionReadyToInvoice(prescription, VisitStatus.WAITING_PAYMENT);
+        when(invoiceRepository.findByPrescriptionId(3L)).thenReturn(Optional.empty());
+
+        assertError(ErrorCode.MEDICINE_PRICE_NOT_FOUND, () -> service.create(3L, buy(null, 10, 1)));
+    }
+
     // ================================================================== sửa / hủy
 
     @Test
@@ -288,8 +304,7 @@ class MedicineInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Prescription prescription = standardPrescription();
         MedicineInvoice invoice = pendingInvoice(prescription, 10, 0);
-        // danh mục đổi giá sau khi lập hóa đơn: hóa đơn vẫn giữ 15.000
-        prescription.getItems().get(0).getMedicine().setSalePrice(new BigDecimal("99999"));
+        // bảng giá đổi sau khi lập hóa đơn (medicine_prices có dòng mới): hóa đơn vẫn giữ snapshot 15.000, sửa số lượng không đổi đơn giá
         when(invoiceRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(invoice));
 
         assertThat(service.updateItems(5L, buy(null, 10, 8)).payableAmount()).isEqualByComparingTo("126000");
@@ -360,7 +375,7 @@ class MedicineInvoiceServiceImplTest {
         MedicineInvoiceResponse response = service.cancel(5L);
 
         assertThat(response.paymentStatus()).isEqualTo(PaymentStatus.CANCELLED);
-        verify(medicineRepository, never()).deductStock(anyLong(), anyInt());
+        verify(stockRepository, never()).deduct(any(java.util.UUID.class), anyInt());
         verify(inventoryRepository, never()).save(any());
     }
 
@@ -380,7 +395,7 @@ class MedicineInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Prescription prescription = standardPrescription();
         MedicineInvoice invoice = pendingInvoice(prescription, 10, 0);
-        stockDb.put(1L, 200);
+        stockDb.put(mid(1L), 200);
         when(invoiceRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(invoice));
 
         MedicineInvoiceResponse response = service.confirmPayment(5L);
@@ -388,7 +403,7 @@ class MedicineInvoiceServiceImplTest {
         assertThat(response.paymentStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(response.cashierId()).isEqualTo(RECEPTIONIST);
         assertThat(response.paidAt()).isEqualTo(CLOCK.instant());
-        assertThat(stockDb.get(1L)).isEqualTo(190);   // 200 -> 190 (Lộ trình Task 4.4)
+        assertThat(stockDb.get(mid(1L))).isEqualTo(190);   // 200 -> 190 (Lộ trình Task 4.4)
 
         ArgumentCaptor<InventoryTransaction> log = ArgumentCaptor.forClass(InventoryTransaction.class);
         verify(inventoryRepository).save(log.capture());
@@ -415,15 +430,15 @@ class MedicineInvoiceServiceImplTest {
                 .unitPrice(new BigDecimal("45000")).vatRate(new BigDecimal("0.05")).build());
         invoice.addItem(MedicineInvoiceItem.builder().prescriptionItem(prescription.getItems().get(0)).quantity(10)
                 .unitPrice(new BigDecimal("15000")).vatRate(new BigDecimal("0.05")).build());
-        stockDb.put(1L, 200);
-        stockDb.put(2L, 100);
+        stockDb.put(mid(1L), 200);
+        stockDb.put(mid(2L), 100);
         when(invoiceRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(invoice));
 
         service.confirmPayment(5L);
 
-        InOrder order = inOrder(medicineRepository);
-        order.verify(medicineRepository).deductStock(1L, 10);
-        order.verify(medicineRepository).deductStock(2L, 2);
+        InOrder order = inOrder(stockRepository);
+        order.verify(stockRepository).deduct(mid(1L), 10);
+        order.verify(stockRepository).deduct(mid(2L), 2);
     }
 
     @Test
@@ -431,8 +446,8 @@ class MedicineInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         Prescription prescription = standardPrescription();
         MedicineInvoice invoice = pendingInvoice(prescription, 10, 2);
-        stockDb.put(1L, 200);
-        stockDb.put(2L, 1);   // Drontal chỉ còn 1, cần 2 (EX-15)
+        stockDb.put(mid(1L), 200);
+        stockDb.put(mid(2L), 1);   // Drontal chỉ còn 1, cần 2 (EX-15)
         when(invoiceRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(invoice));
 
         assertError(ErrorCode.INSUFFICIENT_STOCK, () -> service.confirmPayment(5L));
@@ -452,7 +467,7 @@ class MedicineInvoiceServiceImplTest {
         when(invoiceRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(invoice));
 
         assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(5L));
-        verify(medicineRepository, never()).deductStock(anyLong(), anyInt());
+        verify(stockRepository, never()).deduct(any(java.util.UUID.class), anyInt());
         verify(inventoryRepository, never()).save(any());
     }
 

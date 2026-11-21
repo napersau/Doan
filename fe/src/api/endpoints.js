@@ -158,8 +158,12 @@ export const pharmacyApi = {
   createMedicine: (body) => api.post(`${PHARM}/medicines`, body),
   updateMedicine: (id, body) => api.put(`${PHARM}/medicines/${id}`, body),
   transactions: (id, query) => api.get(`${PHARM}/medicines/${id}/transactions`, query),
-  importStock: (medicineId, body) => api.post(`${PHARM}/inventory/import`, { medicineId, ...body }),
-  adjustStock: (medicineId, body) => api.post(`${PHARM}/inventory/adjust`, { medicineId, ...body }),
+  // Giá bán có lịch sử (đóng dòng đang mở + thêm dòng mới) và tồn kho tách bảng (v4.0)
+  medicinePrices: (id) => api.get(`${PHARM}/medicines/${id}/prices`),
+  changeMedicinePrice: (id, body) => api.post(`${PHARM}/medicines/${id}/prices`, body),
+  importStock: (medicineId, body) => api.post(`${PHARM}/medicines/${medicineId}/import`, body),
+  adjustStock: (medicineId, body) => api.post(`${PHARM}/medicines/${medicineId}/adjust`, body),
+  categories: (query) => api.get(`${PHARM}/medicine-categories`, query),
   // Đơn thuốc v3.0: không giá, không trạng thái; kê vượt tồn chỉ cảnh báo (stockWarnings)
   prescriptions: (query) => api.get(`${PHARM}/prescriptions`, query),
   prescription: (id) => api.get(`${PHARM}/prescriptions/${id}`),

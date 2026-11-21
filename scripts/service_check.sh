@@ -79,4 +79,8 @@ if [ "$MODULE" = "clinical-service" ]; then
   # Bước 3.1: nhóm dịch vụ, dịch vụ UUID, bảng giá có lịch sử, xét nghiệm (chạy thật trên MySQL tạm)
   PYTHONIOENCODING=utf-8 python scripts/catalog_check.py "$PORT" "$CONTAINER" || exit 1
 fi
+if [ "$MODULE" = "billing-pharmacy-service" ]; then
+  # Bước 5.1: danh mục thuốc v4.0, bảng giá có lịch sử, tồn kho tách bảng (chạy thật trên MySQL tạm)
+  PYTHONIOENCODING=utf-8 python scripts/medicine_check.py "$PORT" "$CONTAINER" || exit 1
+fi
 exit 0

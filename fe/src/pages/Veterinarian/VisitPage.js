@@ -247,7 +247,7 @@ function PrescriptionTab({ visit }) {
             <td className="rx-stt"><strong>{index + 1}</strong></td>
             <td className="rx-medicine"><Select id={`rx-medicine-${index}`} aria-label={`Thuốc ${row}`} value={line.medicineId} onChange={(event) => setLine(index, 'medicineId', event.target.value)}>
               <option value="">Chọn thuốc</option>
-              {meds.map((medicine) => <option key={medicine.id} value={medicine.id} disabled={taken.has(String(medicine.id))}>{medicine.name} — {medicine.unit} — tồn {medicine.stockQuantity}</option>)}</Select></td>
+              {meds.map((medicine) => <option key={medicine.id} value={medicine.id} disabled={taken.has(String(medicine.id))}>{medicine.name} — {medicine.baseUnit} — tồn {medicine.stockQuantity}</option>)}</Select></td>
             <td className="rx-number"><Input type="number" min="1" aria-label={`Số lượng ${row}`} value={line.quantity} onChange={(event) => setLine(index, 'quantity', event.target.value)} /></td>
             <td className="rx-number"><Input type="number" min="1" max="365" aria-label={`Số ngày dùng ${row}`} value={line.durationDays} onChange={(event) => setLine(index, 'durationDays', event.target.value)} /></td>
             <td className="rx-text"><Input aria-label={`Liều dùng ${row}`} value={line.dosage} placeholder="1 viên/lần" onChange={(event) => setLine(index, 'dosage', event.target.value)} maxLength={100} /></td>

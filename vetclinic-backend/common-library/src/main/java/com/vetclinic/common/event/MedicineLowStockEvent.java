@@ -11,7 +11,7 @@ public record MedicineLowStockEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,
-        Long medicineId,
+        UUID medicineId,
         String medicineCode,
         String medicineName,
         int stockQuantity,

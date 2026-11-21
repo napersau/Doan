@@ -99,7 +99,7 @@ public class BillingAssembler {
     // ------------------------------------------------------------------ kho
 
     public InventoryTransactionResponse toResponse(InventoryTransaction t) {
-        return new InventoryTransactionResponse(t.getId(), t.getMedicineId(), t.getTransactionType(), t.getQuantity(),
+        return new InventoryTransactionResponse(t.getId(), t.getMedicineId(), t.getTransactionType(), t.getQuantity(), t.getUnitCost(),
                 t.getMedicineInvoiceId(), t.getNotes(), t.getCreatedBy(), t.getCreatedAt());
     }
 }

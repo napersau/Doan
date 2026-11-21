@@ -8,17 +8,19 @@ import com.vetclinic.billing.dto.response.MedicineInvoiceResponse;
 import com.vetclinic.billing.dto.response.VisitSummaryResponse;
 import com.vetclinic.billing.entity.InventoryTransaction;
 import com.vetclinic.billing.entity.Medicine;
+import com.vetclinic.billing.entity.MedicinePrice;
 import com.vetclinic.billing.entity.MedicineInvoice;
 import com.vetclinic.billing.entity.MedicineInvoiceItem;
 import com.vetclinic.billing.entity.Prescription;
 import com.vetclinic.billing.entity.PrescriptionItem;
 import com.vetclinic.billing.repository.InventoryTransactionRepository;
 import com.vetclinic.billing.repository.MedicineInvoiceRepository;
-import com.vetclinic.billing.repository.MedicineRepository;
+import com.vetclinic.billing.repository.MedicineStockRepository;
 import com.vetclinic.billing.repository.PrescriptionRepository;
 import com.vetclinic.billing.service.BillingAssembler;
 import com.vetclinic.billing.service.MedicineInvoiceAmounts;
 import com.vetclinic.billing.service.MedicineInvoiceService;
+import com.vetclinic.billing.service.MedicinePriceBook;
 import com.vetclinic.billing.service.StockAlertPublisher;
 import com.vetclinic.billing.service.VisitLookup;
 import com.vetclinic.common.event.outbox.OutboxWriter;
@@ -58,7 +60,8 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
 
     private final MedicineInvoiceRepository invoiceRepository;
     private final PrescriptionRepository prescriptionRepository;
-    private final MedicineRepository medicineRepository;
+    private final MedicineStockRepository stockRepository;
+    private final MedicinePriceBook priceBook;
     private final InventoryTransactionRepository inventoryRepository;
     private final VisitLookup visitLookup;
     private final BillingAssembler assembler;
@@ -71,14 +74,15 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
 
     public MedicineInvoiceServiceImpl(MedicineInvoiceRepository invoiceRepository,
                                       PrescriptionRepository prescriptionRepository,
-                                      MedicineRepository medicineRepository,
+                                      MedicineStockRepository stockRepository, MedicinePriceBook priceBook,
                                       InventoryTransactionRepository inventoryRepository, VisitLookup visitLookup,
                                       BillingAssembler assembler, StockAlertPublisher stockAlerts,
                                       OutboxWriter outboxWriter, EntityManager entityManager,
                                       Clock clock, PlatformTransactionManager transactionManager) {
         this.invoiceRepository = invoiceRepository;
         this.prescriptionRepository = prescriptionRepository;
-        this.medicineRepository = medicineRepository;
+        this.stockRepository = stockRepository;
+        this.priceBook = priceBook;
         this.inventoryRepository = inventoryRepository;
         this.visitLookup = visitLookup;
         this.assembler = assembler;
@@ -138,8 +142,9 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
                         "Thuốc [" + medicine.getName() + "] đã ngừng kinh doanh, không thể bán");
             }
             assertWithinStock(medicine, line.quantity());   // số lượng kê chỉ để tham khảo: mua nhiều / ít / bằng đều được, nhưng không vượt tồn kho
+            MedicinePrice price = priceBook.current(medicine.getId());   // giá đang hiệu lực trong lịch sử giá (PHARM_1412 nếu chưa có)
             invoice.addItem(MedicineInvoiceItem.builder().prescriptionItem(item).quantity(line.quantity())
-                    .unitPrice(medicine.getSalePrice()).vatRate(medicine.getVatRate()).build());   // snapshot giá / VAT (BR-26)
+                    .unitPrice(price.getSalePrice()).vatRate(price.getVatRate()).build());   // snapshot giá / VAT (BR-26, EX-20)
         }
         BigDecimal discount = request.discountAmount() == null ? BigDecimal.ZERO
                 : MedicineInvoiceAmounts.money(request.discountAmount());
@@ -238,8 +243,8 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
         List<Medicine> touched = new ArrayList<>();
         for (MedicineInvoiceItem line : lines) {
             Medicine medicine = line.getPrescriptionItem().getMedicine();
-            if (medicineRepository.deductStock(medicine.getId(), line.getQuantity()) == 0) {
-                // UPDATE ... WHERE stock_quantity >= :qty ảnh hưởng 0 dòng = thiếu hàng: rollback TOÀN BỘ (kể cả các dòng đã trừ)
+            if (stockRepository.deduct(medicine.getId(), line.getQuantity()) == 0) {
+                // UPDATE medicine_stocks ... WHERE quantity_on_hand >= :qty ảnh hưởng 0 dòng = thiếu hàng: rollback TOÀN BỘ (kể cả các dòng đã trừ)
                 entityManager.refresh(medicine);
                 throw new AppException(ErrorCode.INSUFFICIENT_STOCK, "Không thể bán: thuốc [" + medicine.getName()
                         + "] trong kho không đủ số lượng (còn " + medicine.getStockQuantity() + ", cần " + line.getQuantity()

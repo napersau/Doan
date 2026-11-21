@@ -58,7 +58,7 @@ async function main() {
   await call('POST', `${CLIN}/pet-visits/${visit}/close-visit`, { token: T.doc, body: { finalDiagnosis: 'Viêm da' } });
   const stock = (await call('GET', `${PHARM}/medicines/${AMOX}`, { token: T.admin })).data;
   // đưa tồn về ngưỡng + 10 để lần bán này làm chạm ngưỡng cảnh báo
-  await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: AMOX, delta: -(stock.stockQuantity - stock.minStockAlert - 5), reason: 'e2e đưa tồn gần ngưỡng' } });
+  await call('POST', `${PHARM}/medicines/${AMOX}/adjust`, { token: T.admin, body: { delta: -(stock.stockQuantity - stock.minStockAlert - 5), reason: 'e2e đưa tồn gần ngưỡng' } });
   const invoice = (await call('POST', `${PHARM}/prescriptions/${rx.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx.items[0].id, quantity: 10 }] } })).data;
   await call('POST', `${BILL}/medicine-invoices/${invoice.id}/confirm-payment`, { token: T.rec });
   await expectType('thu thuốc → chủ nuôi nhận MEDICINE_INVOICE_PAID (có số tiền)', T.owner, 'MEDICINE_INVOICE_PAID', { contains: '157500' });

@@ -15,7 +15,7 @@
 -- 1. pet_clinic_auth_db             : auth-service (:8081)             - 9 bảng (v4.0, bước 2.1)
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
 -- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 22 bảng (v4.0, bước 3.1 + 4.1 processed_events + 4.2 vital_signs, medical_records: + service_categories, service_prices, species/lab_test_items SMALLINT)
--- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 6 bảng
+-- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 11 bảng (v4.0, bước 5.1: + medicine_categories, medicine_ingredients, medicine_prices, medicine_stocks)
 -- TỔNG CỘNG: 27 BẢNG
 --
 -- CÁC THAY ĐỔI CHÍNH SO VỚI PHIÊN BẢN 2.0:
@@ -64,6 +64,10 @@ SET @s_deworm     = UUID_TO_BIN('019a9442-d804-747b-9728-edfcf134959d');
 SET @s_cbc        = UUID_TO_BIN('019a9442-d805-75c3-86cd-1efc7485f972');
 SET @s_us         = UUID_TO_BIN('019a9442-d806-7fe9-aab6-60023c504ab3');
 SET @s_xray       = UUID_TO_BIN('019a9442-d807-7b9e-8308-4bc685f447d1');
+SET @m_amox       = UUID_TO_BIN('019a9442-d808-7dbc-a250-489154c55826');
+SET @m_vang       = UUID_TO_BIN('019a9442-d809-7ea7-8e4b-17b6ee239ddb');
+SET @m_pure       = UUID_TO_BIN('019a9442-d80a-7134-8c54-49a51bfb8607');
+SET @m_dron       = UUID_TO_BIN('019a9442-d80b-7e34-a82b-c3f03b8b1ef2');
 
 
 -- ==============================================================================
@@ -780,25 +784,79 @@ CREATE TABLE IF NOT EXISTS processed_events (
 CREATE DATABASE IF NOT EXISTS pet_clinic_billing_pharmacy_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE pet_clinic_billing_pharmacy_db;
 
--- 22. MEDICINES (DANH MỤC THUỐC & TỒN KHO)
--- stock_quantity là phi chuẩn hóa CÓ CHỦ ĐÍCH: về lý thuyết = SUM(inventory_transactions.quantity),
--- nhưng cần lưu để trừ kho nguyên tử (UPDATE ... WHERE stock_quantity >= :qty) và chống bán âm kho.
+-- 38. MEDICINE_CATEGORIES (NHÓM THUỐC - DANH MỤC)
+CREATE TABLE IF NOT EXISTS medicine_categories (
+    id SMALLINT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- 39. MEDICINES (THÔNG TIN THUỐC & QUY CÁCH - KHÔNG CHỨA GIÁ, KHÔNG CHỨA TỒN KHO)
 CREATE TABLE IF NOT EXISTS medicines (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
+    category_id SMALLINT NOT NULL,
     code VARCHAR(50) NOT NULL UNIQUE,
     name VARCHAR(150) NOT NULL,
-    active_ingredient VARCHAR(150) NULL,
-    dosage_form VARCHAR(50) NOT NULL,
-    unit VARCHAR(30) NOT NULL,
-    sale_price DECIMAL(12, 2) NOT NULL, -- Giá bán niêm yết hiện tại
-    vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.05, -- Thuế suất VAT hiện hành của thuốc
-    stock_quantity INT NOT NULL DEFAULT 0,
+    dosage_form VARCHAR(50) NOT NULL, -- Dạng bào chế: viên nén, lọ tiêm đông khô...
+    strength VARCHAR(50) NULL, -- Hàm lượng tổng hiển thị: 250mg
+    base_unit VARCHAR(30) NOT NULL, -- Đơn vị bán nhỏ nhất: viên, lọ, ống
+    packaging_spec VARCHAR(150) NOT NULL, -- Quy cách: Hộp 10 vỉ x 10 viên
+    manufacturer VARCHAR(150) NULL,
+    country_of_origin VARCHAR(100) NULL,
+    registration_number VARCHAR(50) NULL, -- Số đăng ký lưu hành
+    storage_conditions VARCHAR(255) NULL, -- Bảo quản 2 - 8 độ C...
+    requires_prescription BOOLEAN NOT NULL DEFAULT TRUE,
     min_stock_alert INT NOT NULL DEFAULT 10,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE, -- Xóa mềm
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_med_category FOREIGN KEY (category_id) REFERENCES medicine_categories(id),
+    CONSTRAINT chk_med_min_stock CHECK (min_stock_alert >= 0)
+);
+CREATE INDEX idx_med_category ON medicines(category_id, is_active);
+
+-- 40. MEDICINE_INGREDIENTS (THÀNH PHẦN HOẠT CHẤT)
+CREATE TABLE IF NOT EXISTS medicine_ingredients (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    medicine_id BINARY(16) NOT NULL,
+    ingredient_name VARCHAR(150) NOT NULL,
+    strength_value DECIMAL(10, 3) NULL,
+    strength_unit VARCHAR(20) NULL, -- mg, ml, IU, liều...
+    CONSTRAINT fk_mingr_medicine FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE CASCADE,
+    CONSTRAINT uq_mingr UNIQUE (medicine_id, ingredient_name)
+);
+
+-- 41. MEDICINE_PRICES (LỊCH SỬ GIÁ BÁN THUỐC) - quy tắc như service_prices
+CREATE TABLE IF NOT EXISTS medicine_prices (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    medicine_id BINARY(16) NOT NULL,
+    sale_price DECIMAL(12, 2) NOT NULL,
+    vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.05,
+    effective_from DATETIME NOT NULL,
+    effective_to DATETIME NULL,
+    change_reason VARCHAR(255) NULL,
+    created_by BINARY(16) NOT NULL, -- LFK: auth.users (ADMIN)
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_mprice_medicine FOREIGN KEY (medicine_id) REFERENCES medicines(id),
+    CONSTRAINT uq_mprice_from UNIQUE (medicine_id, effective_from),
+    CONSTRAINT chk_mprice_price CHECK (sale_price >= 0),
+    CONSTRAINT chk_mprice_vat CHECK (vat_rate >= 0 AND vat_rate <= 1),
+    CONSTRAINT chk_mprice_period CHECK (effective_to IS NULL OR effective_to > effective_from)
+);
+CREATE INDEX idx_mprice_lookup ON medicine_prices(medicine_id, effective_from, effective_to);
+
+-- 42. MEDICINE_STOCKS (TỒN KHO HIỆN TẠI, 1-1 VỚI MEDICINES)
+-- Tách khỏi medicines: dòng tồn kho bị khóa / cập nhật liên tục khi bán, không ảnh hưởng thông tin thuốc.
+-- Phi chuẩn hóa CÓ CHỦ ĐÍCH: quantity_on_hand = SUM(inventory_transactions.quantity), lưu để trừ kho
+-- nguyên tử (UPDATE ... SET quantity_on_hand = quantity_on_hand - :qty WHERE quantity_on_hand >= :qty).
+CREATE TABLE IF NOT EXISTS medicine_stocks (
+    medicine_id BINARY(16) PRIMARY KEY,
+    quantity_on_hand INT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     version BIGINT NOT NULL DEFAULT 0,
-    CONSTRAINT chk_med_price CHECK (sale_price >= 0),
-    CONSTRAINT chk_med_vat CHECK (vat_rate >= 0 AND vat_rate <= 1),
-    CONSTRAINT chk_med_stock CHECK (stock_quantity >= 0)
+    CONSTRAINT fk_mstock_medicine FOREIGN KEY (medicine_id) REFERENCES medicines(id),
+    CONSTRAINT chk_mstock_qty CHECK (quantity_on_hand >= 0)
 );
 
 -- 23. PRESCRIPTIONS (ĐƠN THUỐC - CHỈ ĐỊNH CHUYÊN MÔN)
@@ -815,7 +873,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
 CREATE TABLE IF NOT EXISTS prescription_items (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     prescription_id BIGINT NOT NULL,
-    medicine_id BIGINT NOT NULL,
+    medicine_id BINARY(16) NOT NULL,
     quantity INT NOT NULL, -- Số lượng bác sĩ kê
     dosage VARCHAR(100) NOT NULL,
     frequency VARCHAR(100) NOT NULL,
@@ -867,9 +925,10 @@ CREATE TABLE IF NOT EXISTS medicine_invoice_items (
 -- Thay reference_id chung chung bằng FK rõ ràng tới hóa đơn thuốc.
 CREATE TABLE IF NOT EXISTS inventory_transactions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    medicine_id BIGINT NOT NULL,
-    transaction_type ENUM('IMPORT', 'EXPORT_SALE', 'ADJUSTMENT') NOT NULL,
+    medicine_id BINARY(16) NOT NULL,
+    transaction_type VARCHAR(20) NOT NULL, -- IMPORT | EXPORT_SALE | ADJUSTMENT
     quantity INT NOT NULL, -- Có dấu: + nhập / - xuất
+    unit_cost DECIMAL(12, 2) NULL, -- Giá nhập (chỉ IMPORT)
     medicine_invoice_id BIGINT NULL, -- Bắt buộc khi EXPORT_SALE
     notes VARCHAR(255) NULL,
     created_by BINARY(16) NOT NULL, -- LFK: auth.users
@@ -918,19 +977,56 @@ JOIN prescriptions p ON p.id = mi.prescription_id
 JOIN medicine_invoice_items mii ON mii.medicine_invoice_id = mi.id
 GROUP BY mi.id, mi.invoice_code, p.visit_id, mi.discount_amount, mi.payment_status, mi.paid_at;
 
--- Seed billing-pharmacy-service
-INSERT INTO medicines (code, name, active_ingredient, dosage_form, unit, sale_price, vat_rate, stock_quantity, min_stock_alert, is_active) VALUES
-('MED_AMOX', 'Clavamox 250mg', 'Amoxicillin + Clavulanate', 'Viên nén', 'Viên', 15000.00, 0.05, 200, 20, TRUE),
-('MED_VANG_7B', 'Vaccine Vanguard Plus 5/L (7 bệnh)', 'Attenuated Virus', 'Lọ tiêm', 'Lọ', 180000.00, 0.05, 50, 10, TRUE),
-('MED_PURE_4B', 'Vaccine Purevax RCP (Mèo)', 'Attenuated Virus', 'Lọ tiêm', 'Lọ', 190000.00, 0.05, 40, 10, TRUE),
-('MED_DRON_DOG', 'Drontal Plus tẩy giun cho chó', 'Febantel, Pyrantel, Praziquantel', 'Viên nén', 'Viên', 45000.00, 0.05, 100, 15, TRUE);
+-- VIEW giá thuốc đang áp dụng kèm tồn kho
+CREATE OR REPLACE VIEW v_current_medicine_prices AS
+SELECT m.id AS medicine_id, m.code, m.name, m.base_unit, m.packaging_spec,
+       mp.sale_price, mp.vat_rate, ms.quantity_on_hand
+FROM medicines m
+JOIN medicine_prices mp ON mp.medicine_id = m.id
+JOIN medicine_stocks ms ON ms.medicine_id = m.id
+WHERE mp.effective_from <= NOW() AND (mp.effective_to IS NULL OR mp.effective_to > NOW());
 
--- Nhập kho ban đầu được ghi nhật ký để thỏa bất biến: stock_quantity = SUM(quantity)
+-- Seed billing-pharmacy-service (dữ liệu mẫu minh họa)
+INSERT INTO medicine_categories (code, name) VALUES
+('ANTIBIOTIC', 'Kháng sinh'),
+('VACCINE', 'Vắc-xin'),
+('ANTIPARASITIC', 'Thuốc trị ký sinh trùng'),
+('SUPPLEMENT', 'Thực phẩm bổ sung, vitamin');
+
+INSERT INTO medicines (id, category_id, code, name, dosage_form, strength, base_unit, packaging_spec, manufacturer, country_of_origin, storage_conditions, requires_prescription, min_stock_alert)
+SELECT v.id, c.id, v.code, v.name, v.form, v.strength, v.unit, v.pack, v.maker, v.origin, v.storage, v.rx, v.min_alert
+FROM (
+    SELECT @m_amox AS id, 'ANTIBIOTIC' AS cat, 'MED_AMOX' AS code, 'Clavamox 250mg' AS name, 'Viên nén' AS form, '250mg' AS strength, 'Viên' AS unit, 'Hộp 10 vỉ x 10 viên' AS pack, 'Zoetis' AS maker, 'Hoa Kỳ' AS origin, 'Nơi khô ráo, dưới 25 độ C' AS storage, TRUE AS rx, 20 AS min_alert
+    UNION ALL SELECT @m_vang, 'VACCINE', 'MED_VANG_7B', 'Vaccine Vanguard Plus 5/L (7 bệnh)', 'Lọ tiêm đông khô', '1 liều', 'Lọ', 'Hộp 25 liều (lọ vaccine + lọ dung môi)', 'Zoetis', 'Hoa Kỳ', 'Bảo quản lạnh 2 - 8 độ C', TRUE, 10
+    UNION ALL SELECT @m_pure, 'VACCINE', 'MED_PURE_4B', 'Vaccine Purevax RCP (Mèo)', 'Lọ tiêm đông khô', '1 liều', 'Lọ', 'Hộp 10 liều', 'Boehringer Ingelheim', 'Pháp', 'Bảo quản lạnh 2 - 8 độ C', TRUE, 10
+    UNION ALL SELECT @m_dron, 'ANTIPARASITIC', 'MED_DRON_DOG', 'Drontal Plus tẩy giun cho chó', 'Viên nén', NULL, 'Viên', 'Hộp 2 vỉ x 2 viên', 'Elanco', 'Đức', 'Nơi khô ráo, dưới 25 độ C', FALSE, 15
+) v JOIN medicine_categories c ON c.code = v.cat;
+
+INSERT INTO medicine_ingredients (medicine_id, ingredient_name, strength_value, strength_unit) VALUES
+(@m_amox, 'Amoxicillin', 200.000, 'mg'),
+(@m_amox, 'Clavulanic acid', 50.000, 'mg'),
+(@m_vang, 'Virus Care, Adeno type 2, Parainfluenza, Parvo (nhược độc)', NULL, NULL),
+(@m_vang, 'Leptospira canicola, icterohaemorrhagiae (vô hoạt)', NULL, NULL),
+(@m_pure, 'Virus Rhinotracheitis, Calici, Panleukopenia (nhược độc)', NULL, NULL),
+(@m_dron, 'Febantel', 150.000, 'mg'),
+(@m_dron, 'Pyrantel embonate', 144.000, 'mg'),
+(@m_dron, 'Praziquantel', 50.000, 'mg');
+
+INSERT INTO medicine_prices (medicine_id, sale_price, vat_rate, effective_from, change_reason, created_by) VALUES
+(@m_amox, 15000.00, 0.05, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@m_vang, 180000.00, 0.05, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@m_pure, 190000.00, 0.05, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@m_dron, 45000.00, 0.05, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin);
+
+INSERT INTO medicine_stocks (medicine_id, quantity_on_hand) VALUES
+(@m_amox, 200), (@m_vang, 50), (@m_pure, 40), (@m_dron, 100);
+
+-- Nhập kho ban đầu được ghi nhật ký để thỏa bất biến: quantity_on_hand = SUM(quantity)
 INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, notes, created_by) VALUES
-(1, 'IMPORT', 200, 'Tồn kho đầu kỳ', @u_admin),
-(2, 'IMPORT', 50, 'Tồn kho đầu kỳ', @u_admin),
-(3, 'IMPORT', 40, 'Tồn kho đầu kỳ', @u_admin),
-(4, 'IMPORT', 100, 'Tồn kho đầu kỳ', @u_admin);
+(@m_amox, 'IMPORT', 200, 'Tồn kho đầu kỳ', @u_admin),
+(@m_vang, 'IMPORT', 50, 'Tồn kho đầu kỳ', @u_admin),
+(@m_pure, 'IMPORT', 40, 'Tồn kho đầu kỳ', @u_admin),
+(@m_dron, 'IMPORT', 100, 'Tồn kho đầu kỳ', @u_admin);
 
 -- ==============================================================================
 -- TRUY VẤN DOANH THU MẪU (không cần thuộc tính tổng tiền)

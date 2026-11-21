@@ -81,7 +81,7 @@ class PrescriptionServiceImplTest {
     }
 
     private static PrescriptionItemRequest line(long medicineId, int quantity) {
-        return new PrescriptionItemRequest(medicineId, quantity, "1 viên", "2 lần/ngày", 5, null);
+        return new PrescriptionItemRequest(com.vetclinic.billing.testsupport.TestData.mid(medicineId), quantity, "1 viên", "2 lần/ngày", 5, null);
     }
 
     private static PrescriptionRequest request(long visitId, PrescriptionItemRequest... lines) {
@@ -100,7 +100,7 @@ class PrescriptionServiceImplTest {
         doctorOnInProgressVisit(7L);
         Medicine amox = medicine(1L, "Clavamox", "15000", 200);
         when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
-        when(medicineRepository.findAllById(any())).thenReturn(List.of(amox));
+        when(medicineRepository.findWithCategoryAndStockByIdIn(any())).thenReturn(List.of(amox));
 
         PrescriptionResponse response = service.create(request(7L, line(1L, 10)));
 
@@ -118,7 +118,7 @@ class PrescriptionServiceImplTest {
         doctorOnInProgressVisit(7L);
         Medicine amox = medicine(1L, "Clavamox 250mg", "15000", 200);
         when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
-        when(medicineRepository.findAllById(any())).thenReturn(List.of(amox));
+        when(medicineRepository.findWithCategoryAndStockByIdIn(any())).thenReturn(List.of(amox));
 
         PrescriptionResponse response = service.create(request(7L, line(1L, 300)));   // EX-13
 
@@ -157,7 +157,7 @@ class PrescriptionServiceImplTest {
     void create_concurrentDuplicateCaughtByUniqueConstraint() {
         doctorOnInProgressVisit(7L);
         when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
-        when(medicineRepository.findAllById(any())).thenReturn(List.of(medicine(1L, "Clavamox", "15000", 200)));
+        when(medicineRepository.findWithCategoryAndStockByIdIn(any())).thenReturn(List.of(medicine(1L, "Clavamox", "15000", 200)));
         when(prescriptionRepository.saveAndFlush(any(Prescription.class))).thenThrow(new DataIntegrityViolationException("dup"));
 
         assertError(ErrorCode.PRESCRIPTION_ALREADY_EXISTS, () -> service.create(request(7L, line(1L, 1))));
@@ -177,7 +177,7 @@ class PrescriptionServiceImplTest {
         Medicine inactive = medicine(1L, "Thuốc cũ", "1000", 10);
         inactive.setActive(false);
         when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
-        when(medicineRepository.findAllById(any())).thenReturn(List.of(inactive));
+        when(medicineRepository.findWithCategoryAndStockByIdIn(any())).thenReturn(List.of(inactive));
 
         assertError(ErrorCode.MEDICINE_NOT_FOUND, () -> service.create(request(7L, line(1L, 1))));
         assertError(ErrorCode.MEDICINE_NOT_FOUND, () -> service.create(request(7L, line(2L, 1))));   // #2 không có trong danh mục
@@ -197,12 +197,12 @@ class PrescriptionServiceImplTest {
         when(prescriptionRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
         when(invoiceRepository.existsByPrescriptionIdAndPaymentStatusNot(3L, PaymentStatus.CANCELLED)).thenReturn(false);
         when(invoiceItemRepository.existsByPrescriptionItemId(11L)).thenReturn(false);
-        when(medicineRepository.findAllById(any())).thenReturn(List.of(amox, vanguard));
+        when(medicineRepository.findWithCategoryAndStockByIdIn(any())).thenReturn(List.of(amox, vanguard));
 
         // giữ Clavamox (đổi 5 -> 8), bỏ Drontal, thêm Vanguard
         PrescriptionResponse response = service.update(3L, request(7L, line(1L, 8), line(3L, 1)));
 
-        assertThat(response.items()).extracting(i -> i.medicineId()).containsExactly(1L, 3L);
+        assertThat(response.items()).extracting(i -> i.medicineId()).containsExactly(com.vetclinic.billing.testsupport.TestData.mid(1L), com.vetclinic.billing.testsupport.TestData.mid(3L));
         assertThat(existing.getItems().get(0).getId()).isEqualTo(10L);   // dòng cũ được cập nhật tại chỗ
         assertThat(existing.getItems().get(0).getQuantity()).isEqualTo(8);
         assertThat(existing.getItems()).hasSize(2);
@@ -231,7 +231,7 @@ class PrescriptionServiceImplTest {
         when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
         when(prescriptionRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
         when(invoiceRepository.existsByPrescriptionIdAndPaymentStatusNot(3L, PaymentStatus.CANCELLED)).thenReturn(false);   // hóa đơn đã hủy
-        when(medicineRepository.findAllById(any())).thenReturn(List.of(amox));
+        when(medicineRepository.findWithCategoryAndStockByIdIn(any())).thenReturn(List.of(amox));
         when(invoiceItemRepository.existsByPrescriptionItemId(11L)).thenReturn(true);   // hóa đơn đã hủy vẫn tham chiếu dòng này
 
         assertError(ErrorCode.PRESCRIPTION_LOCKED, () -> service.update(3L, request(7L, line(1L, 5))));

@@ -29,10 +29,10 @@ class StockAlertPublisherTest {
 
     private static Medicine medicine(int stock, int minAlert) {
         Medicine medicine = new Medicine();
-        medicine.setId(7L);
+        medicine.setId(com.vetclinic.billing.testsupport.TestData.mid(7L));
         medicine.setCode("MED_AMOX");
         medicine.setName("Clavamox 250mg");
-        medicine.setStockQuantity(stock);
+        medicine.setStock(com.vetclinic.billing.entity.MedicineStock.builder().quantityOnHand(stock).build());
         medicine.setMinStockAlert(minAlert);
         return medicine;
     }
@@ -42,10 +42,11 @@ class StockAlertPublisherTest {
         publisher.publishIfLow(medicine(20, 20), ADMIN);   // đúng ngưỡng vẫn cảnh báo (stock <= min)
 
         ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
-        verify(outboxWriter).write(eq("MEDICINE"), eq(7L), event.capture());
+        verify(outboxWriter).write(eq("MEDICINE"), eq(com.vetclinic.billing.testsupport.TestData.mid(7L)), event.capture());
         MedicineLowStockEvent low = (MedicineLowStockEvent) event.getValue();
         assertThat(low.routingKey()).isEqualTo("pharmacy.low_stock");
         assertThat(low.medicineCode()).isEqualTo("MED_AMOX");
+        assertThat(low.medicineId()).isEqualTo(com.vetclinic.billing.testsupport.TestData.mid(7L));
         assertThat(low.actorUserId()).isEqualTo(ADMIN);
         assertThat(low.eventId()).isNotNull();
         assertThat(low.occurredAt()).isEqualTo(NOW);

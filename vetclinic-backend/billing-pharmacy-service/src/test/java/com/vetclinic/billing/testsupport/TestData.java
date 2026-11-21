@@ -3,6 +3,10 @@ package com.vetclinic.billing.testsupport;
 import com.vetclinic.billing.constant.VisitStatus;
 import com.vetclinic.billing.dto.response.VisitSummaryResponse;
 import com.vetclinic.billing.entity.Medicine;
+import com.vetclinic.billing.entity.MedicineCategory;
+import com.vetclinic.billing.entity.MedicinePrice;
+import com.vetclinic.billing.entity.MedicineStock;
+import com.vetclinic.billing.service.MedicinePriceBook;
 import com.vetclinic.billing.entity.Prescription;
 import com.vetclinic.billing.entity.PrescriptionItem;
 import com.vetclinic.common.exception.AppException;
@@ -40,9 +44,44 @@ public final class TestData {
         return UUID.fromString(String.format("019a9442-d810-7000-8000-%012d", n));
     }
 
+    /** UUID cố định của thuốc thử (019a9442-d808-7000-8000-0000000000NN), cùng dạng với dữ liệu seed. */
+    public static UUID mid(long n) {
+        return UUID.fromString(String.format("019a9442-d808-7000-8000-%012d", n));
+    }
+
+    /** Giá bán hiện hành của từng thuốc thử, để {@link #priceBook()} trả đúng giá như {@code medicine_prices} (VAT 5%). */
+    private static final java.util.Map<UUID, BigDecimal> PRICES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static MedicineCategory category() {
+        return MedicineCategory.builder().id((short) 1).code("ANTIBIOTIC").name("Kháng sinh").build();
+    }
+
+    /** Thuốc thử: giá không nằm trên thuốc mà đăng ký vào {@link #priceBook()}; tồn kho là dòng medicine_stocks gắn kèm. */
     public static Medicine medicine(long id, String name, String price, int stock) {
-        return Medicine.builder().id(id).code("MED_" + id).name(name).dosageForm("Viên nén").unit("Viên")
-                .salePrice(new BigDecimal(price)).vatRate(new BigDecimal("0.05")).stockQuantity(stock).minStockAlert(10).active(true).version(0L).build();
+        Medicine medicine = Medicine.builder().id(mid(id)).category(category()).code("MED_" + id).name(name).dosageForm("Viên nén")
+                .baseUnit("Viên").packagingSpec("Hộp 10 vỉ x 10 viên").minStockAlert(10).active(true).build();
+        medicine.setStock(MedicineStock.builder().medicineId(medicine.getId()).medicine(medicine).quantityOnHand(stock).version(0L).build());
+        PRICES.put(medicine.getId(), new BigDecimal(price));
+        return medicine;
+    }
+
+    /** Đổi tồn kho của thuốc thử (mô phỏng UPDATE nguyên tử + refresh). */
+    public static void setStock(Medicine medicine, int quantity) {
+        medicine.getStock().setQuantityOnHand(quantity);
+    }
+
+    /** MedicinePriceBook giả: giá hiện hành = giá đã khai báo khi tạo thuốc thử, VAT 5%. Thuốc không đăng ký -> PHARM_1412. */
+    public static MedicinePriceBook priceBook() {
+        MedicinePriceBook book = org.mockito.Mockito.mock(MedicinePriceBook.class);
+        org.mockito.Mockito.lenient().when(book.current(org.mockito.ArgumentMatchers.any(UUID.class))).thenAnswer(inv -> {
+            UUID medicineId = inv.getArgument(0);
+            BigDecimal price = PRICES.get(medicineId);
+            if (price == null) {
+                throw new AppException(ErrorCode.MEDICINE_PRICE_NOT_FOUND);
+            }
+            return MedicinePrice.builder().salePrice(price).vatRate(new BigDecimal("0.05")).build();
+        });
+        return book;
     }
 
     /** UUID cố định của đợt khám thử (019a9442-d840-7000-8000-0000000000NN), cùng dạng với bên clinical. */
