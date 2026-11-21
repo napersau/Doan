@@ -2,8 +2,8 @@ package com.vetclinic.billing.repository;
 
 import com.vetclinic.billing.constant.PaymentStatus;
 import com.vetclinic.billing.entity.MedicineInvoice;
-import org.springframework.data.jpa.repository.EntityGraph;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -13,25 +13,28 @@ import org.springframework.stereotype.Repository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
-public interface MedicineInvoiceRepository extends JpaRepository<MedicineInvoice, Long> {
+public interface MedicineInvoiceRepository extends JpaRepository<MedicineInvoice, UUID> {
 
     /** Khóa dòng cho mọi thao tác ghi lên hóa đơn (sửa / hủy / thu tiền): hai thu ngân bấm đồng thời thì người sau chờ (EX-16). */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from MedicineInvoice i where i.id = :id")
-    Optional<MedicineInvoice> findByIdForUpdate(@Param("id") Long id);
+    Optional<MedicineInvoice> findByIdForUpdate(@Param("id") UUID id);
 
-    @EntityGraph(attributePaths = {"prescription", "items", "items.prescriptionItem", "items.prescriptionItem.medicine"})
-    Optional<MedicineInvoice> findWithItemsById(Long id);
+    /** Khóa theo đơn thuốc: dựng nháp từ sự kiện không chen vào lúc Thu ngân đang sửa / thu hóa đơn đó. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from MedicineInvoice i where i.prescriptionId = :prescriptionId")
+    Optional<MedicineInvoice> findByPrescriptionIdForUpdate(@Param("prescriptionId") UUID prescriptionId);
 
-    @EntityGraph(attributePaths = {"prescription", "items", "items.prescriptionItem", "items.prescriptionItem.medicine"})
-    Optional<MedicineInvoice> findWithItemsByPrescriptionId(Long prescriptionId);
+    @EntityGraph(attributePaths = {"items", "items.medicine", "items.medicine.stock"})
+    Optional<MedicineInvoice> findWithItemsById(UUID id);
 
-    Optional<MedicineInvoice> findByPrescriptionId(Long prescriptionId);
+    @EntityGraph(attributePaths = {"items", "items.medicine", "items.medicine.stock"})
+    List<MedicineInvoice> findWithItemsByVisitIdOrderByCreatedAtDesc(UUID visitId);
 
-    /** Có hóa đơn thuốc "chưa hủy" (PENDING/PAID) thì đơn thuốc bị khóa chỉnh sửa (PHARM_1411). */
-    boolean existsByPrescriptionIdAndPaymentStatusNot(Long prescriptionId, PaymentStatus status);
+    Optional<MedicineInvoice> findByPrescriptionId(UUID prescriptionId);
 
     /** Hóa đơn PAID có ngày thu tiền trong [start, end): nguồn của báo cáo doanh thu thuốc (FR-69). */
     @Query("select new com.vetclinic.billing.repository.MedicineRevenueRow(mi.paidAt, mi.discountAmount, "

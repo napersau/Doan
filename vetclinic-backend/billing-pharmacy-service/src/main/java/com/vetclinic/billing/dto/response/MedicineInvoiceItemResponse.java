@@ -1,12 +1,11 @@
 package com.vetclinic.billing.dto.response;
 
-import java.util.UUID;
 import java.math.BigDecimal;
+import java.util.UUID;
 
-/** Dòng hóa đơn thuốc; unitPrice / vatRate là snapshot lúc lập hóa đơn. */
+/** Dòng hóa đơn thuốc; unitPrice / vatRate là snapshot (làm mới lúc thu tiền, EX-20). */
 public record MedicineInvoiceItemResponse(
         Long id,
-        Long prescriptionItemId,
         UUID medicineId,
         String medicineCode,
         String medicineName,

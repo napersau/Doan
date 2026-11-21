@@ -21,7 +21,18 @@ const visitOf = async (id) => (await call('GET', `${CLIN}/pet-visits/${id}`, { t
 const labQueue = async () => (await call('GET', `${CLIN}/lab-queue`, { token: T.lab })).data;
 const imagingQueue = async () => (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
 const detailOf = (queue, visitId) => queue.find((item) => item.visitId === visitId)?.serviceDetailId;
-const rx = (visitId, medicineId, quantity) => ({ visitId, doctorNotes: 'e2e', items: [{ medicineId, quantity, dosage: '1 viên/lần', frequency: '2 lần/ngày', durationDays: 5 }] });
+const rxBody = (medicineId, quantity) => ({ doctorNotes: 'e2e', items: [{ medicineId, quantity, dosage: '1 viên/lần', frequency: '2 lần/ngày', durationDays: 5 }] });
+// v4.0 (5.2): đơn thuốc thuộc clinical, lưu cả đơn bằng PUT
+const savePrescription = (token, visitId, medicineId, quantity) => call('PUT', `${CLIN}/pet-visits/${visitId}/prescription`, { token, body: rxBody(medicineId, quantity) });
+// Hóa đơn thuốc NHÁP do billing tự tạo từ PrescriptionCreatedEvent sau khi chốt ca (qua outbox + RabbitMQ, thường dưới 1 giây)
+async function draftOf(visitId) {
+  for (let i = 0; i < 40; i += 1) {
+    const res = await call('GET', `${BILL}/medicine-invoices?visitId=${visitId}`, { token: T.rec });
+    if (res.status === 200 && res.data.length) return res.data[0];
+    await sleep(500);
+  }
+  return null;
+}
 const close = (token, id) => call('POST', `${CLIN}/pet-visits/${id}/close-visit`, { token, body: { finalDiagnosis: 'Viêm da', treatmentPlan: 'Dùng thuốc', doctorAdvice: 'Theo dõi' } });
 async function labResults(detailId) {
   const form = (await call('GET', `${CLIN}/service-details/${detailId}/lab-form`, { token: T.lab })).data;
@@ -96,16 +107,18 @@ async function main() {
   await doctorCallNext(T.doc2);
   check('bắt đầu giai đoạn 2 (T07)', (await call('POST', `${CLIN}/pet-visits/${v1}/start-phase2`, { token: T.doc2 })).status === 200);
   const stock0 = await stockOf(AMOX);
-  const prescription = await call('POST', `${PHARM}/prescriptions`, { token: T.doc2, body: rx(v1, AMOX, 10) });
-  check('kê đơn 10 Clavamox (không giá, không trạng thái)', prescription.status === 201 && prescription.data.stockWarnings.length === 0 && !('status' in prescription.data), brief(prescription));
+  const prescription = await savePrescription(T.doc2, v1, AMOX, 10);
+  check('kê đơn 10 Clavamox (không giá, không trạng thái)', prescription.status === 200 && prescription.data.stockWarnings.length === 0 && !('status' in prescription.data), brief(prescription));
+  check('chưa chốt ca: billing chưa có hóa đơn thuốc', (await call('GET', `${BILL}/medicine-invoices?visitId=${v1}`, { token: T.rec })).data.length === 0);
   check('chốt ca (T09) → WAITING_PAYMENT', (await close(T.doc2, v1)).data?.status === 'WAITING_PAYMENT');
   const statement = await statementOf(v1);
   check('3 hóa đơn dịch vụ (khám, CBC, X-quang) đã thu trước đủ 530.000đ, không còn khoản chờ', statement.invoices.length === 3 && Number(statement.totalPaid) === 530000 && Number(statement.totalPending) === 0, JSON.stringify(statement).slice(0, 300));
   check('VIEW v_service_invoice_amounts = 530.000', Number(sql(`SELECT SUM(payable_amount) FROM pet_clinic_clinical_db.v_service_invoice_amounts WHERE visit_id=${uuidSql(v1)}`)) === 530000);
-  const mi = await call('POST', `${PHARM}/prescriptions/${prescription.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: prescription.data.items[0].id, quantity: 10 }], discountAmount: 0 } });
-  check('hóa đơn thuốc 157.500đ (10 × 15.000 × 1,05)', mi.status === 201 && Number(mi.data.payableAmount) === 157500);
-  check('VIEW v_medicine_invoice_amounts = 157.500', Number(sql(`SELECT payable_amount FROM pet_clinic_billing_pharmacy_db.v_medicine_invoice_amounts WHERE invoice_id=${mi.data.id}`)) === 157500);
-  check('thu tiền thuốc: 200 → 190, trạng thái ca không đổi', (await call('POST', `${BILL}/medicine-invoices/${mi.data.id}/confirm-payment`, { token: T.rec })).status === 200 && (await stockOf(AMOX)) === stock0 - 10 && (await visitOf(v1)).status === 'WAITING_PAYMENT');
+  const mi = await draftOf(v1);
+  check('chốt ca → PrescriptionCreatedEvent → hóa đơn thuốc NHÁP PENDING 157.500đ (10 × 15.000 × 1,05)', mi && mi.paymentStatus === 'PENDING' && Number(mi.payableAmount) === 157500 && mi.items.length === 1 && mi.items[0].quantity === 10 && mi.items[0].prescribedQuantity === 10, brief(mi));
+  check('VIEW v_medicine_invoice_amounts = 157.500', Number(sql(`SELECT payable_amount FROM pet_clinic_billing_pharmacy_db.v_medicine_invoice_amounts WHERE invoice_id=${uuidSql(mi.id)}`)) === 157500);
+  check('nháp chưa đụng kho', (await stockOf(AMOX)) === stock0);
+  check('thu tiền thuốc: 200 → 190, trạng thái ca không đổi', (await call('POST', `${BILL}/medicine-invoices/${mi.id}/confirm-payment`, { token: T.rec })).status === 200 && (await stockOf(AMOX)) === stock0 - 10 && (await visitOf(v1)).status === 'WAITING_PAYMENT');
   check('bất biến SUM(inventory_transactions.quantity) = medicine_stocks.quantity_on_hand', sql(`SELECT (SELECT SUM(quantity) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_id=${medicineIdSql('MED_AMOX')}) - (SELECT quantity_on_hand FROM pet_clinic_billing_pharmacy_db.medicine_stocks WHERE medicine_id=${medicineIdSql('MED_AMOX')})`) === '0');
   const finished = await pay(v1, []);
   check('không còn gì để thu: thu ngân xác nhận (danh sách rỗng) → COMPLETED (T10, AD-03)', finished.status === 200 && (await visitOf(v1)).status === 'COMPLETED', brief(finished));
@@ -151,35 +164,43 @@ async function main() {
   const p2 = await newPet('E2E-ex15');
   const v2 = await admit(p2, DOC3);
   await doctorCallNext(T.doc3); await startExam(T.doc3, v2);
-  const rx2 = await call('POST', `${PHARM}/prescriptions`, { token: T.doc3, body: rx(v2, DRON, 10) });   // Drontal tồn 100
+  await savePrescription(T.doc3, v2, DRON, 10);   // Drontal tồn 100
   await close(T.doc3, v2);
   const stock4 = await stockOf(DRON);
-  const mi2 = await call('POST', `${PHARM}/prescriptions/${rx2.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx2.data.items[0].id, quantity: 10 }] } });
-  // kho giảm giữa lúc lập hóa đơn và lúc thu tiền (bán chỗ khác, kiểm kê...): lúc lập còn đủ nên được lập, lúc thu mới thiếu
+  const mi2 = await draftOf(v2);   // nháp mua đúng đơn (10 viên)
+  // kho giảm giữa lúc lập nháp và lúc thu tiền (bán chỗ khác, kiểm kê...): lúc lập còn đủ, lúc thu mới thiếu
   await call('POST', `${PHARM}/medicines/${DRON}/adjust`, { token: T.admin, body: { delta: -(stock4 - 5), reason: 'e2e đưa tồn về 5' } });
-  const lack = await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec });
+  const lack = await call('POST', `${BILL}/medicine-invoices/${mi2.id}/confirm-payment`, { token: T.rec });
   check('EX-15: thiếu kho → 409 PHARM_1406', lack.status === 409 && lack.code === 'PHARM_1406');
-  check('EX-15: tồn vẫn 5, không có dòng EXPORT_SALE, hóa đơn vẫn PENDING', (await stockOf(DRON)) === 5 && sql(`SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_invoice_id=${mi2.data.id}`) === '0' && (await call('GET', `${BILL}/medicine-invoices/${mi2.data.id}`, { token: T.rec })).data.paymentStatus === 'PENDING');
-  const tooMuch = await call('PUT', `${BILL}/medicine-invoices/${mi2.data.id}/items`, { token: T.rec, body: { items: [{ prescriptionItemId: rx2.data.items[0].id, quantity: 6 }] } });
+  check('EX-15: tồn vẫn 5, không có dòng EXPORT_SALE, hóa đơn vẫn PENDING', (await stockOf(DRON)) === 5 && sql(`SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_invoice_id=${uuidSql(mi2.id)}`) === '0' && (await call('GET', `${BILL}/medicine-invoices/${mi2.id}`, { token: T.rec })).data.paymentStatus === 'PENDING');
+  const tooMuch = await call('PUT', `${BILL}/medicine-invoices/${mi2.id}/items`, { token: T.rec, body: { items: [{ medicineId: DRON, quantity: 6 }] } });
   check('sửa hóa đơn: không bán quá tồn kho (kho còn 5, sửa lên 6 → 409 PHARM_1406)', tooMuch.status === 409 && tooMuch.code === 'PHARM_1406', brief(tooMuch));
-  await call('PUT', `${BILL}/medicine-invoices/${mi2.data.id}/items`, { token: T.rec, body: { items: [{ prescriptionItemId: rx2.data.items[0].id, quantity: 5 }] } });
-  check('EX-15: sửa về 5 viên rồi thu lại → PAID, tồn 0', (await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec })).status === 200 && (await stockOf(DRON)) === 0);
-  check('EX-16: thu lần hai → 409 BILL_1403', (await call('POST', `${BILL}/medicine-invoices/${mi2.data.id}/confirm-payment`, { token: T.rec })).code === 'BILL_1403');
+  await call('PUT', `${BILL}/medicine-invoices/${mi2.id}/items`, { token: T.rec, body: { items: [{ medicineId: DRON, quantity: 5 }] } });
+  check('EX-15: sửa về 5 viên rồi thu lại → PAID, tồn 0', (await call('POST', `${BILL}/medicine-invoices/${mi2.id}/confirm-payment`, { token: T.rec })).status === 200 && (await stockOf(DRON)) === 0);
+  check('EX-16: thu lần hai → 409 BILL_1403', (await call('POST', `${BILL}/medicine-invoices/${mi2.id}/confirm-payment`, { token: T.rec })).code === 'BILL_1403');
   // thu đồng thời trên hóa đơn khác
   await call('POST', `${PHARM}/medicines/${DRON}/import`, { token: T.admin, body: { quantity: 50, notes: 'e2e' } });
   const p3 = await newPet('E2E-ex16');
   const v3 = await admit(p3, DOC3);
   await doctorCallNext(T.doc3); await startExam(T.doc3, v3);
-  const rx3 = await call('POST', `${PHARM}/prescriptions`, { token: T.doc3, body: rx(v3, DRON, 10) });
+  await savePrescription(T.doc3, v3, DRON, 10);
   await close(T.doc3, v3);
   const stockNow = await stockOf(DRON);
-  const overStock = await call('POST', `${PHARM}/prescriptions/${rx3.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx3.data.items[0].id, quantity: stockNow + 1 }] } });
-  check('lập hóa đơn: không bán quá tồn kho (409 PHARM_1406)', overStock.status === 409 && overStock.code === 'PHARM_1406', brief(overStock));
-  const mi3 = await call('POST', `${PHARM}/prescriptions/${rx3.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx3.data.items[0].id, quantity: 12 }] } });
-  check('số lượng bác sĩ kê chỉ để tham khảo: kê 10, khách mua 12 (≤ tồn) vẫn lập được', mi3.status === 201 && mi3.data.items[0].quantity === 12 && mi3.data.items[0].prescribedQuantity === 10, brief(mi3));
-  check('hóa đơn trả kèm tồn kho hiện tại để màn hình bán thuốc hiển thị', mi3.data.items[0].stockQuantity === stockNow, brief(mi3));
+  const mi3 = await draftOf(v3);
+  const overStock = await call('PUT', `${BILL}/medicine-invoices/${mi3.id}/items`, { token: T.rec, body: { items: [{ medicineId: DRON, quantity: stockNow + 1 }] } });
+  check('sửa hóa đơn: không bán quá tồn kho (409 PHARM_1406)', overStock.status === 409 && overStock.code === 'PHARM_1406', brief(overStock));
+  const mi3b = await call('PUT', `${BILL}/medicine-invoices/${mi3.id}/items`, { token: T.rec, body: { items: [{ medicineId: DRON, quantity: 12 }] } });
+  check('số lượng bác sĩ kê chỉ để tham khảo: kê 10, khách mua 12 (≤ tồn) vẫn sửa được', mi3b.status === 200 && mi3b.data.items[0].quantity === 12 && mi3b.data.items[0].prescribedQuantity === 10, brief(mi3b));
+  check('hóa đơn trả kèm tồn kho hiện tại để màn hình bán thuốc hiển thị', mi3b.data.items[0].stockQuantity === stockNow, brief(mi3b));
+  // EX-19: sự kiện chốt ca giao lại không tạo hóa đơn thứ hai và không dựng lại nháp đã sửa
+  const outboxRow = `routing_key='prescription.created' AND aggregate_id='${v3}'`;
+  sql(`UPDATE pet_clinic_clinical_db.outbox_events SET status='PENDING', published_at=NULL, next_attempt_at=UTC_TIMESTAMP() WHERE ${outboxRow}`);
+  for (let i = 0; i < 40 && sql(`SELECT status FROM pet_clinic_clinical_db.outbox_events WHERE ${outboxRow}`) !== 'PUBLISHED'; i += 1) await sleep(500);
+  await sleep(2000);
+  check('EX-19: relay gửi lại; vẫn đúng 1 hóa đơn thuốc cho đơn, nháp đã sửa (12 viên) không bị dựng lại', sql(`SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.medicine_invoices WHERE visit_id=${uuidSql(v3)}`) === '1' && (await call('GET', `${BILL}/medicine-invoices/${mi3.id}`, { token: T.rec })).data.items[0].quantity === 12);
+  check('EX-19: processed_events có đúng 1 dòng cho sự kiện này', sql(`SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.processed_events WHERE consumer='billing.prescription-created' AND event_id=(SELECT event_id FROM pet_clinic_clinical_db.outbox_events WHERE ${outboxRow})`) === '1');
   const before = await stockOf(DRON);
-  const race = await Promise.all([1, 2, 3, 4, 5].map(() => call('POST', `${BILL}/medicine-invoices/${mi3.data.id}/confirm-payment`, { token: T.rec })));
+  const race = await Promise.all([1, 2, 3, 4, 5].map(() => call('POST', `${BILL}/medicine-invoices/${mi3.id}/confirm-payment`, { token: T.rec })));
   check('EX-16 đồng thời: đúng 1/5 yêu cầu thu được, 4 bị từ chối 409', race.filter((r) => r.status === 200).length === 1 && race.filter((r) => r.status === 409).length === 4, race.map((r) => r.status).join(','));
   check('EX-16 đồng thời: kho chỉ trừ đúng một lần', (await stockOf(DRON)) === before - 12);
   check('bất biến kho giữ nguyên sau EX-15/16 (Drontal)', sql(`SELECT (SELECT SUM(quantity) FROM pet_clinic_billing_pharmacy_db.inventory_transactions WHERE medicine_id=${medicineIdSql('MED_DRON_DOG')}) - (SELECT quantity_on_hand FROM pet_clinic_billing_pharmacy_db.medicine_stocks WHERE medicine_id=${medicineIdSql('MED_DRON_DOG')})`) === '0');
@@ -262,8 +283,8 @@ async function main() {
 
   step('H. Phân quyền và /internal bị chặn ở Gateway');
   check('/internal/** từ ngoài bị chặn', [403, 404].includes((await call('GET', `/internal/pet-visits/${v1}/summary`)).status));
-  check('lễ tân không kê đơn (403)', (await call('POST', `${PHARM}/prescriptions`, { token: T.rec, body: rx(v1, AMOX, 1) })).status === 403);
-  check('bác sĩ không thu tiền thuốc (403)', (await call('POST', `${BILL}/medicine-invoices/${mi.data.id}/confirm-payment`, { token: T.doc2 })).status === 403);
+  check('lễ tân không kê đơn (403)', (await savePrescription(T.rec, v1, AMOX, 1)).status === 403);
+  check('bác sĩ không thu tiền thuốc (403)', (await call('POST', `${BILL}/medicine-invoices/${mi.id}/confirm-payment`, { token: T.doc2 })).status === 403);
   check('không token → 401 SYS_1002', (await call('GET', `${CLIN}/pet-visits/queue`)).code === 'SYS_1002');
 
   step('I. Transactional Outbox (v4 Phase 1): sự kiện nghiệp vụ đi qua outbox_events và đều được OutboxRelay gửi đi');
@@ -276,8 +297,8 @@ async function main() {
   check('mọi dòng outbox của luồng chuẩn đều PUBLISHED (không còn PENDING / FAILED)', notPublished === 0, `${notPublished} dòng chưa gửi`);
   const outboxTypes = sql(['pet_clinic_appointment_db', 'pet_clinic_clinical_db', 'pet_clinic_billing_pharmacy_db']
     .map((db) => `SELECT event_type FROM ${db}.outbox_events`).join(' UNION ')).split('\n').filter(Boolean).sort();
-  const expectedTypes = ['AppointmentBookedEvent', 'MedicineInvoicePaidEvent', 'MedicineLowStockEvent', 'ParaclinicalResultsReadyEvent', 'VisitCheckedInEvent', 'VisitCompletedEvent'];
-  check('6 loại sự kiện đã đi qua outbox: đặt lịch, tiếp nhận, có kết quả CLS, hoàn tất ca, thu tiền thuốc, tồn kho thấp',
+  const expectedTypes = ['AppointmentBookedEvent', 'MedicineInvoicePaidEvent', 'PrescriptionCreatedEvent', 'MedicineLowStockEvent', 'ParaclinicalResultsReadyEvent', 'VisitCheckedInEvent', 'VisitCompletedEvent'];
+  check('7 loại sự kiện đã đi qua outbox: đặt lịch, tiếp nhận, có kết quả CLS, hoàn tất ca, đơn thuốc chốt ca, thu tiền thuốc, tồn kho thấp',
     expectedTypes.every((type) => outboxTypes.includes(type)), outboxTypes.join(','));
   check('phiếu xếp hàng và gọi số gửi thẳng, không qua outbox (D9)',
     Number(sql("SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type IN ('QueueTicketIssuedEvent', 'PatientCalledEvent')")) === 0);

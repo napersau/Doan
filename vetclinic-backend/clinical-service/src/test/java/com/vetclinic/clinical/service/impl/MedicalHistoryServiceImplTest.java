@@ -1,11 +1,11 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AuthClient;
-import com.vetclinic.clinical.client.BillingClient;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.MedicalHistoryEntry;
 import com.vetclinic.clinical.dto.response.MedicalRecordResponse;
 import com.vetclinic.clinical.dto.response.PrescriptionSummary;
+import com.vetclinic.clinical.service.PrescriptionService;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.entity.PetVisit;
@@ -31,6 +31,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.Optional;
 
@@ -66,7 +67,7 @@ class MedicalHistoryServiceImplTest {
     @Mock
     private AuthClient authClient;
     @Mock
-    private BillingClient billingClient;
+    private PrescriptionService prescriptionService;
 
     private MedicalHistoryServiceImpl service;
 
@@ -74,7 +75,7 @@ class MedicalHistoryServiceImplTest {
     void setUp() {
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service = new MedicalHistoryServiceImpl(petRepository, visitRepository, assembler, authClient, billingClient, tm);
+        service = new MedicalHistoryServiceImpl(petRepository, visitRepository, assembler, authClient, prescriptionService, tm);
         lenient().when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
     }
 
@@ -99,14 +100,14 @@ class MedicalHistoryServiceImplTest {
     }
 
     private static PrescriptionSummary prescription(long visitId) {
-        return new PrescriptionSummary(3L, lid(visitId), null, List.of());
+        return new PrescriptionSummary(uid(3), lid(visitId), null, List.of());
     }
 
     @Test
     void staff_seeTheTimelineWithDoctorNameAndPrescription() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubVisits(7L, 8L);
-        when(billingClient.getPrescriptions(List.of(lid(7L), lid(8L)))).thenReturn(ApiResponse.success(List.of(prescription(8L))));
+        when(prescriptionService.summariesByVisit(List.of(lid(7L), lid(8L)))).thenReturn(Map.of(lid(8L), prescription(8L)));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(
                 new UserSummaryResponse(DOCTOR, "BS Lan", "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), "P01", "ACTIVE"))));
 
@@ -115,7 +116,7 @@ class MedicalHistoryServiceImplTest {
         assertThat(page.getItems()).hasSize(2);
         assertThat(page.getItems()).extracting(MedicalHistoryEntry::doctorName).containsOnly("BS Lan");
         assertThat(page.getItems().get(0).prescription()).isNull();              // ca 7 không kê đơn
-        assertThat(page.getItems().get(1).prescription().id()).isEqualTo(3L);   // đơn thuốc v3.0 không có trạng thái
+        assertThat(page.getItems().get(1).prescription().id()).isEqualTo(uid(3));   // đơn thuốc không có trạng thái
         verify(visitRepository).findByPetId(eq(pid(11)), any(Pageable.class));
     }
 
@@ -123,7 +124,7 @@ class MedicalHistoryServiceImplTest {
     void owner_seesOnlyCompletedVisitsOfOwnPet() {
         loginAs(OWNER, RoleCode.PET_OWNER);
         stubVisits(7L);
-        when(billingClient.getPrescriptions(any())).thenReturn(ApiResponse.success(List.of()));
+        when(prescriptionService.summariesByVisit(any())).thenReturn(Map.of());
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of()));
 
         PageResponse<MedicalHistoryEntry> page = service.history(pid(11), 0, 10);
@@ -149,10 +150,10 @@ class MedicalHistoryServiceImplTest {
     }
 
     @Test
-    void billingOrAuthDown_stillReturnsTheMedicalRecord() {
+    void prescriptionOrAuthDown_stillReturnsTheMedicalRecord() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         stubVisits(7L);
-        when(billingClient.getPrescriptions(any())).thenThrow(new RuntimeException("billing down"));
+        when(prescriptionService.summariesByVisit(any())).thenThrow(new RuntimeException("db down"));
         when(authClient.getUsers(any())).thenThrow(new RuntimeException("auth down"));
 
         PageResponse<MedicalHistoryEntry> page = service.history(pid(11), 0, 10);
@@ -169,7 +170,7 @@ class MedicalHistoryServiceImplTest {
         when(visitRepository.findByPetId(eq(pid(11)), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         assertThat(service.history(pid(11), 0, 10).getItems()).isEmpty();
-        verify(billingClient, never()).getPrescriptions(any());
+        verify(prescriptionService, never()).summariesByVisit(any());
         verify(authClient, never()).getUsers(any());
     }
 }

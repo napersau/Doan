@@ -123,6 +123,10 @@ export const visitsApi = {
   discountServiceInvoice: (invoiceId, discountAmount) => api.post(`${CLIN}/service-invoices/${invoiceId}/discount`, { discountAmount }),
   // Màn hình thu ngân 3 mục: EXAM_FEE (chờ nộp phí khám), PARACLINIC (chờ nộp tiền XN / CĐHA), FINAL (đã chốt ca)
   cashierPending: (section) => api.get(`${CLIN}/cashier/pending`, { section }),
+  // Đơn thuốc (v4.0: thuộc clinical): lưu CẢ đơn, kê vượt tồn chỉ cảnh báo (stockWarnings), trùng dị ứng chỉ cảnh báo (allergyWarning)
+  prescription: (visitId) => api.get(`${VISITS}/${visitId}/prescription`),
+  savePrescription: (visitId, body) => api.put(`${VISITS}/${visitId}/prescription`, body),
+  printPrescription: (visitId) => api.get(`${VISITS}/${visitId}/prescription/print`),
 };
 
 /** Phiếu xếp hàng (SM-07): hàng đợi Bác sĩ / Lab / CĐHA. "Gọi" chỉ báo khách, không đổi thứ tự hay trạng thái. */
@@ -164,18 +168,11 @@ export const pharmacyApi = {
   importStock: (medicineId, body) => api.post(`${PHARM}/medicines/${medicineId}/import`, body),
   adjustStock: (medicineId, body) => api.post(`${PHARM}/medicines/${medicineId}/adjust`, body),
   categories: (query) => api.get(`${PHARM}/medicine-categories`, query),
-  // Đơn thuốc v3.0: không giá, không trạng thái; kê vượt tồn chỉ cảnh báo (stockWarnings)
-  prescriptions: (query) => api.get(`${PHARM}/prescriptions`, query),
-  prescription: (id) => api.get(`${PHARM}/prescriptions/${id}`),
-  prescriptionByVisit: (visitId) => api.get(`${PHARM}/prescriptions/by-visit/${visitId}`),
-  printPrescription: (id) => api.get(`${PHARM}/prescriptions/${id}/print`),
-  createPrescription: (body) => api.post(`${PHARM}/prescriptions`, body),
-  updatePrescription: (id, body) => api.put(`${PHARM}/prescriptions/${id}`, body),
-  // Hóa đơn thuốc (chỉ khi khách chọn mua tại phòng khám)
-  createMedicineInvoice: (prescriptionId, body) => api.post(`${PHARM}/prescriptions/${prescriptionId}/medicine-invoices`, body),
 };
 
 export const billingApi = {
+  // Hóa đơn thuốc NHÁP tự tạo khi Bác sĩ chốt ca (không có API lập hóa đơn); mảng rỗng = chưa chốt ca hoặc đơn chưa tới billing
+  medicineInvoicesByVisit: (visitId) => api.get(`${BILL}/medicine-invoices`, { visitId }),
   medicineInvoice: (id) => api.get(`${BILL}/medicine-invoices/${id}`),
   updateMedicineInvoiceItems: (id, body) => api.put(`${BILL}/medicine-invoices/${id}/items`, body),
   cancelMedicineInvoice: (id) => api.post(`${BILL}/medicine-invoices/${id}/cancel`),

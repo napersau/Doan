@@ -24,6 +24,7 @@ import com.vetclinic.clinical.dto.response.VitalSignResponse;
 import com.vetclinic.clinical.entity.MedicalRecord;
 import com.vetclinic.clinical.entity.VitalSign;
 import com.vetclinic.clinical.repository.MedicalRecordRepository;
+import com.vetclinic.clinical.repository.PrescriptionRepository;
 import com.vetclinic.clinical.repository.VitalSignRepository;
 import com.vetclinic.clinical.dto.response.AppointmentSummaryResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
@@ -128,6 +129,8 @@ class VisitServiceImplTest {
     @Mock
     private MedicalRecordRepository medicalRecordRepository;
     @Mock
+    private PrescriptionRepository prescriptionRepository;
+    @Mock
     private ClinicServiceRepository serviceRepository;
     @Mock
     private ServiceInvoiceRepository invoiceRepository;
@@ -176,7 +179,7 @@ class VisitServiceImplTest {
         lenient().when(lockService.runLocked(anyCollection(), any())).thenAnswer(inv ->
                 ((Supplier<?>) inv.getArgument(1)).get());
         service = new VisitServiceImpl(visitRepository, petRepository, historyRepository, detailRepository,
-                vitalSignRepository, medicalRecordRepository, serviceRepository, authClient, appointmentClient, support, ticketIssuer, assembler,
+                vitalSignRepository, medicalRecordRepository, prescriptionRepository, serviceRepository, authClient, appointmentClient, support, ticketIssuer, assembler,
                 lockService, outboxWriter, CLOCK, tm);
     }
 
@@ -852,6 +855,36 @@ class VisitServiceImplTest {
         assertThat(response.medicalRecord().locked()).isTrue();
         assertThat(exam.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);   // hóa đơn của dịch vụ khám giữ PENDING cho thu ngân
         verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));   // v3.0: không còn event "đóng ca" sang billing
+    }
+
+    @Test
+    void closeVisit_withPrescription_writesPrescriptionCreatedEventToTheOutboxInTheSameTransaction() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        PetVisit visit = visitWithVitals(100L, VisitStatus.IN_PROGRESS);
+        visit.setDoctorNameSnapshot("BS Tiến");
+        when(visitRepository.findByIdForUpdate(lid(100L))).thenReturn(Optional.of(visit));
+        when(medicalRecordRepository.findById(lid(100L))).thenReturn(Optional.of(
+                MedicalRecord.builder().visitId(lid(100L)).preliminaryDiagnosis("Viêm da").build()));
+        when(detailRepository.findByVisitIdOrderByIdAsc(lid(100L))).thenReturn(List.of());
+        com.vetclinic.clinical.entity.Prescription prescription = com.vetclinic.clinical.entity.Prescription.builder().id(uid(77)).visitId(lid(100L)).build();
+        prescription.addItem(com.vetclinic.clinical.entity.PrescriptionItem.builder().medicineId(uid(31)).quantity(10).build());
+        prescription.addItem(com.vetclinic.clinical.entity.PrescriptionItem.builder().medicineId(uid(32)).quantity(2).build());
+        when(prescriptionRepository.findWithItemsByVisitId(lid(100L))).thenReturn(Optional.of(prescription));
+
+        service.closeVisit(lid(100L), new CloseVisitRequest(null, null, null, null));
+
+        org.mockito.ArgumentCaptor<DomainEvent> event = org.mockito.ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxWriter).write(eq("VISIT"), eq(lid(100L)), event.capture());
+        com.vetclinic.common.event.PrescriptionCreatedEvent created = (com.vetclinic.common.event.PrescriptionCreatedEvent) event.getValue();
+        assertThat(created.routingKey()).isEqualTo("prescription.created");
+        assertThat(created.prescriptionId()).isEqualTo(uid(77));
+        assertThat(created.visitId()).isEqualTo(lid(100L));
+        assertThat(created.actorUserId()).isEqualTo(DOCTOR);
+        assertThat(created.customerName()).isEqualTo("Hoàng Thị Lan");   // chụp từ hồ sơ thú cưng
+        assertThat(created.customerPhone()).isEqualTo("0912000008");
+        assertThat(created.doctorName()).isEqualTo("BS Tiến");
+        assertThat(created.items()).extracting(com.vetclinic.common.event.PrescriptionCreatedEvent.Item::medicineId, com.vetclinic.common.event.PrescriptionCreatedEvent.Item::quantity)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(uid(31), 10), org.assertj.core.groups.Tuple.tuple(uid(32), 2));
     }
 
     @Test

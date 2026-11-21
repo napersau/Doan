@@ -14,8 +14,8 @@
 -- 4 Cơ sở dữ liệu logic:
 -- 1. pet_clinic_auth_db             : auth-service (:8081)             - 9 bảng (v4.0, bước 2.1)
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
--- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 22 bảng (v4.0, bước 3.1 + 4.1 processed_events + 4.2 vital_signs, medical_records: + service_categories, service_prices, species/lab_test_items SMALLINT)
--- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 11 bảng (v4.0, bước 5.1: + medicine_categories, medicine_ingredients, medicine_prices, medicine_stocks)
+-- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 24 bảng (v4.0, bước 3.1 + 4.1 processed_events + 4.2 vital_signs, medical_records + 5.2 prescriptions, prescription_items: + service_categories, service_prices, species/lab_test_items SMALLINT)
+-- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 10 bảng (v4.0, bước 5.1 + 5.2: thuốc tách giá / tồn kho; đơn thuốc đã chuyển sang clinical)
 -- TỔNG CỘNG: 27 BẢNG
 --
 -- CÁC THAY ĐỔI CHÍNH SO VỚI PHIÊN BẢN 2.0:
@@ -616,6 +616,37 @@ CREATE TABLE IF NOT EXISTS service_invoices (
 CREATE INDEX idx_si_status_paid ON service_invoices(payment_status, paid_at);
 CREATE INDEX idx_si_cashier ON service_invoices(cashier_id);
 
+-- 32. PRESCRIPTIONS (ĐƠN THUỐC - CHỈ ĐỊNH CHUYÊN MÔN CỦA BÁC SĨ)
+-- Sửa được khi đợt khám IN_PROGRESS / RESULTS_READY; khóa khi chốt ca (phát PrescriptionCreatedEvent).
+CREATE TABLE IF NOT EXISTS prescriptions (
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
+    visit_id BINARY(16) NOT NULL UNIQUE, -- FK vật lý (cùng CSDL với đợt khám)
+    doctor_notes TEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pres_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id)
+);
+
+-- 33. PRESCRIPTION_ITEMS (CHI TIẾT THUỐC ĐƯỢC KÊ)
+-- medicine_id trỏ sang danh mục thuốc của billing-pharmacy (LFK); tên, đơn vị chụp lại lúc kê
+-- để bệnh án luôn đọc được mà không gọi chéo service.
+CREATE TABLE IF NOT EXISTS prescription_items (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    prescription_id BINARY(16) NOT NULL,
+    medicine_id BINARY(16) NOT NULL, -- LFK: billing_pharmacy.medicines
+    medicine_name_snapshot VARCHAR(150) NOT NULL,
+    unit_snapshot VARCHAR(30) NOT NULL,
+    quantity INT NOT NULL, -- Số lượng Bác sĩ kê
+    dosage VARCHAR(100) NOT NULL,
+    frequency VARCHAR(100) NOT NULL,
+    duration_days INT NOT NULL,
+    instructions TEXT NULL,
+    CONSTRAINT fk_pi_prescription FOREIGN KEY (prescription_id) REFERENCES prescriptions(id) ON DELETE CASCADE,
+    CONSTRAINT uq_pi_prescription_medicine UNIQUE (prescription_id, medicine_id),
+    CONSTRAINT chk_pi_quantity CHECK (quantity > 0),
+    CONSTRAINT chk_pi_duration CHECK (duration_days > 0)
+);
+CREATE INDEX idx_pi_medicine ON prescription_items(medicine_id);
+
 -- 20. QUEUE_TICKETS (PHIẾU XẾP HÀNG - DỮ LIỆU VẬN HÀNH, TÁCH KHỎI HỒ SƠ KHÁM) - MỚI 16/11
 -- Mỗi phiếu = một lượt chờ của một đợt khám tại hàng đợi Bác sĩ / phòng XN / phòng CĐHA.
 -- Phát khi đã thu tiền dịch vụ cần thu trước (services.requires_prepayment = TRUE);
@@ -859,77 +890,62 @@ CREATE TABLE IF NOT EXISTS medicine_stocks (
     CONSTRAINT chk_mstock_qty CHECK (quantity_on_hand >= 0)
 );
 
--- 23. PRESCRIPTIONS (ĐƠN THUỐC - CHỈ ĐỊNH CHUYÊN MÔN)
--- Đã bỏ: status, dispensed_by, dispensed_at (việc mua/xuất thuốc thể hiện qua medicine_invoices).
-CREATE TABLE IF NOT EXISTS prescriptions (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    visit_id BINARY(16) NOT NULL UNIQUE, -- LFK: clinical.pet_visits (UUIDv7)
-    doctor_notes TEXT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- 24. PRESCRIPTION_ITEMS (CHI TIẾT THUỐC ĐƯỢC KÊ)
--- Đã bỏ: unit_price, subtotal (đơn thuốc không phải chứng từ tiền; giá chốt tại hóa đơn thuốc).
-CREATE TABLE IF NOT EXISTS prescription_items (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    prescription_id BIGINT NOT NULL,
-    medicine_id BINARY(16) NOT NULL,
-    quantity INT NOT NULL, -- Số lượng bác sĩ kê
-    dosage VARCHAR(100) NOT NULL,
-    frequency VARCHAR(100) NOT NULL,
-    duration_days INT NOT NULL,
-    instructions TEXT NULL,
-    CONSTRAINT fk_pi_prescription FOREIGN KEY (prescription_id) REFERENCES prescriptions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_pi_medicine FOREIGN KEY (medicine_id) REFERENCES medicines(id),
-    CONSTRAINT uq_pi_prescription_medicine UNIQUE (prescription_id, medicine_id),
-    CONSTRAINT chk_pi_quantity CHECK (quantity > 0),
-    CONSTRAINT chk_pi_duration CHECK (duration_days > 0)
-);
-
--- 25. MEDICINE_INVOICES (HÓA ĐƠN THUỐC - TÙY CHỌN, TỐI ĐA 1 / ĐƠN THUỐC) - MỚI
+-- 43. MEDICINE_INVOICES (HÓA ĐƠN THUỐC - NHÁP TỰ TẠO TỪ ĐƠN THUỐC, TỐI ĐA 1 / ĐƠN)
+-- payment_status: PENDING (nháp, chờ khách quyết định) | PAID | CANCELLED (khách mua ngoài / hủy).
+-- prescription_id: khóa ngoại logic DUY NHẤT sang ngữ cảnh lâm sàng. Thông tin khách, Bác sĩ chụp lại
+-- từ PrescriptionCreatedEvent để in hóa đơn không cần gọi clinical / auth.
 CREATE TABLE IF NOT EXISTS medicine_invoices (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
     invoice_code VARCHAR(50) NOT NULL UNIQUE,
-    prescription_id BIGINT NOT NULL UNIQUE,
+    prescription_id BINARY(16) NOT NULL UNIQUE, -- LFK: clinical.prescriptions
+    visit_id BINARY(16) NOT NULL, -- LFK: clinical.pet_visits (tra cứu theo đợt khám)
+    customer_name_snapshot VARCHAR(150) NOT NULL,
+    customer_phone_snapshot VARCHAR(20) NOT NULL,
+    pet_name_snapshot VARCHAR(100) NOT NULL,
+    doctor_name_snapshot VARCHAR(150) NOT NULL,
     discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-    payment_status ENUM('PENDING', 'PAID', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+    payment_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     cashier_id BINARY(16) NULL, -- LFK: auth.users (gán khi thu tiền)
     paid_at TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version BIGINT NOT NULL DEFAULT 0,
-    CONSTRAINT fk_mi_prescription FOREIGN KEY (prescription_id) REFERENCES prescriptions(id),
     CONSTRAINT chk_mi_discount CHECK (discount_amount >= 0)
 );
 CREATE INDEX idx_mi_status_paid ON medicine_invoices(payment_status, paid_at);
+CREATE INDEX idx_mi_visit ON medicine_invoices(visit_id);
 CREATE INDEX idx_mi_cashier ON medicine_invoices(cashier_id);
 
--- 26. MEDICINE_INVOICE_ITEMS (CÁC THUỐC KHÁCH MUA TẠI PHÒNG KHÁM) - MỚI
--- Khách có thể mua một phần đơn: quantity <= prescription_items.quantity (kiểm tra ở tầng ứng dụng).
+-- 44. MEDICINE_INVOICE_ITEMS (DÒNG THUỐC TRÊN HÓA ĐƠN - TRỎ THẲNG MEDICINES)
+-- prescribed_quantity: số lượng kê lấy từ sự kiện (giá trị, không phải khóa ngoại), chỉ để đối chiếu.
+-- quantity: số lượng khách mua, được nhiều hơn / ít hơn / bằng số kê nhưng không vượt tồn kho (BR-32);
+--           Thu ngân sửa trước khi thu, bỏ dòng = xóa dòng.
+-- unit_price, vat_rate: snapshot từ medicine_prices đang hiệu lực lúc thu tiền.
 CREATE TABLE IF NOT EXISTS medicine_invoice_items (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    medicine_invoice_id BIGINT NOT NULL,
-    prescription_item_id BIGINT NOT NULL,
-    quantity INT NOT NULL, -- Số lượng khách mua
-    unit_price DECIMAL(12, 2) NOT NULL, -- Snapshot giá bán lúc lập hóa đơn
-    vat_rate DECIMAL(4, 2) NOT NULL, -- Snapshot thuế suất lúc lập hóa đơn
+    medicine_invoice_id BINARY(16) NOT NULL,
+    medicine_id BINARY(16) NOT NULL,
+    prescribed_quantity INT NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(12, 2) NOT NULL,
+    vat_rate DECIMAL(4, 2) NOT NULL,
     CONSTRAINT fk_mii_invoice FOREIGN KEY (medicine_invoice_id) REFERENCES medicine_invoices(id) ON DELETE CASCADE,
-    CONSTRAINT fk_mii_pitem FOREIGN KEY (prescription_item_id) REFERENCES prescription_items(id),
-    CONSTRAINT uq_mii_invoice_pitem UNIQUE (medicine_invoice_id, prescription_item_id),
+    CONSTRAINT fk_mii_medicine FOREIGN KEY (medicine_id) REFERENCES medicines(id),
+    CONSTRAINT uq_mii_invoice_medicine UNIQUE (medicine_invoice_id, medicine_id),
     CONSTRAINT chk_mii_quantity CHECK (quantity > 0),
     CONSTRAINT chk_mii_price CHECK (unit_price >= 0),
     CONSTRAINT chk_mii_vat CHECK (vat_rate >= 0 AND vat_rate <= 1)
 );
+CREATE INDEX idx_mii_medicine ON medicine_invoice_items(medicine_id);
 
--- 27. INVENTORY_TRANSACTIONS (NHẬT KÝ BIẾN ĐỘNG KHO)
--- Đã bỏ: balance_after (tồn sau giao dịch = tổng lũy kế quantity, tính bằng window function).
--- Thay reference_id chung chung bằng FK rõ ràng tới hóa đơn thuốc.
+-- 45. INVENTORY_TRANSACTIONS (NHẬT KÝ BIẾN ĐỘNG KHO)
+-- transaction_type: IMPORT | EXPORT_SALE | ADJUSTMENT. quantity có dấu: + nhập / - xuất.
 CREATE TABLE IF NOT EXISTS inventory_transactions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     medicine_id BINARY(16) NOT NULL,
-    transaction_type VARCHAR(20) NOT NULL, -- IMPORT | EXPORT_SALE | ADJUSTMENT
-    quantity INT NOT NULL, -- Có dấu: + nhập / - xuất
+    transaction_type VARCHAR(20) NOT NULL,
+    quantity INT NOT NULL,
     unit_cost DECIMAL(12, 2) NULL, -- Giá nhập (chỉ IMPORT)
-    medicine_invoice_id BIGINT NULL, -- Bắt buộc khi EXPORT_SALE
+    medicine_invoice_id BINARY(16) NULL, -- Bắt buộc khi EXPORT_SALE
     notes VARCHAR(255) NULL,
     created_by BINARY(16) NOT NULL, -- LFK: auth.users
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -961,11 +977,20 @@ CREATE TABLE IF NOT EXISTS outbox_events (
 );
 CREATE INDEX idx_outbox_pending ON outbox_events(status, next_attempt_at, id);
 
+-- 47. PROCESSED_EVENTS (cấu trúc như mục 13)
+-- billing-pharmacy nhận: PrescriptionCreatedEvent (tạo hóa đơn thuốc nháp).
+CREATE TABLE IF NOT EXISTS processed_events (
+    event_id BINARY(16) NOT NULL,
+    consumer VARCHAR(100) NOT NULL,
+    processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_id, consumer)
+);
+
 -- VIEW tính tiền hóa đơn thuốc (không lưu giá trị dẫn xuất)
 CREATE OR REPLACE VIEW v_medicine_invoice_amounts AS
 SELECT mi.id AS invoice_id,
        mi.invoice_code,
-       p.visit_id,
+       mi.visit_id,
        mi.discount_amount,
        ROUND(SUM(mii.quantity * mii.unit_price), 2) AS amount_before_vat,
        ROUND(SUM(mii.quantity * mii.unit_price * mii.vat_rate), 2) AS vat_amount,
@@ -973,9 +998,8 @@ SELECT mi.id AS invoice_id,
        mi.payment_status,
        mi.paid_at
 FROM medicine_invoices mi
-JOIN prescriptions p ON p.id = mi.prescription_id
 JOIN medicine_invoice_items mii ON mii.medicine_invoice_id = mi.id
-GROUP BY mi.id, mi.invoice_code, p.visit_id, mi.discount_amount, mi.payment_status, mi.paid_at;
+GROUP BY mi.id, mi.invoice_code, mi.visit_id, mi.discount_amount, mi.payment_status, mi.paid_at;
 
 -- VIEW giá thuốc đang áp dụng kèm tồn kho
 CREATE OR REPLACE VIEW v_current_medicine_prices AS

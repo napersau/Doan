@@ -12,9 +12,9 @@ public record MedicineInvoicePaidEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,        // thu ngân
-        Long invoiceId,
+        UUID invoiceId,
         String invoiceCode,
-        Long prescriptionId,
+        UUID prescriptionId,
         UUID visitId,
         BigDecimal payableAmount // chỉ để hiển thị trong thông báo; số tiền không được lưu ở CSDL
 ) implements DomainEvent {

@@ -329,17 +329,13 @@ async function main() {
     await b.clickRow(owner.pet, 'Thu tiền');
     check('bảng kê có hóa đơn riêng từng dịch vụ; khám, XN, CĐHA đã thu trước', await b.hasText('Hóa đơn dịch vụ') && await b.hasText('tổng phân tích tế bào máu') && await b.hasText('Siêu âm') && await b.hasText('tẩy giun') && await b.hasText('Đã thanh toán'), (await b.text()).slice(0, 500));
     check('phần bán thuốc thấy đơn Clavamox', await b.hasText('Clavamox'));
-    await b.click('Lập hóa đơn thuốc');
-    check('lập hóa đơn thuốc', await b.hasText('Đã lập hóa đơn thuốc'), (await b.text()).slice(0, 300));
-    check('hóa đơn thuốc: 10 x giá + VAT', await b.hasText('MINV-'));
+    check('hóa đơn thuốc NHÁP tự tạo khi bác sĩ chốt ca (không còn nút lập hóa đơn)', await b.hasText('MINV-', 20000), (await b.text()).slice(0, 300));
     await b.click('Thu tiền thuốc', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
     check('thu tiền thuốc + trừ kho', await b.hasText('Đã thu tiền thuốc và trừ kho'), (await b.text()).slice(0, 300));
     await b.clickRow('tẩy giun', 'Giảm giá'); await b.fill('Số tiền giảm giá', '10000'); await b.click('Lưu', 'button[type=submit]');
     check('giảm giá hóa đơn dịch vụ tại phòng', await b.hasText('Đã cập nhật giảm giá'), (await b.text()).slice(0, 300));
     await b.click('hóa đơn đã chọn', 'button'); await b.click('Đã thu tiền', 'button[type=submit]');
     check('thu hóa đơn cuối (dịch vụ tại phòng): ca hoàn tất cùng giao dịch', await b.hasText('ca khám hoàn tất'), (await b.text()).slice(0, 300));
-    await b.goto('/reception/dispense');
-    check('đơn thuốc nằm trong danh sách bán thuốc', await b.hasText(owner.pet));
 
     step('7. Chủ nuôi: bệnh án + thông báo');
     await b.login(owner.phone, owner.password);
@@ -371,7 +367,7 @@ async function main() {
     await b.reset(); await b.goto('/reception/queue');
     check('chưa đăng nhập bị chuyển về trang đăng nhập', await b.waitFor('location.pathname === "/auth/login"'));
   } finally {
-    const unexpected = b.problems.filter((p) => !/HTTP 404 \/api\/v1\/pharmacy\/prescriptions\/by-visit/.test(p) && !/HTTP 401 \/api\/v1\/auth\/(login|me)/.test(p));
+    const unexpected = b.problems.filter((p) => !/HTTP 404 \/api\/v1\/clinical\/pet-visits\/[^/]+\/prescription/.test(p) && !/HTTP 401 \/api\/v1\/auth\/(login|me)/.test(p));
     console.log(`\nLỗi console/mạng phát sinh trong lúc chạy (${unexpected.length}):`); [...new Set(unexpected)].slice(0, 25).forEach((p) => console.log(`  - ${p}`));
     child.kill(); server?.close(); try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome còn giữ tệp */ }
   }

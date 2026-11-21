@@ -486,7 +486,7 @@ class NotificationEventListenerTest {
         when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
-        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), 4L, "MINV-2026-0004", 3L, VISIT_ID,
+        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), uid(4), "MINV-2026-0004", uid(3), VISIT_ID,
                 new BigDecimal("157500.00")));
 
         NotificationMessage forOwner = captureUser(OWNER);
@@ -503,7 +503,7 @@ class NotificationEventListenerTest {
     void medicineInvoicePaid_unknownOwnerSendsNothing() {
         when(people.findVisit(VISIT_ID)).thenReturn(Optional.empty());
 
-        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), 4L, "MINV-2026-0004", 3L, VISIT_ID,
+        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), uid(4), "MINV-2026-0004", uid(3), VISIT_ID,
                 new BigDecimal("157500.00")));
 
         verifyNoInteractions(dispatcher, emailService);

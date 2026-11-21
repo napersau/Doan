@@ -13,7 +13,6 @@ const RECEPTION_LINKS = [
   { to: '/reception/intake', label: 'Tiếp nhận khách', icon: 'calendar' },
   { to: '/reception/appointments', label: 'Lịch hẹn', icon: 'calendar' },
   { to: '/reception/invoices', label: 'Thu ngân', icon: 'chart' },
-  { to: '/reception/dispense', label: 'Bán thuốc', icon: 'medicine' },
   { to: '/reception/customers', label: 'Khách hàng', icon: 'users' },
   { to: '/reception/pets', label: 'Thú cưng', icon: 'heart' },
   { to: '/reception/history', label: 'Tra cứu bệnh án', icon: 'document' },

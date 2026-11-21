@@ -33,7 +33,7 @@ async function main() {
   };
   try {
     await sweep('chủ nuôi', 'khach_lan', [['/portal/profile', 'Thông tin cá nhân'], ['/portal/pets', 'Thú cưng của tôi'], [`/portal/pets/${luPetId}`, 'Lu'], ['/portal/booking', 'Đặt lịch'], ['/portal/appointments', 'Lịch hẹn của tôi'], ['/portal/medical-history', 'Lịch sử khám bệnh'], ['/portal/notifications', 'Thông báo']]);
-    await sweep('lễ tân', 'letan_hoa', [['/reception/queue', 'Bảng điều phối'], ['/reception/intake', 'Tiếp nhận khách hàng'], ['/reception/appointments', 'Lịch hẹn'], ['/reception/invoices', 'Hóa đơn & thanh toán'], ['/reception/dispense', 'Bán thuốc'], ['/reception/customers', 'Thông tin khách hàng'], ['/reception/pets', 'Thông tin thú cưng'], ['/reception/history', 'Tra cứu bệnh án']]);
+    await sweep('lễ tân', 'letan_hoa', [['/reception/queue', 'Bảng điều phối'], ['/reception/intake', 'Tiếp nhận khách hàng'], ['/reception/appointments', 'Lịch hẹn'], ['/reception/invoices', 'Hóa đơn & thanh toán'], ['/reception/customers', 'Thông tin khách hàng'], ['/reception/pets', 'Thông tin thú cưng'], ['/reception/history', 'Tra cứu bệnh án']]);
     await sweep('bác sĩ', 'bs_tien', [['/vet/today', 'Hàng đợi của tôi'], ['/vet/history', 'Tra cứu bệnh án'], ['/vet/medicines', 'Tra cứu thuốc']]);
     await sweep('KTV xét nghiệm', 'ktv_lab_minh', [['/lab/queue', 'Hàng đợi xét nghiệm']]);
     await sweep('KTV CĐHA', 'ktv_cdha_dung', [['/imaging/queue', 'Hàng đợi chẩn đoán hình ảnh']]);
@@ -121,7 +121,7 @@ async function main() {
       return (await b.hasText(`Đã lưu dịch vụ Dịch vụ UI ${RUN}`, 10000)) && (await b.waitFor(`[...document.querySelectorAll('tr')].some((r) => r.innerText.includes(${JSON.stringify(`Dịch vụ UI ${RUN}`)}) && r.innerText.includes('VAT 8%'))`, 8000));
     });
   } finally {
-    const unexpected = b.problems.filter((p) => !/HTTP 404 \/api\/v1\/pharmacy\/prescriptions\/by-visit/.test(p) && !/HTTP 401 \/api\/v1\/auth\/(login|me)/.test(p) && !/HTTP 409 \/api\/v1\/auth\/users/.test(p));
+    const unexpected = b.problems.filter((p) => !/HTTP 404 \/api\/v1\/clinical\/pet-visits\/[^/]+\/prescription/.test(p) && !/HTTP 401 \/api\/v1\/auth\/(login|me)/.test(p) && !/HTTP 409 \/api\/v1\/auth\/users/.test(p));
     console.log(`\nLỗi console/mạng phát sinh trong lúc chạy (${unexpected.length}):`); [...new Set(unexpected)].slice(0, 25).forEach((p) => console.log(`  - ${p}`));
     check('không có lỗi console / HTTP ≥ 400 ngoài dự kiến', unexpected.length === 0);
     child.kill(); try { (await import('node:fs')).rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome còn giữ tệp */ }

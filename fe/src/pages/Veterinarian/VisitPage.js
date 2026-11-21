@@ -192,10 +192,11 @@ const blankLine = () => ({ medicineId: '', quantity: 1, dosage: '', frequency: '
 /** Đơn thuốc v3.0: chỉ định chuyên môn, không giá. Kê vượt tồn kho vẫn lưu, chỉ cảnh báo (khách có thể mua ngoài). */
 function PrescriptionTab({ visit }) {
   const medicines = useAsync(() => pharmacyApi.medicines({ active: true, size: 100 }), []);
-  const existing = useAsync(() => pharmacyApi.prescriptionByVisit(visit.id).catch((problem) => { if (problem.status === 404) return null; throw problem; }), [visit.id]);
+  const existing = useAsync(() => visitsApi.prescription(visit.id).catch((problem) => { if (problem.status === 404) return null; throw problem; }), [visit.id]);
   const [lines, setLines] = useState([blankLine()]);
   const [notes, setNotes] = useState('');
   const [warnings, setWarnings] = useState([]);
+  const [allergyWarning, setAllergyWarning] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [focusLast, setFocusLast] = useState(false);
   const action = useAction();
@@ -218,8 +219,8 @@ function PrescriptionTab({ visit }) {
     if (items.some((line) => !line.dosage.trim() || !line.frequency.trim())) { action.setNotice({ type: 'error', text: 'Mỗi thuốc cần có liều dùng và tần suất.' }); return; }
     if (new Set(items.map((line) => line.medicineId)).size !== items.length) { action.setNotice({ type: 'error', text: 'Mỗi thuốc chỉ một dòng — hãy gộp các dòng trùng.' }); return; }
     const payload = { doctorNotes: blankToNull(notes), items: items.map((line) => ({ medicineId: line.medicineId, quantity: Number(line.quantity), dosage: line.dosage.trim(), frequency: line.frequency.trim(), durationDays: Number(line.durationDays), instructions: blankToNull(line.instructions) })) };
-    const saved = await action.run(() => (current ? pharmacyApi.updatePrescription(current.id, payload) : pharmacyApi.createPrescription({ ...payload, visitId: visit.id })), 'Đã lưu đơn thuốc. Kho chỉ bị trừ khi khách mua tại phòng khám.');
-    if (saved && saved !== true) { setWarnings(saved.stockWarnings || []); existing.refresh(); }
+    const saved = await action.run(() => visitsApi.savePrescription(visit.id, payload), 'Đã lưu đơn thuốc. Hóa đơn thuốc nháp tự tạo khi bạn chốt ca; kho chỉ bị trừ khi khách mua tại phòng khám.');
+    if (saved && saved !== true) { setWarnings(saved.stockWarnings || []); setAllergyWarning(saved.allergyWarning || ''); existing.refresh(); }
   };
 
   const addLine = () => { setLines([...lines, blankLine()]); setFocusLast(true); };
@@ -231,8 +232,9 @@ function PrescriptionTab({ visit }) {
   }, [focusLast, lines.length]);
   const chosenElsewhere = (index) => new Set(lines.filter((_, position) => position !== index).map((line) => line.medicineId).filter(Boolean));
 
-  return <Panel title="Đơn thuốc" subtitle="Đơn không có giá. Kê vượt tồn kho vẫn lưu được (chỉ cảnh báo). Sửa được khi ca còn đang khám và chưa có hóa đơn thuốc.">
+  return <Panel title="Đơn thuốc" subtitle="Đơn không có giá. Kê vượt tồn kho hoặc trùng tiền sử dị ứng vẫn lưu được (chỉ cảnh báo). Sửa được khi ca còn đang khám và hóa đơn thuốc chưa được thanh toán.">
     <Notice notice={action.notice} onClose={action.clear} />
+    {allergyWarning && <div className="ui-alert warning" role="alert"><span><strong>Cảnh báo dị ứng:</strong> {allergyWarning}</span></div>}
     {warnings.length > 0 && <div className="ui-alert warning" role="status"><span><strong>Cảnh báo tồn kho:</strong> {warnings.join('; ')}. Khách có thể mua ngoài phòng khám.</span></div>}
     <AsyncView state={medicines}>{() => <div className="ui-stack" style={{ gap: 14 }}>
       <div className="ui-table-scroll"><table className="ui-table rx-table">
@@ -290,7 +292,7 @@ function ConclusionTab({ draft, setDraft, onNext }) {
 
 /** Chốt ca: xem lại kết luận + dịch vụ + đơn thuốc rồi chốt và chuyển thanh toán. */
 function CloseTab({ visit, draft, onClosed, goTo }) {
-  const prescription = useAsync(() => pharmacyApi.prescriptionByVisit(visit.id).catch((problem) => { if (problem.status === 404) return null; throw problem; }), [visit.id]);
+  const prescription = useAsync(() => visitsApi.prescription(visit.id).catch((problem) => { if (problem.status === 404) return null; throw problem; }), [visit.id]);
   const [confirming, setConfirming] = useState(false);
   const diagnosis = draft.finalDiagnosis.trim();
   const unfinished = (visit.services || []).filter((row) => ['PENDING', 'IN_PROGRESS'].includes(row.status) && isInRoom(row));

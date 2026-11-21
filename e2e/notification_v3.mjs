@@ -7,6 +7,15 @@ import { seedIds } from './lib/ids.mjs';
 const MAILPIT = process.env.MAILPIT_URL || 'http://localhost:8025';
 const T = {};
 const login = async (username) => (await loginSession(username)).accessToken;
+// Hóa đơn thuốc NHÁP do billing tự tạo từ PrescriptionCreatedEvent sau khi chốt ca (outbox + RabbitMQ, thường dưới 1 giây)
+async function draftOf(token, visitId) {
+  for (let i = 0; i < 40; i += 1) {
+    const res = await call('GET', `${BILL}/medicine-invoices?visitId=${visitId}`, { token });
+    if (res.status === 200 && res.data.length) return res.data[0];
+    await sleep(500);
+  }
+  return null;
+}
 const list = async (token) => (await call('GET', `${NOTI}?limit=100`, { token })).data || [];
 // Chờ tới 15 giây cho đến khi người dùng có ≥ n thông báo thuộc type (và chứa `contains` trong JSON nếu có)
 async function expectType(name, token, type, { n = 1, contains = '' } = {}) {
@@ -54,12 +63,12 @@ async function main() {
   await expectType('hết CLS → bác sĩ nhận RESULTS_READY', T.doc, 'RESULTS_READY');
   await expectType('chủ nuôi nhận RESULTS_READY', T.owner, 'RESULTS_READY');
   await call('POST', `${CLIN}/queue-tickets/call-next?queueType=DOCTOR`, { token: T.doc }); await call('POST', `${CLIN}/pet-visits/${visit}/start-phase2`, { token: T.doc });
-  const rx = (await call('POST', `${PHARM}/prescriptions`, { token: T.doc, body: { visitId: visit, items: [{ medicineId: AMOX, quantity: 10, dosage: '1', frequency: '2', durationDays: 5 }] } })).data;
+  await call('PUT', `${CLIN}/pet-visits/${visit}/prescription`, { token: T.doc, body: { items: [{ medicineId: AMOX, quantity: 10, dosage: '1', frequency: '2', durationDays: 5 }] } });
   await call('POST', `${CLIN}/pet-visits/${visit}/close-visit`, { token: T.doc, body: { finalDiagnosis: 'Viêm da' } });
   const stock = (await call('GET', `${PHARM}/medicines/${AMOX}`, { token: T.admin })).data;
   // đưa tồn về ngưỡng + 10 để lần bán này làm chạm ngưỡng cảnh báo
   await call('POST', `${PHARM}/medicines/${AMOX}/adjust`, { token: T.admin, body: { delta: -(stock.stockQuantity - stock.minStockAlert - 5), reason: 'e2e đưa tồn gần ngưỡng' } });
-  const invoice = (await call('POST', `${PHARM}/prescriptions/${rx.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: rx.items[0].id, quantity: 10 }] } })).data;
+  const invoice = await draftOf(T.rec, visit);   // nháp tự tạo khi chốt ca
   await call('POST', `${BILL}/medicine-invoices/${invoice.id}/confirm-payment`, { token: T.rec });
   await expectType('thu thuốc → chủ nuôi nhận MEDICINE_INVOICE_PAID (có số tiền)', T.owner, 'MEDICINE_INVOICE_PAID', { contains: '157500' });
   await expectType('tồn chạm ngưỡng → Admin nhận LOW_STOCK', T.admin, 'LOW_STOCK');

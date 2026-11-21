@@ -59,7 +59,7 @@ export function PrescriptionView({ prescription }) {
   return <div className="ui-stack" style={{ gap: 12 }}>
     {prescription.doctorNotes && <p style={{ margin: 0 }}><strong>Lời dặn của bác sĩ:</strong> {prescription.doctorNotes}</p>}
     <Table caption="Đơn thuốc" rowKey={(row) => row.medicineId} columns={[
-      { title: 'Thuốc', render: (row) => <><strong>{row.medicineName}</strong><small>{row.activeIngredient || row.medicineCode}</small></> },
+      { title: 'Thuốc', render: (row) => <><strong>{row.medicineName}</strong></> },
       { title: 'Số lượng', render: (row) => `${row.quantity} ${row.unit}` },
       { title: 'Cách dùng', render: (row) => <>{row.dosage}, {row.frequency}, {row.durationDays} ngày{row.instructions && <small>{row.instructions}</small>}</> },
     ]} rows={prescription.items || []} />

@@ -1,14 +1,10 @@
 package com.vetclinic.billing.testsupport;
 
-import com.vetclinic.billing.constant.VisitStatus;
-import com.vetclinic.billing.dto.response.VisitSummaryResponse;
 import com.vetclinic.billing.entity.Medicine;
 import com.vetclinic.billing.entity.MedicineCategory;
 import com.vetclinic.billing.entity.MedicinePrice;
 import com.vetclinic.billing.entity.MedicineStock;
 import com.vetclinic.billing.service.MedicinePriceBook;
-import com.vetclinic.billing.entity.Prescription;
-import com.vetclinic.billing.entity.PrescriptionItem;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -89,21 +85,9 @@ public final class TestData {
         return UUID.fromString(String.format("019a9442-d840-7000-8000-%012d", n));
     }
 
-    public static VisitSummaryResponse visit(long id, VisitStatus status, UUID doctorId) {
-        return new VisitSummaryResponse(vid(id), "VIS-2026-" + id, status, uid(11), "Lu", OWNER, doctorId);
-    }
-
-    public static PrescriptionItem item(long id, Medicine medicine, int quantity) {
-        return PrescriptionItem.builder().id(id).medicine(medicine).quantity(quantity).dosage("1 viên")
-                .frequency("2 lần/ngày").durationDays(5).build();
-    }
-
-    public static Prescription prescription(long id, long visitId, PrescriptionItem... items) {
-        Prescription prescription = Prescription.builder().id(id).visitId(vid(visitId)).build();
-        for (PrescriptionItem item : items) {
-            prescription.addItem(item);
-        }
-        return prescription;
+    /** UUID cố định của đơn thuốc thử (019a9442-d850-7000-8000-0000000000NN). */
+    public static UUID pid(long n) {
+        return UUID.fromString(String.format("019a9442-d850-7000-8000-%012d", n));
     }
 
     public static void loginAs(UUID userId, RoleCode role) {

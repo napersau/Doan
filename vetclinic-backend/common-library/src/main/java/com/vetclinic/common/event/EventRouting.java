@@ -28,6 +28,8 @@ public final class EventRouting {
     public static final String USER_PROFILE_UPDATED = "user.profile_updated";
     public static final String USER_STATUS_CHANGED = "user.status_changed";
     public static final String PET_UPDATED = "pet.updated";
+    // Thêm 21/11/2026 (v4.0, bước 5.2): chốt ca có đơn thuốc -> billing tạo hóa đơn thuốc nháp
+    public static final String PRESCRIPTION_CREATED = "prescription.created";
 
     public static String queueName(String serviceName, String routingKey) {
         return serviceName + "." + routingKey;

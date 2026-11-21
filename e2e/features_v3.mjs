@@ -56,6 +56,15 @@ async function startRoom(kind, v) {   // nộp tiền CLS (nếu chưa) rồi KT
 }
 const startExam = (token, id, vitals = true) => call('POST', `${CLIN}/pet-visits/${id}/start-exam`, { token, body: vitals ? { vitalSigns: { weightKg: 6, temperatureC: 38.6 } } : {} });
 const closeVisit = (token, id, diagnosis = 'Chẩn đoán e2e') => call('POST', `${CLIN}/pet-visits/${id}/close-visit`, { token, body: { finalDiagnosis: diagnosis, treatmentPlan: 'Điều trị', doctorAdvice: 'Theo dõi' } });
+// Hóa đơn thuốc NHÁP do billing tự tạo từ PrescriptionCreatedEvent sau khi chốt ca (outbox + RabbitMQ, thường dưới 1 giây)
+async function draftOf(token, visitId) {
+  for (let i = 0; i < 40; i += 1) {
+    const res = await call('GET', `${BILL}/medicine-invoices?visitId=${visitId}`, { token });
+    if (res.status === 200 && res.data.length) return res.data[0];
+    await sleep(500);
+  }
+  return null;
+}
 async function inProgress(petName, doctorId = ID.user.bs_mai) {
   const pet = await newPet(petName);
   const v = (await checkIn(pet, doctorId)).data.id;
@@ -353,7 +362,7 @@ async function main() {
   check('"Đã thực hiện" → COMPLETED', (await call('POST', `${CLIN}/service-details/${vac.id}/perform`, { token: T.doc4 })).data?.status === 'COMPLETED');
   check('hủy dịch vụ chưa làm → dịch vụ và hóa đơn CANCELLED', (await call('POST', `${CLIN}/service-details/${dew.id}/cancel`, { token: T.doc4, body: { reason: 'Khách không đồng ý' } })).data?.status === 'CANCELLED' && (await statementOf(va.id)).invoices.find((i) => i.visitServiceDetailId === dew.id).paymentStatus === 'CANCELLED');
   check('chốt chuyên môn (T05) → WAITING_PAYMENT', (await closeVisit(T.doc4, va.id)).data?.status === 'WAITING_PAYMENT');
-  check('bác sĩ không sửa đơn thuốc sau khi chốt (PHARM_1411)', (await call('POST', `${PHARM}/prescriptions`, { token: T.doc4, body: { visitId: va.id, items: [{ medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1411');
+  check('bác sĩ không sửa đơn thuốc sau khi chốt (PHARM_1411)', (await call('PUT', `${CLIN}/pet-visits/${va.id}/prescription`, { token: T.doc4, body: { items: [{ medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1411');
   const stmt = await statementOf(va.id);
   const vacInv = stmt.invoices.find((i) => i.visitServiceDetailId === vac.id);
   const gross = Number(vacInv.payableAmount) + Number(vacInv.discountAmount);
@@ -501,15 +510,18 @@ async function main() {
     && sql(`SELECT sale_price FROM pet_clinic_billing_pharmacy_db.medicine_prices WHERE medicine_id=${uuidSql(med.data.id)} AND effective_to IS NOT NULL`) === '12000.00');
   check('ngừng kinh doanh: bác sĩ không còn thấy; Admin vẫn thấy', (await call('PUT', `${PHARM}/medicines/${med.data.id}`, { token: T.admin, body: { name: `Thuốc e2e ${RUN}`, dosageForm: 'Viên', baseUnit: 'Viên', packagingSpec: 'Hộp 10 viên', active: false } })).data?.active === false && !(await call('GET', `${PHARM}/medicines?size=100`, { token: T.doc4 })).data.items.some((m) => m.id === med.data.id) && (await call('GET', `${PHARM}/medicines?active=false&size=100`, { token: T.admin })).data.items.some((m) => m.id === med.data.id));
   const rv = await inProgress('KeDon', DOC4);
-  check('kê thuốc đã ngừng kinh doanh → 404 PHARM_1405', (await call('POST', `${PHARM}/prescriptions`, { token: rv.token, body: { visitId: rv.v, items: [{ medicineId: med.data.id, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1405');
-  const rxOk = await call('POST', `${PHARM}/prescriptions`, { token: rv.token, body: { visitId: rv.v, items: [{ medicineId: M.MED_AMOX, quantity: 2, dosage: '1', frequency: '2', durationDays: 3 }, { medicineId: M.MED_VANG_7B, quantity: 1, dosage: '1', frequency: '1', durationDays: 1 }] } });
-  check('kê đơn nhiều thuốc; kê trùng thuốc trong một đơn bị từ chối', rxOk.status === 201 && (await call('POST', `${PHARM}/prescriptions`, { token: T.doc4, body: { visitId: rv.v, items: [{ medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }, { medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).status >= 400);
-  check('mỗi đợt khám tối đa một đơn → PHARM_1413', (await call('POST', `${PHARM}/prescriptions`, { token: rv.token, body: { visitId: rv.v, items: [{ medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1413');
-  check('sửa đơn: bỏ bớt thuốc, giữ id dòng còn lại', (await call('PUT', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: rv.token, body: { items: [{ medicineId: M.MED_AMOX, quantity: 3, dosage: '1', frequency: '2', durationDays: 3 }] } })).data?.items?.length === 1);
-  check('chủ nuôi xem đơn của thú cưng mình; chủ nuôi khác không (404)', (await call('GET', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: T.owner })).status === 200 && (await call('GET', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: T.owner2 })).status === 404);
+  check('kê thuốc đã ngừng kinh doanh → 404 PHARM_1405', (await call('PUT', `${CLIN}/pet-visits/${rv.v}/prescription`, { token: rv.token, body: { items: [{ medicineId: med.data.id, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).code === 'PHARM_1405');
+  const rxOk = await call('PUT', `${CLIN}/pet-visits/${rv.v}/prescription`, { token: rv.token, body: { items: [{ medicineId: M.MED_AMOX, quantity: 2, dosage: '1', frequency: '2', durationDays: 3 }, { medicineId: M.MED_VANG_7B, quantity: 1, dosage: '1', frequency: '1', durationDays: 1 }] } });
+  check('kê đơn nhiều thuốc; kê trùng thuốc trong một đơn bị từ chối', rxOk.status === 200 && (await call('PUT', `${CLIN}/pet-visits/${rv.v}/prescription`, { token: rv.token, body: { items: [{ medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }, { medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }] } })).status >= 400);
+  check('mỗi đợt khám tối đa một đơn: lưu lại là cập nhật cùng đơn (prescriptions.visit_id UNIQUE)', (await call('PUT', `${CLIN}/pet-visits/${rv.v}/prescription`, { token: rv.token, body: { items: [{ medicineId: M.MED_AMOX, quantity: 1, dosage: 'a', frequency: 'b', durationDays: 1 }, { medicineId: M.MED_VANG_7B, quantity: 1, dosage: '1', frequency: '1', durationDays: 1 }] } })).data?.id === rxOk.data.id && sql(`SELECT COUNT(*) FROM pet_clinic_clinical_db.prescriptions WHERE visit_id=${uuidSql(rv.v)}`) === '1');
+  check('sửa đơn: bỏ bớt thuốc, giữ id dòng còn lại', (await call('PUT', `${CLIN}/pet-visits/${rv.v}/prescription`, { token: rv.token, body: { items: [{ medicineId: M.MED_AMOX, quantity: 3, dosage: '1', frequency: '2', durationDays: 3 }] } })).data?.items?.length === 1);
+  check('chủ nuôi xem đơn của thú cưng mình; chủ nuôi khác không (404)', (await call('GET', `${CLIN}/pet-visits/${rv.v}/prescription`, { token: T.owner })).status === 200 && (await call('GET', `${CLIN}/pet-visits/${rv.v}/prescription`, { token: T.owner2 })).status === 404);
   await closeVisit(rv.token, rv.v);
-  const mInv = await call('POST', `${PHARM}/prescriptions/${rxOk.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: (await call('GET', `${PHARM}/prescriptions/${rxOk.data.id}`, { token: T.rec })).data.items[0].id, quantity: 2 }], discountAmount: 99999999 } });
+  const draft = await draftOf(T.rec, rv.v);
+  check('chốt ca có đơn → hóa đơn thuốc nháp tự tạo, mua đúng số kê (Clavamox 3)', draft && draft.paymentStatus === 'PENDING' && draft.items.length === 1 && draft.items[0].quantity === 3, brief(draft));
+  const mInv = await call('PUT', `${BILL}/medicine-invoices/${draft.id}/items`, { token: T.rec, body: { items: [{ medicineId: M.MED_AMOX, quantity: 2 }], discountAmount: 99999999 } });
   check('giảm giá hóa đơn thuốc vượt tổng → BILL_1402', mInv.code === 'BILL_1402', brief(mInv));
+  check('Thu ngân hủy nháp (khách mua ngoài) → CANCELLED, kho không đổi', (await call('POST', `${BILL}/medicine-invoices/${draft.id}/cancel`, { token: T.rec })).data?.paymentStatus === 'CANCELLED');
   await call('POST', `${CLIN}/pet-visits/${rv.v}/reopen`, { token: T.admin, body: { reason: 'dọn' } });
   await call('POST', `${CLIN}/pet-visits/${rv.v}/cancel-exam`, { token: rv.token, body: { reason: 'dọn' } });
 

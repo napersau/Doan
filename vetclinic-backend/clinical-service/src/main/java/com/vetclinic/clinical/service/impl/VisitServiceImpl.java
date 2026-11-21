@@ -34,6 +34,7 @@ import com.vetclinic.clinical.repository.MedicalRecordRepository;
 import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
+import com.vetclinic.clinical.repository.PrescriptionRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
 import com.vetclinic.clinical.repository.VitalSignRepository;
 import com.vetclinic.clinical.service.TicketIssuer;
@@ -45,6 +46,7 @@ import com.vetclinic.common.util.Codes;
 import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
+import com.vetclinic.common.event.PrescriptionCreatedEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
@@ -91,6 +93,7 @@ public class VisitServiceImpl implements VisitService {
     private final VisitServiceDetailRepository detailRepository;
     private final VitalSignRepository vitalSignRepository;
     private final MedicalRecordRepository medicalRecordRepository;
+    private final PrescriptionRepository prescriptionRepository;
     private final ClinicServiceRepository serviceRepository;
     private final AuthClient authClient;
     private final AppointmentClient appointmentClient;
@@ -105,7 +108,8 @@ public class VisitServiceImpl implements VisitService {
     public VisitServiceImpl(PetVisitRepository visitRepository, PetRepository petRepository,
                             PetVisitStatusHistoryRepository historyRepository,
                             VisitServiceDetailRepository detailRepository, VitalSignRepository vitalSignRepository,
-                            MedicalRecordRepository medicalRecordRepository, ClinicServiceRepository serviceRepository,
+                            MedicalRecordRepository medicalRecordRepository, PrescriptionRepository prescriptionRepository,
+                            ClinicServiceRepository serviceRepository,
                             AuthClient authClient, AppointmentClient appointmentClient,
                             VisitSupport support, TicketIssuer ticketIssuer, VisitAssembler assembler,
                             NamedLockService lockService, OutboxWriter outboxWriter, Clock clock,
@@ -116,6 +120,7 @@ public class VisitServiceImpl implements VisitService {
         this.detailRepository = detailRepository;
         this.vitalSignRepository = vitalSignRepository;
         this.medicalRecordRepository = medicalRecordRepository;
+        this.prescriptionRepository = prescriptionRepository;
         this.serviceRepository = serviceRepository;
         this.authClient = authClient;
         this.appointmentClient = appointmentClient;
@@ -596,7 +601,24 @@ public class VisitServiceImpl implements VisitService {
         // Khóa hồ sơ chuyên môn một chiều (BR-27); thời điểm chốt = created_at của dòng lịch sử (không còn cột closed_at)
         support.transition(visit, VisitStatus.WAITING_PAYMENT, doctorId,
                 "Bác sĩ chốt chuyên môn, khóa hồ sơ bệnh án và chuyển sang thanh toán");
+        publishPrescriptionCreated(visit, doctorId);
         return assembler.detail(visit);
+    }
+
+    /**
+     * Chốt ca có đơn thuốc: ghi outbox {@code PrescriptionCreatedEvent} CÙNG giao dịch chốt ca; billing tạo hóa đơn thuốc NHÁP (hoặc dựng lại nháp
+     * nếu đây là lần chốt lại sau khi mở lại hồ sơ, T14). Không có đơn thì không phát gì. Khách / thú cưng / Bác sĩ chụp vào sự kiện để billing in
+     * hóa đơn mà không gọi ngược clinical.
+     */
+    private void publishPrescriptionCreated(PetVisit visit, UUID doctorId) {
+        prescriptionRepository.findWithItemsByVisitId(visit.getId()).ifPresent(prescription -> {
+            Pet pet = visit.getPet();
+            List<PrescriptionCreatedEvent.Item> items = prescription.getItems().stream()
+                    .map(i -> new PrescriptionCreatedEvent.Item(i.getMedicineId(), i.getQuantity())).toList();
+            String doctorName = visit.getDoctorNameSnapshot() == null ? "Bác sĩ" : visit.getDoctorNameSnapshot();
+            outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new PrescriptionCreatedEvent(UuidV7.generate(clock), clock.instant(),
+                    doctorId, prescription.getId(), visit.getId(), pet.getOwnerNameSnapshot(), pet.getOwnerPhoneSnapshot(), pet.getName(), doctorName, items));
+        });
     }
 
     @Override

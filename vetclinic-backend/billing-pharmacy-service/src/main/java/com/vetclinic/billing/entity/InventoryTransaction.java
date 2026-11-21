@@ -44,7 +44,7 @@ public class InventoryTransaction {
     private java.math.BigDecimal unitCost;
 
     @Column(name = "medicine_invoice_id")
-    private Long medicineInvoiceId;
+    private UUID medicineInvoiceId;
 
     @Column(name = "notes", length = 255)
     private String notes;

@@ -11,19 +11,19 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 /**
- * Lập (POST .../medicine-invoices) hoặc sửa (PUT .../medicine-invoices/{id}/items) hóa đơn thuốc.
- * Khi lập: mỗi dòng quantity >= 1, discountAmount bỏ trống = 0. Khi sửa: quantity = 0 là bỏ dòng khỏi hóa đơn,
- * discountAmount bỏ trống = giữ nguyên mức giảm hiện tại.
+ * Sửa hóa đơn thuốc nháp ({@code PUT /billing/medicine-invoices/{id}/items}): mỗi dòng gồm thuốc (có trong đơn) và số lượng khách mua;
+ * {@code quantity = 0} là bỏ dòng khỏi hóa đơn; {@code discountAmount} bỏ trống = giữ nguyên mức giảm hiện tại. Không có API lập hóa đơn thuốc:
+ * hóa đơn nháp tự có khi Bác sĩ chốt ca.
  */
 public record MedicineInvoiceRequest(
         @NotEmpty @Size(max = 20) List<@Valid Line> items,
         @DecimalMin("0.00") @Digits(integer = 10, fraction = 2) BigDecimal discountAmount
 ) {
-
     public record Line(
-            @NotNull Long prescriptionItemId,
+            @NotNull UUID medicineId,
             @NotNull @Min(0) @Max(10_000) Integer quantity
     ) {
     }

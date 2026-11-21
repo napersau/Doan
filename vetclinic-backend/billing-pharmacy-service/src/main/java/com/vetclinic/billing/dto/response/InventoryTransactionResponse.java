@@ -13,7 +13,7 @@ public record InventoryTransactionResponse(
         InventoryTransactionType transactionType,
         int quantity,
         BigDecimal unitCost,
-        Long medicineInvoiceId,
+        UUID medicineInvoiceId,
         String notes,
         UUID createdBy,
         Instant createdAt
