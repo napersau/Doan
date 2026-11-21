@@ -8,7 +8,7 @@ spring:
     gateway:
       server:
         webflux:
-          # Chỉ định tuyến /api/v1/** và /ws/**; KHÔNG định tuyến /internal/** (endpoint nội bộ giữa các service)
+          # Chỉ định tuyến /api/v1/**, /files/** (ảnh ký tạm) và /ws/**; KHÔNG định tuyến /internal/** (endpoint nội bộ giữa các service)
           routes:
             - id: auth-service
               uri: lb://auth-service
@@ -21,7 +21,7 @@ spring:
             - id: clinical-service
               uri: lb://clinical-service
               predicates:
-                - Path=/api/v1/clinical/**,/api/v1/pets/**,/api/v1/species/**,/api/v1/catalog/**
+                - Path=/api/v1/clinical/**,/api/v1/pets/**,/api/v1/species/**,/api/v1/catalog/**,/files/**
             - id: billing-pharmacy-service
               uri: lb://billing-pharmacy-service
               predicates:
@@ -55,6 +55,7 @@ vetclinic:
       - /api/v1/auth/logout
       - /api/v1/auth/register
       - /api/v1/appointments/slots   # Portal công khai: xem khung giờ còn trống trước khi đăng nhập (v3.0)
+      - /files/**          # URL ký tạm của ảnh CĐHA: chữ ký + hạn do clinical-service kiểm tra (Quy chuẩn 7.5)
       - /ws/**            # JWT của WebSocket được kiểm tra trong STOMP CONNECT tại notification-service
       - /actuator/health/**
 

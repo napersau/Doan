@@ -148,7 +148,8 @@ export const paraclinicApi = {
     files.forEach((file) => form.append('files', file));
     return api.upload(`${CLIN}/imaging-results/${detailId}`, form);
   },
-  attachment: (attachmentId) => api.blob(`${CLIN}/imaging-attachments/${attachmentId}/file`),
+  // URL ký tạm (hạn 1 giờ) của ảnh CĐHA: { url: '/files/imaging/...?exp=..&sig=..', expiresAt }. Ảnh tải thẳng bằng thẻ img, không cần Authorization.
+  attachmentUrl: (attachmentId) => api.get(`${CLIN}/imaging-attachments/${attachmentId}/url`),
 };
 
 export const pharmacyApi = {

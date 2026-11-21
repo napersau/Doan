@@ -8,6 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface ImagingAttachmentRepository extends JpaRepository<ImagingAttachment, Long> {
+public interface ImagingAttachmentRepository extends JpaRepository<ImagingAttachment, UUID> {
     List<ImagingAttachment> findByImagingResultIdIn(Collection<UUID> imagingResultIds);
 }

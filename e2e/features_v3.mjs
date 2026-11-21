@@ -411,11 +411,20 @@ async function main() {
   const saved = await call('POST', `${CLIN}/imaging-results/${imgDetail}`, { token: T.img, form: imgForm() });
   check('ảnh hợp lệ được lưu', saved.status === 200, brief(saved));
   const attach = (await visitOf(im.v)).imagingResults?.[0]?.attachments?.[0];
-  const dl = attach && await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/file`, { headers: { Authorization: `Bearer ${T.doc4}` } });
-  check('bác sĩ tải được ảnh (đúng loại, đúng dung lượng)', dl?.status === 200 && Buffer.from(await dl.arrayBuffer()).length === PNG.length);
-  const dlOther = attach && await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/file`, { headers: { Authorization: `Bearer ${T.owner2}` } });
-  check('chủ nuôi khác KHÔNG tải được ảnh (403/404)', [403, 404].includes(dlOther?.status));
-  check('không token không tải được ảnh (401)', attach && (await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/file`)).status === 401);
+  // Quy chuẩn 7.5: CSDL chỉ lưu file_key; URL ký tạm (HMAC, hạn 1 giờ) được cấp sau khi kiểm quyền, /files/** chỉ kiểm chữ ký
+  const urlRes = attach && await call('GET', `${CLIN}/imaging-attachments/${attach.id}/url`, { token: T.doc4 });
+  const fileKey = sql(`SELECT file_key FROM pet_clinic_clinical_db.imaging_attachments WHERE id=${uuidSql(attach.id)}`);
+  check('CSDL lưu file_key dạng imaging/yyyy/MM/<uuid>.png (không lưu URL)', /^imaging\/\d{4}\/\d{2}\/[0-9a-f-]{36}\.png$/.test(fileKey), fileKey);
+  check('bác sĩ xin được URL ký tạm /files/<file_key>?exp&sig', urlRes?.status === 200 && urlRes.data.url.startsWith(`/files/${fileKey}?exp=`) && urlRes.data.url.includes('&sig=') && Boolean(urlRes.data.expiresAt), brief(urlRes));
+  const dl = urlRes?.status === 200 && await fetch(`${API}${urlRes.data.url}`);   // không gửi Authorization: chữ ký thay token (thẻ img)
+  check('tải ảnh bằng URL ký không cần token (đúng loại, đúng dung lượng)', dl?.status === 200 && dl.headers.get('content-type') === 'image/png' && Buffer.from(await dl.arrayBuffer()).length === PNG.length);
+  check('sửa chữ ký → bị từ chối (403)', urlRes?.status === 200 && (await fetch(`${API}${urlRes.data.url.replace(/sig=./, 'sig=X')}`)).status === 403);
+  check('sửa hạn (exp) → bị từ chối (403)', urlRes?.status === 200 && (await fetch(`${API}${urlRes.data.url.replace(/exp=\d+/, 'exp=9999999999')}`)).status === 403);
+  check('file_key lạ / đi ra ngoài thư mục → 404', (await fetch(`${API}/files/imaging/../../etc/passwd?exp=9999999999&sig=x`)).status >= 400
+    && (await fetch(`${API}/files/imaging/2026/11/khong-ton-tai.png?exp=9999999999&sig=x`)).status === 404);
+  const urlOther = attach && await call('GET', `${CLIN}/imaging-attachments/${attach.id}/url`, { token: T.owner2 });
+  check('chủ nuôi khác KHÔNG xin được URL ảnh (403/404)', [403, 404].includes(urlOther?.status));
+  check('không token không xin được URL (401)', attach && (await fetch(`${API}${CLIN}/imaging-attachments/${attach.id}/url`)).status === 401);
   await call('POST', `${CLIN}/pet-visits/${im.v}/abandon`, { token: T.rec });
   // Gộp ca: nhiều dịch vụ CĐHA của CÙNG một đợt khám bị đẩy lùi cùng nhau (một lần gọi / một lần đẩy lùi)
   const g1 = await inProgress('GRP1', DOC4);

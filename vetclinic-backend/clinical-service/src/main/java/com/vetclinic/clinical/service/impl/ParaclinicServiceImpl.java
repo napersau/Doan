@@ -35,6 +35,7 @@ import com.vetclinic.clinical.repository.LabTestResultRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
+import com.vetclinic.clinical.service.FileUrlSigner;
 import com.vetclinic.clinical.service.ImagingStorage;
 import com.vetclinic.clinical.service.ParaclinicService;
 import com.vetclinic.clinical.service.VisitAssembler;
@@ -94,6 +95,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     private final VisitSupport support;
     private final VisitAssembler assembler;
     private final ImagingStorage storage;
+    private final FileUrlSigner urlSigner;
     private final TransactionTemplate readCommittedTemplate;
 
     public ParaclinicServiceImpl(VisitServiceDetailRepository detailRepository,
@@ -106,7 +108,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                                  LabTestResultRepository labResultRepository,
                                  ImagingResultRepository imagingResultRepository,
                                  ImagingAttachmentRepository attachmentRepository, VisitSupport support,
-                                 VisitAssembler assembler, ImagingStorage storage,
+                                 VisitAssembler assembler, ImagingStorage storage, FileUrlSigner urlSigner,
                                  PlatformTransactionManager transactionManager) {
         this.detailRepository = detailRepository;
         this.detailHistoryRepository = detailHistoryRepository;
@@ -123,6 +125,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         this.support = support;
         this.assembler = assembler;
         this.storage = storage;
+        this.urlSigner = urlSigner;
         this.readCommittedTemplate = new TransactionTemplate(transactionManager);
         this.readCommittedTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
@@ -449,12 +452,12 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         List<ImagingStorage.StoredFile> stored = new ArrayList<>();
         try {
             for (MultipartFile file : files) {
-                stored.add(storage.store(preview.getVisitId(), file));
+                stored.add(storage.store(file));
             }
             return readCommittedTemplate.execute(tx -> saveImaging(actor, detailId, description.trim(),
                     conclusion.trim(), stored));
         } catch (RuntimeException e) {
-            stored.forEach(f -> storage.deleteQuietly(f.relativePath()));
+            stored.forEach(f -> storage.deleteQuietly(f.fileKey()));
             throw e;
         }
     }
@@ -473,8 +476,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         ImagingResult result = imagingResultRepository.saveAndFlush(ImagingResult.builder()
                 .visitServiceDetailId(detailId).description(description).conclusion(conclusion).performedBy(actor).build());
         attachmentRepository.saveAll(stored.stream().map(f -> ImagingAttachment.builder()
-                .imagingResultId(result.getId()).fileUrl(f.relativePath()).fileName(f.originalName())
-                .fileSize(f.size()).contentType(f.contentType()).build()).toList());
+                .imagingResultId(result.getId()).fileKey(f.fileKey()).originalFileName(f.originalName())
+                .fileSize(f.size()).contentType(f.contentType()).uploadedBy(actor).build()).toList());
 
         setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
         ticketIssuer.refreshRoomTicketOf(detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
@@ -484,7 +487,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(readOnly = true)
-    public AttachmentDownload downloadAttachment(Long attachmentId) {
+    public FileUrlSigner.SignedUrl attachmentUrl(UUID attachmentId) {
         UUID actor = SecurityUtils.getCurrentUserId();
         RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
         ImagingAttachment attachment = attachmentRepository.findById(attachmentId)
@@ -499,8 +502,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         if (role == RoleCode.PET_OWNER && !visit.getPet().getOwnerId().equals(actor)) {
             throw new AppException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        return new AttachmentDownload(storage.load(attachment.getFileUrl()), attachment.getContentType(),
-                attachment.getFileName());
+        return urlSigner.sign(attachment.getFileKey());
     }
 
     // ================================================================== helper

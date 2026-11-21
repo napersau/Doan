@@ -12,9 +12,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 
-import static com.vetclinic.clinical.testsupport.TestData.lid;
+import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,19 +31,19 @@ class ImagingStorageTest {
 
     @BeforeEach
     void setUp() {
-        storage = new ImagingStorage(new StorageProperties(root.toString(),
-                List.of("image/jpeg", "image/png", "application/dicom")));
+        storage = new ImagingStorage(new StorageProperties(root.toString(), "test-secret-test-secret-0123456789",
+                Duration.ofHours(1), List.of("image/jpeg", "image/png", "application/dicom")), CLOCK);
     }
 
     @Test
     void store_writesJpegUnderTheVisitFolderWithAServerGeneratedName() throws IOException {
-        ImagingStorage.StoredFile stored = storage.store(lid(12L), new MockMultipartFile("files", "sieu-am.jpg", "image/jpeg", JPEG));
+        ImagingStorage.StoredFile stored = storage.store(new MockMultipartFile("files", "sieu-am.jpg", "image/jpeg", JPEG));
 
-        assertThat(stored.relativePath()).matches(lid(12L) + "/[0-9a-f-]{36}\\.jpg");
+        assertThat(stored.fileKey()).matches("imaging/2026/10/[0-9a-f-]{36}\\.jpg");   // file_key theo Quy chuẩn 7.5 (năm/tháng theo giờ phòng khám)
         assertThat(stored.originalName()).isEqualTo("sieu-am.jpg");
         assertThat(stored.size()).isEqualTo(JPEG.length);
         assertThat(stored.contentType()).isEqualTo("image/jpeg");
-        assertThat(Files.readAllBytes(root.resolve(stored.relativePath()))).isEqualTo(JPEG);
+        assertThat(Files.readAllBytes(root.resolve(stored.fileKey()))).isEqualTo(JPEG);
     }
 
     @Test
@@ -53,8 +54,8 @@ class ImagingStorageTest {
         dicom[130] = 'C';
         dicom[131] = 'M';
 
-        assertThat(storage.store(lid(1L), new MockMultipartFile("files", "x.png", "image/png", PNG)).relativePath()).endsWith(".png");
-        assertThat(storage.store(lid(1L), new MockMultipartFile("files", "x.dcm", "application/dicom", dicom)).relativePath()).endsWith(".dcm");
+        assertThat(storage.store(new MockMultipartFile("files", "x.png", "image/png", PNG)).fileKey()).endsWith(".png");
+        assertThat(storage.store(new MockMultipartFile("files", "x.dcm", "application/dicom", dicom)).fileKey()).endsWith(".dcm");
     }
 
     @Test
@@ -75,12 +76,12 @@ class ImagingStorageTest {
 
     @Test
     void store_neverWritesOutsideTheStorageRootEvenWithAMaliciousOriginalName() throws IOException {
-        ImagingStorage.StoredFile stored = storage.store(lid(7L),
+        ImagingStorage.StoredFile stored = storage.store(
                 new MockMultipartFile("files", "../../../etc/evil.jpg", "image/jpeg", JPEG));
 
         // Tên gốc chỉ để hiển thị (đã bỏ phần đường dẫn); nơi lưu thật do server sinh
         assertThat(stored.originalName()).isEqualTo("evil.jpg");
-        assertThat(Files.exists(root.resolve(stored.relativePath()))).isTrue();
+        assertThat(Files.exists(root.resolve(stored.fileKey()))).isTrue();
         try (var files = Files.walk(root)) {
             assertThat(files.filter(Files::isRegularFile)).allSatisfy(f -> assertThat(f.normalize()).startsWith(root));
         }
@@ -94,14 +95,14 @@ class ImagingStorageTest {
 
     @Test
     void loadAndDelete_roundTrip() throws IOException {
-        ImagingStorage.StoredFile stored = storage.store(lid(3L), new MockMultipartFile("files", "a.jpg", "image/jpeg", JPEG));
+        ImagingStorage.StoredFile stored = storage.store(new MockMultipartFile("files", "a.jpg", "image/jpeg", JPEG));
 
-        Resource resource = storage.load(stored.relativePath());
+        Resource resource = storage.load(stored.fileKey());
         assertThat(resource.contentLength()).isEqualTo(JPEG.length);
 
-        storage.deleteQuietly(stored.relativePath());
-        assertThat(Files.exists(root.resolve(stored.relativePath()))).isFalse();
-        storage.deleteQuietly(stored.relativePath());   // xóa lần hai không gây lỗi
+        storage.deleteQuietly(stored.fileKey());
+        assertThat(Files.exists(root.resolve(stored.fileKey()))).isFalse();
+        storage.deleteQuietly(stored.fileKey());   // xóa lần hai không gây lỗi
         storage.deleteQuietly("../ngoai-root.txt");     // đường dẫn xấu cũng không ném ngoại lệ
     }
 }

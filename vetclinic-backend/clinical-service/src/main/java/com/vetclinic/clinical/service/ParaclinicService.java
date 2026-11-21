@@ -15,9 +15,6 @@ import java.util.List;
 /** Hai hàng đợi cận lâm sàng độc lập: phòng Xét nghiệm (LABORATORY) và phòng Chẩn đoán hình ảnh (IMAGING). */
 public interface ParaclinicService {
 
-    record AttachmentDownload(Resource resource, String contentType, String fileName) {
-    }
-
     /**
      * Hàng đợi của một phòng (17/11/2026): các PHIẾU XẾP HÀNG của phòng đang chờ / đang làm, thứ tự priority DESC, issued_at, id;
      * mỗi phiếu bung ra các dịch vụ của nó. Dịch vụ chưa nộp tiền không có phiếu nên không xuất hiện. Gọi số và "Bắt đầu" thao tác
@@ -60,5 +57,9 @@ public interface ParaclinicService {
     ServiceDetailResponse submitImagingResult(UUID detailId, String description, String conclusion,
                                               List<MultipartFile> files);
 
-    AttachmentDownload downloadAttachment(Long attachmentId);
+    /**
+     * Xin URL ký tạm của một tệp ảnh CĐHA (Quy chuẩn 7.5): kiểm quyền một lần ở đây (chủ nuôi chỉ xin được ảnh của thú cưng mình), URL có
+     * hạn 1 giờ. Tệp được phục vụ ở {@code GET /files/**} chỉ bằng chữ ký.
+     */
+    FileUrlSigner.SignedUrl attachmentUrl(UUID attachmentId);
 }

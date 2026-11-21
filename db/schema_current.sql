@@ -572,14 +572,19 @@ CREATE TABLE IF NOT EXISTS imaging_results (
 CREATE INDEX idx_ir_performer ON imaging_results(performed_by);
 
 -- 30. IMAGING_ATTACHMENTS (TỆP ẢNH ĐÍNH KÈM)
+-- file_key: đường dẫn tương đối trong kho lưu trữ, ví dụ imaging/2026/11/<uuid>.jpg.
+-- URL trả cho client được sinh lúc đọc (URL có chữ ký, hết hạn sau 1 giờ); đổi nơi lưu không phải sửa CSDL.
 CREATE TABLE IF NOT EXISTS imaging_attachments (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    imaging_result_id BINARY(16) NOT NULL, -- imaging_results.id (UUIDv7); cấu trúc còn lại đổi ở bước 4.3
-    file_url VARCHAR(500) NOT NULL,
-    file_name VARCHAR(255) NOT NULL,
-    file_size BIGINT NULL,
-    content_type VARCHAR(50) NULL,
-    CONSTRAINT fk_ia_result FOREIGN KEY (imaging_result_id) REFERENCES imaging_results(id) ON DELETE CASCADE
+    id BINARY(16) PRIMARY KEY, -- UUIDv7 (không đoán được khi tải ảnh)
+    imaging_result_id BINARY(16) NOT NULL,
+    file_key VARCHAR(255) NOT NULL UNIQUE,
+    original_file_name VARCHAR(255) NOT NULL,
+    content_type VARCHAR(100) NOT NULL,
+    file_size BIGINT NOT NULL,
+    uploaded_by BINARY(16) NOT NULL, -- LFK: auth.users
+    uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_ia_result FOREIGN KEY (imaging_result_id) REFERENCES imaging_results(id) ON DELETE CASCADE,
+    CONSTRAINT chk_ia_size CHECK (file_size > 0)
 );
 CREATE INDEX idx_ia_result ON imaging_attachments(imaging_result_id);
 

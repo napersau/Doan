@@ -1,24 +1,38 @@
 import { useEffect, useState } from 'react';
 import { paraclinicApi } from '../../api/endpoints';
+import { API_URL } from '../../config';
 import { Badge, Facts, Table } from '../ui';
 import { LAB_EVALUATION, serviceCategoryLabel, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
 import { formatDate, formatDateTime, formatMoney, formatNumber } from '../../lib/format';
 
-/** Ảnh CĐHA: tải qua API có xác thực (không dùng thẻ img trực tiếp vì cần Authorization). DICOM chỉ tải về. */
+/** Hết hạn còn bao lâu thì xin lại URL: trước hạn 1 phút để ảnh đang mở không bị đứt; tối thiểu 5 giây để không xin liên tục. */
+const refreshDelay = (expiresAt) => Math.max(5000, new Date(expiresAt).getTime() - Date.now() - 60000);
+
+/**
+ * Ảnh CĐHA: xin URL ký tạm (quyền được kiểm một lần ở máy chủ, hạn 1 giờ) rồi để thẻ img tải thẳng. URL hết hạn thì tự xin lại (theo hẹn giờ,
+ * hoặc khi ảnh báo lỗi); không lưu URL ở đâu cả. DICOM chỉ cho tải về.
+ */
 export function AttachmentView({ attachment }) {
-  const [url, setUrl] = useState('');
+  const [signed, setSigned] = useState(null);
   const [failed, setFailed] = useState(false);
   const previewable = /^image\/(jpeg|png)$/.test(attachment.contentType || '');
   useEffect(() => {
-    let revoked = false; let created = '';
-    paraclinicApi.attachment(attachment.id).then((blob) => { if (!revoked) { created = URL.createObjectURL(blob); setUrl(created); } }).catch(() => setFailed(true));
-    return () => { revoked = true; if (created) URL.revokeObjectURL(created); };
+    let cancelled = false; let timer;
+    const load = () => paraclinicApi.attachmentUrl(attachment.id).then((result) => {
+      if (cancelled) return;
+      setSigned(result); setFailed(false);
+      timer = setTimeout(load, refreshDelay(result.expiresAt));
+    }).catch(() => { if (!cancelled) setFailed(true); });
+    load();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [attachment.id]);
+  const reload = () => paraclinicApi.attachmentUrl(attachment.id).then(setSigned).catch(() => setFailed(true));
   if (failed) return <span className="ui-muted">Không tải được tệp {attachment.fileName}.</span>;
-  if (!url) return <span className="ui-muted">Đang tải {attachment.fileName}…</span>;
+  if (!signed) return <span className="ui-muted">Đang tải {attachment.fileName}…</span>;
+  const href = `${API_URL}${signed.url}`;
   return <figure style={{ margin: 0 }}>
-    {previewable && <a href={url} target="_blank" rel="noreferrer"><img className="ui-image" src={url} alt={`Ảnh kết quả ${attachment.fileName}`} /></a>}
-    <figcaption><a className="ui-link" href={url} download={attachment.fileName}>Tải {attachment.fileName}</a> <small className="ui-muted">({formatNumber((attachment.fileSize || 0) / 1024)} KB)</small></figcaption>
+    {previewable && <a href={href} target="_blank" rel="noreferrer"><img className="ui-image" src={href} alt={`Ảnh kết quả ${attachment.fileName}`} onError={reload} /></a>}
+    <figcaption><a className="ui-link" href={href} download={attachment.fileName}>Tải {attachment.fileName}</a> <small className="ui-muted">({formatNumber((attachment.fileSize || 0) / 1024)} KB)</small></figcaption>
   </figure>;
 }
 

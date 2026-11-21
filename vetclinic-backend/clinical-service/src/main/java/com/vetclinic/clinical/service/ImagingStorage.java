@@ -3,6 +3,7 @@ package com.vetclinic.clinical.service;
 import com.vetclinic.clinical.config.StorageProperties;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
+import com.vetclinic.common.util.UuidV7;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -13,13 +14,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Locale;
-import java.util.UUID;
 
 /**
- * Lưu và đọc ảnh chẩn đoán hình ảnh trên đĩa (Docker volume).
- * - Tên tệp trên đĩa luôn là UUID do server sinh; tên gốc của người dùng chỉ lưu vào CSDL để hiển thị: không có path traversal.
+ * Lưu và đọc ảnh chẩn đoán hình ảnh trên đĩa (Docker volume). CSDL chỉ giữ {@code file_key} = {@code imaging/yyyy/MM/<uuidv7>.<đuôi>}
+ * (Quy chuẩn 7.5), đường dẫn tương đối dưới thư mục gốc {@code app.storage.root}.
+ * - Tên tệp trên đĩa luôn là UUIDv7 do server sinh; tên gốc của người dùng chỉ lưu vào CSDL để hiển thị: không có path traversal.
  * - Kiểm tra cả Content-Type khai báo lẫn chữ ký tệp (magic bytes): đổi đuôi .exe thành .jpg không qua được.
  */
 @Slf4j
@@ -28,15 +31,17 @@ public class ImagingStorage {
 
     public static final long MAX_FILE_BYTES = 20L * 1024 * 1024;
 
-    public record StoredFile(String relativePath, String originalName, long size, String contentType) {
+    public record StoredFile(String fileKey, String originalName, long size, String contentType) {
     }
 
     private final Path root;
     private final StorageProperties properties;
+    private final Clock clock;
 
-    public ImagingStorage(StorageProperties properties) {
+    public ImagingStorage(StorageProperties properties, Clock clock) {
         this.properties = properties;
-        this.root = Path.of(properties.imagingDir()).toAbsolutePath().normalize();
+        this.clock = clock;
+        this.root = Path.of(properties.root()).toAbsolutePath().normalize();
     }
 
     /** Kiểm tra mà chưa ghi gì xuống đĩa: gọi cho TẤT CẢ tệp trước khi lưu tệp nào. */
@@ -58,14 +63,15 @@ public class ImagingStorage {
         return detected;
     }
 
-    public StoredFile store(UUID visitId, MultipartFile file) {
+    public StoredFile store(MultipartFile file) {
         String contentType = validate(file);
         String extension = switch (contentType) {
             case "image/jpeg" -> ".jpg";
             case "image/png" -> ".png";
             default -> ".dcm";
         };
-        String relative = visitId + "/" + UUID.randomUUID() + extension;
+        LocalDate today = LocalDate.now(clock);
+        String relative = String.format("imaging/%d/%02d/%s%s", today.getYear(), today.getMonthValue(), UuidV7.generate(clock), extension);
         Path target = resolve(relative);
         try {
             Files.createDirectories(target.getParent());
@@ -80,24 +86,24 @@ public class ImagingStorage {
     }
 
     /** Xóa tệp đã lưu khi bước ghi CSDL phía sau thất bại, để không để lại tệp mồ côi. */
-    public void deleteQuietly(String relativePath) {
+    public void deleteQuietly(String fileKey) {
         try {
-            Files.deleteIfExists(resolve(relativePath));
+            Files.deleteIfExists(resolve(fileKey));
         } catch (IOException | AppException e) {
-            log.warn("Không xóa được tệp {}: {}", relativePath, e.getMessage());
+            log.warn("Không xóa được tệp {}: {}", fileKey, e.getMessage());
         }
     }
 
-    public Resource load(String relativePath) {
-        Path path = resolve(relativePath);
+    public Resource load(String fileKey) {
+        Path path = resolve(fileKey);
         if (!Files.isReadable(path)) {
             throw new AppException(ErrorCode.RESOURCE_NOT_FOUND);
         }
         return new FileSystemResource(path);
     }
 
-    private Path resolve(String relativePath) {
-        Path path = root.resolve(relativePath).normalize();
+    private Path resolve(String fileKey) {
+        Path path = root.resolve(fileKey).normalize();
         if (!path.startsWith(root)) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Đường dẫn tệp không hợp lệ");
         }

@@ -13,4 +13,4 @@ services:
       - mysql-data:/var/lib/mysql
   clinical-service:
     volumes: !override
-      - imaging-data:/app/uploads/imaging
+      - imaging-data:/app/uploads

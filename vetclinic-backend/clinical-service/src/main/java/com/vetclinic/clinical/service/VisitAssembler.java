@@ -134,8 +134,8 @@ public class VisitAssembler {
     }
 
     private ImagingResultResponse toImaging(ImagingResult r, List<ImagingAttachment> files) {
-        List<AttachmentResponse> attachments = files.stream().map(a -> new AttachmentResponse(a.getId(), a.getFileName(),
-                a.getFileSize(), a.getContentType(), "/api/v1/clinical/imaging-attachments/" + a.getId() + "/file")).toList();
+        List<AttachmentResponse> attachments = files.stream().map(a -> new AttachmentResponse(a.getId(), a.getOriginalFileName(),
+                a.getFileSize(), a.getContentType())).toList();
         return new ImagingResultResponse(r.getId(), r.getVisitServiceDetailId(), r.getDescription(), r.getConclusion(),
                 r.getPerformedBy(), r.getPerformedAt(), attachments);
     }

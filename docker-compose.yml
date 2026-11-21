@@ -173,11 +173,11 @@ services:
     image: vetclinic/clinical-service:latest
     environment:
       <<: *spring-env
-      IMAGING_DIR: /app/uploads/imaging
+      # Thư mục gốc của kho tệp (file_key dạng imaging/yyyy/MM/<uuid>.jpg nằm dưới đây); khóa ký URL tạm: STORAGE_SECRET, mặc định dùng JWT_SECRET
+      STORAGE_ROOT: /app/uploads
+      STORAGE_SECRET: ${STORAGE_SECRET:-${JWT_SECRET}}
     volumes:
-      - imaging-data:/app/uploads/imaging
-      # Ảnh CĐHA mẫu cho dữ liệu demo trong schema_init.sql (file_url = seed/...); chỉ đọc
-      - ./docs/demo-images:/app/uploads/imaging/seed:ro
+      - imaging-data:/app/uploads
     depends_on: *depends-on-infra
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health"]

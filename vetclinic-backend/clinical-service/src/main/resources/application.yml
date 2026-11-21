@@ -74,6 +74,13 @@ management:
 vetclinic:
   clinic:
     zone: Asia/Ho_Chi_Minh              # Múi giờ vận hành phòng khám (xác định "hôm nay" khi check-in lịch hẹn)
+  security:
+    public-paths:
+      - /files/**       # URL ký tạm của ảnh CĐHA (Quy chuẩn 7.5): chữ ký + hạn thay cho JWT, vì thẻ img không gắn được Authorization
+
+app:
   storage:
-    imaging-dir: ${IMAGING_DIR:./uploads/imaging}
+    root: ${STORAGE_ROOT:./uploads}                      # file_key (imaging/yyyy/MM/<uuidv7>.<đuôi>) nằm dưới thư mục này
+    secret: ${STORAGE_SECRET:${JWT_SECRET:}}             # khóa HMAC ký URL tạm; mặc định dùng chung JWT_SECRET
+    url-ttl: 1h
     allowed-content-types: image/jpeg,image/png,application/dicom

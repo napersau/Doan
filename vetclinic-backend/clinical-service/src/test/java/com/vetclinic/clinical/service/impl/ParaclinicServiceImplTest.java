@@ -27,7 +27,9 @@ import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.event.PatientCalledEvent;
 import com.vetclinic.clinical.dto.response.ServiceDetailResponse;
 import com.vetclinic.clinical.entity.ClinicService;
+import com.vetclinic.clinical.entity.ImagingAttachment;
 import com.vetclinic.clinical.entity.ImagingResult;
+import com.vetclinic.clinical.service.FileUrlSigner;
 import com.vetclinic.clinical.entity.LabTestItem;
 import com.vetclinic.clinical.entity.LabTestReferenceRange;
 import com.vetclinic.clinical.entity.LabTestResult;
@@ -71,6 +73,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import java.util.Optional;
 import java.util.Set;
 
@@ -86,6 +89,8 @@ import static com.vetclinic.clinical.testsupport.TestData.dog;
 import static com.vetclinic.clinical.testsupport.TestData.loginAs;
 import static com.vetclinic.clinical.testsupport.TestData.pet;
 import static com.vetclinic.clinical.testsupport.TestData.service;
+import static com.vetclinic.clinical.testsupport.TestData.OWNER;
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
 import static com.vetclinic.clinical.testsupport.TestData.pid;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -139,6 +144,8 @@ class ParaclinicServiceImplTest {
     private TicketIssuer ticketIssuer;
 
     private ParaclinicServiceImpl service;
+    private final FileUrlSigner urlSigner = new FileUrlSigner(new com.vetclinic.clinical.config.StorageProperties("./uploads",
+            "test-secret-test-secret-0123456789", java.time.Duration.ofHours(1), List.of("image/jpeg")), CLOCK);
 
     @BeforeEach
     void setUp() {
@@ -152,7 +159,7 @@ class ParaclinicServiceImplTest {
         service = new ParaclinicServiceImpl(detailRepository, detailHistoryRepository, ticketRepository, ticketItemRepository,
                 ticketIssuer, visitRepository,
                 labTestItemRepository, rangeRepository, serviceLabItemRepository, labResultRepository, imagingResultRepository,
-                attachmentRepository, support, assembler, storage, tm);
+                attachmentRepository, support, assembler, storage, urlSigner, tm);
     }
 
     @AfterEach
@@ -703,7 +710,7 @@ class ParaclinicServiceImplTest {
         VisitServiceDetail d = detail(1L, 100L, ULTRASOUND, ServiceDetailStatus.IN_PROGRESS);
         when(detailRepository.findById(lid(1L))).thenReturn(Optional.of(d));
         stubLocks(d, VisitStatus.WAITING_RESULTS);
-        when(storage.store(any(), any())).thenReturn(new ImagingStorage.StoredFile("100/a.jpg", "sieu-am.jpg", 1234L, "image/jpeg"));
+        when(storage.store(any())).thenReturn(new ImagingStorage.StoredFile("imaging/2026/10/a.jpg", "sieu-am.jpg", 1234L, "image/jpeg"));
         when(imagingResultRepository.saveAndFlush(any(ImagingResult.class))).thenAnswer(inv -> {
             ImagingResult r = inv.getArgument(0);
             r.setId(lid(700L));
@@ -715,23 +722,66 @@ class ParaclinicServiceImplTest {
                 List.of(new MockMultipartFile("files", "sieu-am.jpg", "image/jpeg", new byte[]{1})));
 
         assertThat(response.status()).isEqualTo(ServiceDetailStatus.COMPLETED);
-        verify(attachmentRepository).saveAll(anyList());
+        // Chỉ lưu file_key (không lưu URL), kèm người tải lên
+        ArgumentCaptor<List<ImagingAttachment>> saved = ArgumentCaptor.forClass(List.class);
+        verify(attachmentRepository).saveAll(saved.capture());
+        assertThat(saved.getValue()).singleElement().satisfies(a -> {
+            assertThat(a.getFileKey()).isEqualTo("imaging/2026/10/a.jpg");
+            assertThat(a.getOriginalFileName()).isEqualTo("sieu-am.jpg");
+            assertThat(a.getFileSize()).isEqualTo(1234L);
+            assertThat(a.getUploadedBy()).isEqualTo(IMAGING_TECH);
+            assertThat(a.getImagingResultId()).isEqualTo(lid(700L));
+        });
         verify(outboxWriter).write(eq("VISIT"), any(), any(ParaclinicalResultsReadyEvent.class));
         verify(storage, never()).deleteQuietly(any());
+    }
+
+    // ================================================================== URL ký tạm của ảnh (Quy chuẩn 7.5)
+
+    private void stubAttachmentOfPetOwnedBy(UUID owner) {
+        ImagingAttachment a = ImagingAttachment.builder().id(lid(800L)).imagingResultId(lid(700L)).fileKey("imaging/2026/10/a.jpg").build();
+        when(attachmentRepository.findById(lid(800L))).thenReturn(Optional.of(a));
+        when(imagingResultRepository.findById(lid(700L))).thenReturn(Optional.of(ImagingResult.builder().id(lid(700L)).visitServiceDetailId(lid(1L)).build()));
+        when(detailRepository.findById(lid(1L))).thenReturn(Optional.of(detail(1L, 100L, ULTRASOUND, ServiceDetailStatus.COMPLETED)));
+        PetVisit visit = visit(100L, VisitStatus.COMPLETED, DOCTOR);
+        visit.getPet().setOwnerId(owner);
+        when(visitRepository.findWithPetById(lid(100L))).thenReturn(Optional.of(visit));
+    }
+
+    @Test
+    void attachmentUrl_staffGetsASignedUrlWithExpiry_ownerOnlyForTheirOwnPet() {
+        stubAttachmentOfPetOwnedBy(OWNER);
+
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        var signed = service.attachmentUrl(lid(800L));
+        assertThat(signed.url()).startsWith("/files/imaging/2026/10/a.jpg?exp=").contains("&sig=");
+        assertThat(signed.expiresAt()).isEqualTo(CLOCK.instant().plusSeconds(3600));   // hạn 1 giờ
+
+        loginAs(OWNER, RoleCode.PET_OWNER);
+        assertThat(service.attachmentUrl(lid(800L)).url()).startsWith("/files/imaging/2026/10/a.jpg?exp=");
+
+        loginAs(uid(77), RoleCode.PET_OWNER);   // chủ nuôi khác: không lộ sự tồn tại của ảnh
+        assertError(ErrorCode.RESOURCE_NOT_FOUND, () -> service.attachmentUrl(lid(800L)));
+    }
+
+    @Test
+    void attachmentUrl_unknownAttachment_isNotFound() {
+        loginAs(DOCTOR, RoleCode.VETERINARIAN);
+        assertError(ErrorCode.RESOURCE_NOT_FOUND, () -> service.attachmentUrl(lid(999L)));
     }
 
     @Test
     void submitImaging_whenDatabaseWriteFails_deletesTheFilesAlreadyStored() {
         loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
         when(detailRepository.findById(lid(1L))).thenReturn(Optional.of(detail(1L, 100L, ULTRASOUND, ServiceDetailStatus.IN_PROGRESS)));
-        when(storage.store(any(), any())).thenReturn(new ImagingStorage.StoredFile("100/a.jpg", "a.jpg", 10L, "image/jpeg"));
+        when(storage.store(any())).thenReturn(new ImagingStorage.StoredFile("imaging/2026/10/a.jpg", "a.jpg", 10L, "image/jpeg"));
         // Chỉ định bị xóa / không khóa được trong lúc xử lý -> transaction thất bại sau khi tệp đã lưu
         when(detailRepository.findByIdForUpdate(lid(1L))).thenReturn(Optional.empty());
 
         assertError(ErrorCode.SERVICE_DETAIL_NOT_FOUND, () -> service.submitImagingResult(lid(1L), "Mô tả", "Kết luận",
                 List.of(new MockMultipartFile("files", "a.jpg", "image/jpeg", new byte[]{1}))));
 
-        verify(storage).deleteQuietly("100/a.jpg");   // không để lại tệp mồ côi
+        verify(storage).deleteQuietly("imaging/2026/10/a.jpg");   // không để lại tệp mồ côi
     }
 
     @Test
@@ -747,7 +797,7 @@ class ParaclinicServiceImplTest {
         assertError(ErrorCode.INVALID_IMAGING_FILE, () -> service.submitImagingResult(lid(1L), "Mô tả", "Kết luận", List.of()));
         assertError(ErrorCode.INVALID_IMAGING_FILE, () -> service.submitImagingResult(lid(1L), "Mô tả", "Kết luận", null));
 
-        verify(storage, never()).store(any(), any());
+        verify(storage, never()).store(any());
         verify(detailRepository, never()).findByIdForUpdate(any());
     }
 
