@@ -504,7 +504,7 @@ async function main() {
   check('nhập kho số âm / bằng 0 bị từ chối (400)', (await call('POST', `${PHARM}/medicines/${med.data.id}/import`, { token: T.admin, body: { quantity: 0 } })).status === 400);
   check('cân chỉnh thiếu lý do bị từ chối (400)', (await call('POST', `${PHARM}/medicines/${med.data.id}/adjust`, { token: T.admin, body: { delta: -1 } })).status === 400);
   check('cân chỉnh −28 → tồn 2; lọc "sắp hết" thấy thuốc', (await call('POST', `${PHARM}/medicines/${med.data.id}/adjust`, { token: T.admin, body: { delta: -28, reason: 'Kiểm kê' } })).data?.stockQuantity === 2 && (await call('GET', `${PHARM}/medicines?lowStock=true&size=100`, { token: T.admin })).data.items.some((m) => m.id === med.data.id));
-  check('đổi giá + VAT (bảng giá có lịch sử) không đụng tồn kho; dòng giá cũ được đóng, không bị sửa', (await call('POST', `${PHARM}/medicines/${med.data.id}/prices`, { token: T.admin, body: { salePrice: 15000, vatRate: 0.05, reason: 'e2e' } })).status === 201
+  check('đổi giá + VAT (bảng giá có lịch sử) không đụng tồn kho; dòng giá cũ được đóng, không bị sửa', (await call('POST', `${PHARM}/medicines/${med.data.id}/prices`, { token: T.admin, body: { salePrice: 15000, vatRate: 0.05, effectiveFrom: new Date(Date.now() + 86400000).toISOString(), reason: 'e2e' } })).status === 201
     && (await call('GET', `${PHARM}/medicines/${med.data.id}`, { token: T.admin })).data?.stockQuantity === 2
     && sql(`SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.medicine_prices WHERE medicine_id=${uuidSql(med.data.id)}`) === '2'
     && sql(`SELECT sale_price FROM pet_clinic_billing_pharmacy_db.medicine_prices WHERE medicine_id=${uuidSql(med.data.id)} AND effective_to IS NOT NULL`) === '12000.00');
