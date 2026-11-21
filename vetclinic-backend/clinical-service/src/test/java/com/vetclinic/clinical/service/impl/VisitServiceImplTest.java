@@ -86,6 +86,8 @@ import static com.vetclinic.clinical.testsupport.TestData.loginAs;
 import static com.vetclinic.clinical.testsupport.TestData.pet;
 import static com.vetclinic.clinical.testsupport.TestData.service;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
+import static com.vetclinic.clinical.testsupport.TestData.pid;
+import static com.vetclinic.clinical.testsupport.TestData.apid;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -173,10 +175,10 @@ class VisitServiceImplTest {
     @Test
     void checkIn_walkIn_createsWaitingVisitWithEmergencyFlagAndPublishesEvent() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
         stubSaveVisit();
 
-        VisitResponse response = service.checkIn(new CheckInRequest(11L, null, "  Co giật  ", true, null));
+        VisitResponse response = service.checkIn(new CheckInRequest(pid(11), null, "  Co giật  ", true, null));
 
         assertThat(response.status()).isEqualTo(VisitStatus.WAITING);
         assertThat(response.visitCode()).isEqualTo("VIS-2026-00100");
@@ -202,29 +204,29 @@ class VisitServiceImplTest {
     @Test
     void checkIn_withTodaysConfirmedAppointment_usesItsPetAndLinksTheAppointment() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(appointmentClient.getAppointment(7L)).thenReturn(ApiResponse.success(appointment("CONFIRMED", LocalDate.of(2026, 10, 30), 11L)));
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        when(appointmentClient.getAppointment(apid(7))).thenReturn(ApiResponse.success(appointment("CONFIRMED", LocalDate.of(2026, 10, 30), pid(11))));
+        when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
         stubSaveVisit();
 
         // Không gửi petId và triệu chứng: lấy từ lịch hẹn
-        VisitResponse response = service.checkIn(new CheckInRequest(null, 7L, null, false, null));
+        VisitResponse response = service.checkIn(new CheckInRequest(null, apid(7), null, false, null));
 
-        assertThat(response.petId()).isEqualTo(11L);
-        assertThat(response.appointmentId()).isEqualTo(7L);
+        assertThat(response.petId()).isEqualTo(pid(11));
+        assertThat(response.appointmentId()).isEqualTo(apid(7));
         assertThat(response.initialSymptoms()).isEqualTo("Khám tổng quát");
         ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
         verify(outboxWriter).write(eq("VISIT"), any(), event.capture());
-        assertThat(((VisitCheckedInEvent) event.getValue()).appointmentId()).isEqualTo(7L);
+        assertThat(((VisitCheckedInEvent) event.getValue()).appointmentId()).isEqualTo(apid(7));
     }
 
     private PetVisit checkInWithSlot(LocalTime start, LocalTime end) {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(appointmentClient.getAppointment(7L)).thenReturn(ApiResponse.success(new AppointmentSummaryResponse(7L,
-                "APT-20261030-00007", 11L, OWNER, LocalDate.of(2026, 10, 30), start, end, "Khám", "CONFIRMED")));
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        when(appointmentClient.getAppointment(apid(7))).thenReturn(ApiResponse.success(new AppointmentSummaryResponse(apid(7),
+                "APT-20261030-00007", pid(11), OWNER, LocalDate.of(2026, 10, 30), start, end, "Khám", "CONFIRMED")));
+        when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
         stubSaveVisit();
 
-        service.checkIn(new CheckInRequest(null, 7L, null, false, null));
+        service.checkIn(new CheckInRequest(null, apid(7), null, false, null));
 
         ArgumentCaptor<PetVisit> saved = ArgumentCaptor.forClass(PetVisit.class);
         verify(visitRepository).saveAndFlush(saved.capture());
@@ -246,17 +248,17 @@ class VisitServiceImplTest {
         assertThat(invoice.getValue().getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
         // BR-35: chưa nộp phí khám thì chưa có phiếu, chưa vào hàng đợi Bác sĩ
         verify(ticketIssuer, never()).issueForPaidServices(any(), anyCollection(), any());
-        assertThat(lastHistory().getNotes()).contains("lịch hẹn #7");
+        assertThat(lastHistory().getNotes()).contains("lịch hẹn #" + apid(7));
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);
     }
 
     @Test
     void checkIn_emergency_issuesTheDoctorTicketImmediately_andCollectsTheFeeLater() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
         stubSaveVisit();
 
-        service.checkIn(new CheckInRequest(11L, null, "Co giật", true, null));
+        service.checkIn(new CheckInRequest(pid(11), null, "Co giật", true, null));
 
         verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), ArgumentMatchers.isNull());
     }
@@ -268,10 +270,10 @@ class VisitServiceImplTest {
         ClinicService freeExam = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
         freeExam.getCategory().setRequiresPrepayment(false);
         when(serviceRepository.findByCode("EXAM_GEN")).thenReturn(Optional.of(freeExam));
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
         stubSaveVisit();
 
-        service.checkIn(new CheckInRequest(11L, null, "Khám", false, null));
+        service.checkIn(new CheckInRequest(pid(11), null, "Khám", false, null));
 
         verify(ticketIssuer).issueForPaidServices(any(PetVisit.class), anyCollection(), ArgumentMatchers.isNull());
     }
@@ -279,12 +281,12 @@ class VisitServiceImplTest {
     @Test
     void checkIn_appointmentThatIsNotConfirmedOrNotToday_isRefused() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(appointmentClient.getAppointment(1L)).thenReturn(ApiResponse.success(appointment("PENDING", LocalDate.of(2026, 10, 30), 11L)));
-        when(appointmentClient.getAppointment(2L)).thenReturn(ApiResponse.success(appointment("CONFIRMED", LocalDate.of(2026, 10, 31), 11L)));
-        when(appointmentClient.getAppointment(3L)).thenReturn(ApiResponse.success(appointment("NO_SHOW", LocalDate.of(2026, 10, 30), 11L)));
+        when(appointmentClient.getAppointment(apid(1))).thenReturn(ApiResponse.success(appointment("PENDING", LocalDate.of(2026, 10, 30), pid(11))));
+        when(appointmentClient.getAppointment(apid(2))).thenReturn(ApiResponse.success(appointment("CONFIRMED", LocalDate.of(2026, 10, 31), pid(11))));
+        when(appointmentClient.getAppointment(apid(3))).thenReturn(ApiResponse.success(appointment("NO_SHOW", LocalDate.of(2026, 10, 30), pid(11))));
 
         for (long id : new long[]{1L, 2L, 3L}) {
-            assertError(ErrorCode.APPOINTMENT_NOT_CHECKABLE, () -> service.checkIn(new CheckInRequest(null, id, null, false, null)));
+            assertError(ErrorCode.APPOINTMENT_NOT_CHECKABLE, () -> service.checkIn(new CheckInRequest(null, apid(id), null, false, null)));
         }
         verify(visitRepository, never()).saveAndFlush(any());
     }
@@ -292,18 +294,18 @@ class VisitServiceImplTest {
     @Test
     void checkIn_petThatDoesNotMatchTheAppointment_isRefused() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(appointmentClient.getAppointment(7L)).thenReturn(ApiResponse.success(appointment("CONFIRMED", LocalDate.of(2026, 10, 30), 11L)));
+        when(appointmentClient.getAppointment(apid(7))).thenReturn(ApiResponse.success(appointment("CONFIRMED", LocalDate.of(2026, 10, 30), pid(11))));
 
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.checkIn(new CheckInRequest(99L, 7L, null, false, null)));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.checkIn(new CheckInRequest(pid(99), apid(7), null, false, null)));
     }
 
     @Test
     void checkIn_petAlreadyInAnActiveVisit_isRefused() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
-        when(visitRepository.existsByPetIdAndStatusIn(11L, VisitStatus.ACTIVE)).thenReturn(true);
+        when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
+        when(visitRepository.existsByPetIdAndStatusIn(pid(11), VisitStatus.ACTIVE)).thenReturn(true);
 
-        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(11L, null, null, false, null)));
+        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(pid(11), null, null, false, null)));
         verify(visitRepository, never()).saveAndFlush(any());
         verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
     }
@@ -311,10 +313,10 @@ class VisitServiceImplTest {
     @Test
     void checkIn_appointmentThatAlreadyHasAVisit_isRefused() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(visitRepository.existsByAppointmentId(7L)).thenReturn(true);
+        when(visitRepository.existsByAppointmentId(apid(7))).thenReturn(true);
 
         // Chặn ngay trước khi gọi sang appointment-service (lịch đã CHECKED_IN sẽ báo "chưa sẵn sàng" gây khó hiểu)
-        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(null, 7L, null, false, null)));
+        assertError(ErrorCode.PET_HAS_OPEN_VISIT, () -> service.checkIn(new CheckInRequest(null, apid(7), null, false, null)));
         verifyNoInteractions(appointmentClient);
     }
 
@@ -397,10 +399,10 @@ class VisitServiceImplTest {
     void checkIn_withADoctor_putsTheVisitInThatDoctorsQueueAndTellsTheEvent() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubDoctor(DOCTOR, RoleCode.VETERINARIAN, "ACTIVE", "P01");
-        when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
         stubSaveVisit();
 
-        VisitResponse response = service.checkIn(new CheckInRequest(11L, null, null, false, DOCTOR));
+        VisitResponse response = service.checkIn(new CheckInRequest(pid(11), null, null, false, DOCTOR));
 
         assertThat(response.doctorId()).isEqualTo(DOCTOR);
         ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
@@ -414,7 +416,7 @@ class VisitServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubDoctor(uid(30), RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
 
-        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.checkIn(new CheckInRequest(11L, null, null, false, uid(30))));
+        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.checkIn(new CheckInRequest(pid(11), null, null, false, uid(30))));
         verify(visitRepository, never()).saveAndFlush(any());
     }
 
@@ -999,8 +1001,8 @@ class VisitServiceImplTest {
                 new UserSummaryResponse(id, "BS " + id, "0911111111", role, List.of(role), room, status)));
     }
 
-    private static AppointmentSummaryResponse appointment(String status, LocalDate date, Long petId) {
-        return new AppointmentSummaryResponse(7L, "APT-20261030-00007", petId, OWNER, date, null, null, "Khám tổng quát", status);
+    private static AppointmentSummaryResponse appointment(String status, LocalDate date, UUID petId) {
+        return new AppointmentSummaryResponse(apid(7), "APT-20261030-00007", petId, OWNER, date, null, null, "Khám tổng quát", status);
     }
 
     private PetVisitStatusHistory lastHistory() {

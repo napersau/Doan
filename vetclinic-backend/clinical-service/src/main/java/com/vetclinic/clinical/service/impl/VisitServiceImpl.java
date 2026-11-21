@@ -128,8 +128,8 @@ public class VisitServiceImpl implements VisitService {
     @Override
     public VisitResponse checkIn(CheckInRequest request) {
         Actor actor = currentActor();
-        Long petId = request.petId();
-        Long appointmentId = request.appointmentId();
+        UUID petId = request.petId();
+        UUID appointmentId = request.appointmentId();
         String symptoms = blankToNull(request.initialSymptoms());
         // Bác sĩ chọn ngay khi tiếp nhận (tùy chọn): kiểm tra qua Feign NGOÀI transaction
         UUID doctorId = request.doctorId() == null ? null : fetchActiveDoctor(request.doctorId()).id();
@@ -158,7 +158,7 @@ public class VisitServiceImpl implements VisitService {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Phải chọn thú cưng hoặc lịch hẹn để tiếp nhận");
         }
 
-        Long finalPetId = petId;
+        UUID finalPetId = petId;
         String finalSymptoms = symptoms;
         boolean emergency = Boolean.TRUE.equals(request.emergency());
         return lockService.runLocked(List.of("vetclinic:visit-pet:" + petId), () -> {
@@ -177,9 +177,9 @@ public class VisitServiceImpl implements VisitService {
         });
     }
 
-    private VisitResponse createVisit(UUID receptionistId, Long petId, Long appointmentId, String symptoms,
+    private VisitResponse createVisit(UUID receptionistId, UUID petId, UUID appointmentId, String symptoms,
                                       boolean emergency, UUID doctorId) {
-        Pet pet = petRepository.findWithSpeciesById(petId)
+        Pet pet = petRepository.findWithSpeciesByIdAndDeletedAtIsNull(petId)
                 .orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
         if (visitRepository.existsByPetIdAndStatusIn(petId, VisitStatus.ACTIVE)) {
             throw new AppException(ErrorCode.PET_HAS_OPEN_VISIT);
@@ -226,7 +226,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<VisitResponse> search(VisitStatus status, LocalDate date,
-            UUID doctorId, Long petId, String keyword, int page, int size) {
+            UUID doctorId, UUID petId, String keyword, int page, int size) {
         Specification<PetVisit> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));

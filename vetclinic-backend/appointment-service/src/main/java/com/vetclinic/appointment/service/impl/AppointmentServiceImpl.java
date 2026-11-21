@@ -22,17 +22,18 @@ import com.vetclinic.appointment.service.AppointmentFilter;
 import com.vetclinic.appointment.service.AppointmentService;
 import com.vetclinic.appointment.service.SlotLockService;
 import com.vetclinic.appointment.service.SlotPolicy;
-import com.vetclinic.common.event.outbox.OutboxWriter;
-import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.event.AppointmentBookedEvent;
 import com.vetclinic.common.event.AppointmentNoShowEvent;
 import com.vetclinic.common.event.AppointmentStatusChangedEvent;
+import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
 import com.vetclinic.common.security.SecurityUtils;
+import com.vetclinic.common.util.Codes;
+import com.vetclinic.common.util.UuidV7;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -56,6 +57,8 @@ import java.util.UUID;
 public class AppointmentServiceImpl implements AppointmentService {
 
     private static final int MAX_PAGE_SIZE = 100;
+    private static final int CODE_ATTEMPTS = 8;
+    private static final String AGGREGATE = "APPOINTMENT";
 
     private final AppointmentRepository appointmentRepository;
     private final AppointmentStatusHistoryRepository historyRepository;
@@ -93,9 +96,6 @@ public class AppointmentServiceImpl implements AppointmentService {
         this.clock = clock;
     }
 
-    /** aggregate_type của các dòng outbox do service này ghi. */
-    private static final String AGGREGATE = "APPOINTMENT";
-
     private record Actor(UUID id, RoleCode role) {
     }
 
@@ -106,7 +106,7 @@ public class AppointmentServiceImpl implements AppointmentService {
 
     /**
      * KHÔNG đánh dấu @Transactional: các lời gọi OpenFeign phải nằm ngoài transaction (quy chuẩn §9.1), và khóa
-     * khung giờ phải còn giữ SAU KHI transaction commit. Thứ tự: kiểm tra đầu vào -> Feign -> lấy khóa
+     * khung giờ phải còn giữ SAU KHI transaction commit. Thứ tự: kiểm tra đầu vào -> Feign (thú cưng + chủ nuôi) -> lấy khóa
      * -> [transaction: đếm chỗ + chèn] -> nhả khóa.
      */
     @Override
@@ -117,7 +117,8 @@ public class AppointmentServiceImpl implements AppointmentService {
         slotPolicy.assertBookable(date, start);
 
         Booking booking = resolveBooking(actor, request);
-        verifyPet(request.petId(), booking.ownerId());
+        // Thú cưng phải tồn tại và thuộc đúng chủ nuôi; tên thú cưng + tên / SĐT chủ nuôi được CHỤP lên lịch hẹn (snapshot)
+        PetSummaryResponse pet = loadPet(request.petId(), booking.ownerId());
 
         int capacity = slotPolicy.activeDoctorCapacity();
         if (capacity <= 0) {
@@ -128,8 +129,8 @@ public class AppointmentServiceImpl implements AppointmentService {
         List<String> locks = List.of(SlotLockService.slotLock(date, start),
                 SlotLockService.petDayLock(request.petId(), date));
         Appointment saved = slotLockService.runLocked(locks,
-                () -> transactionTemplate.execute(tx -> insertAppointment(actor, request, booking, capacity)));
-        return toResponse(saved).withOwnerId(booking.ownerId());
+                () -> transactionTemplate.execute(tx -> insertAppointment(actor, request, booking, pet, capacity)));
+        return toResponse(saved);
     }
 
     private Booking resolveBooking(Actor actor, CreateAppointmentRequest request) {
@@ -152,7 +153,8 @@ public class AppointmentServiceImpl implements AppointmentService {
     }
 
     /** Chạy trong transaction + khóa khung giờ: đếm chỗ và chèn là một bước không bị chen ngang. */
-    private Appointment insertAppointment(Actor actor, CreateAppointmentRequest request, Booking booking, int capacity) {
+    private Appointment insertAppointment(Actor actor, CreateAppointmentRequest request, Booking booking,
+                                          PetSummaryResponse pet, int capacity) {
         LocalDate date = request.appointmentDate();
         LocalTime start = request.startTime();
 
@@ -168,11 +170,13 @@ public class AppointmentServiceImpl implements AppointmentService {
 
         Instant now = clock.instant();
         boolean confirmed = booking.status() == AppointmentStatus.CONFIRMED;
-        // appointments chỉ còn 9 cột (v3.0): không có owner_id, end_time, confirmed_*; người duyệt/tạo nằm ở lịch sử trạng thái
         Appointment appointment = Appointment.builder()
-                // Mã tạm duy nhất; đổi thành mã theo id ngay bên dưới (id chỉ có sau khi INSERT)
-                .appointmentCode("TMP-" + UUID.randomUUID())
+                .appointmentCode(newCode())
                 .petId(request.petId())
+                .ownerId(booking.ownerId())
+                .petNameSnapshot(pet.name())
+                .ownerNameSnapshot(pet.ownerName())
+                .ownerPhoneSnapshot(pet.ownerPhone())
                 .appointmentDate(date)
                 .startTime(start)
                 .reason(request.reason().trim())
@@ -180,7 +184,6 @@ public class AppointmentServiceImpl implements AppointmentService {
                 .status(booking.status())
                 .build();
         appointment = appointmentRepository.saveAndFlush(appointment);
-        appointment.setAppointmentCode(buildCode(appointment.getId()));
 
         recordHistory(appointment.getId(), null, booking.status(), actor.id(),
                 confirmed ? "Lễ tân tạo lịch hẹn qua kênh " + booking.channel()
@@ -195,20 +198,16 @@ public class AppointmentServiceImpl implements AppointmentService {
 
     // ================================================================== tra cứu
 
-    /**
-     * KHÔNG @Transactional: có lời gọi Feign sang clinical-service (quy chuẩn §9.1). Câu truy vấn chính tự chạy trong
-     * transaction của repository.
-     */
+    /** Chỉ đọc bảng của chính service này (owner_id + snapshot): không còn gọi Feign sang clinical / auth. */
     @Override
+    @Transactional(readOnly = true)
     public PageResponse<AppointmentResponse> search(AppointmentFilter filter) {
         Actor actor = currentActor();
         // Chủ nuôi chỉ thấy lịch hẹn của chính mình, bất kể tham số gửi lên
         UUID ownerId = actor.role() == RoleCode.PET_OWNER ? actor.id() : filter.ownerId();
 
-        // appointments không còn owner_id: "lịch của một chủ nuôi" = lịch của các thú cưng của họ
-        List<Long> petIds = ownerId == null ? null : petIdsOfOwner(ownerId);
-
         Sort.Direction direction = filter.ascending() ? Sort.Direction.ASC : Sort.Direction.DESC;
+        // UUIDv7 xếp được theo thời gian nên dùng làm khóa phụ ổn định
         Sort sort = "createdAt".equalsIgnoreCase(filter.sortBy())
                 ? Sort.by(direction, "createdAt", "id")
                 : Sort.by(direction, "appointmentDate", "startTime", "id");
@@ -216,22 +215,23 @@ public class AppointmentServiceImpl implements AppointmentService {
                 Math.min(Math.max(filter.size(), 1), MAX_PAGE_SIZE), sort);
 
         Page<Appointment> result = appointmentRepository.findAll(AppointmentSpecifications.filter(
-                petIds, filter.petId(), filter.code(), filter.fromDate(), filter.toDate(), filter.status()), pageable);
+                ownerId, filter.petId(), filter.code(), filter.fromDate(), filter.toDate(), filter.status()), pageable);
         return PageResponse.of(result.getContent(), result.getNumber(), result.getSize(), result.getTotalElements(),
                 result.getTotalPages(), result.isLast(), this::toResponse);
     }
 
     @Override
-    public AppointmentResponse getById(Long id) {
+    @Transactional(readOnly = true)
+    public AppointmentResponse getById(UUID id) {
         Actor actor = currentActor();
         Appointment appointment = findById(id);
-        UUID ownerId = resolveOwner(actor, appointment.getPetId());   // chủ nuôi chỉ xem được lịch của mình
-        return toResponse(appointment).withOwnerId(ownerId);
+        assertVisibleTo(actor, appointment);   // chủ nuôi chỉ xem được lịch của mình
+        return toResponse(appointment);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<AppointmentHistoryResponse> getHistory(Long id) {
+    public List<AppointmentHistoryResponse> getHistory(UUID id) {
         findById(id);
         return historyRepository.findByAppointmentIdOrderByIdAsc(id).stream()
                 .map(mapper::toHistoryResponse).toList();
@@ -239,47 +239,39 @@ public class AppointmentServiceImpl implements AppointmentService {
 
     @Override
     @Transactional(readOnly = true)
-    public AppointmentResponse getForInternal(Long id) {
+    public AppointmentResponse getForInternal(UUID id) {
         return toResponse(findById(id));
     }
 
     // ================================================================== chuyển trạng thái (UC-15, UC-17)
     //
-    // Mọi thao tác dưới đây cần biết chủ nuôi (để kiểm quyền / để báo tin), mà appointments không còn cột owner_id: chủ nuôi
-    // được tra ở clinical-service qua thú cưng. Lời gọi Feign phải NẰM NGOÀI transaction nên các hàm này không đánh dấu
-    // @Transactional; phần ghi dữ liệu chạy trong transactionTemplate.
+    // Từ v4.0 lịch hẹn có sẵn owner_id nên không còn phải tra chủ nuôi qua clinical-service: các thao tác chỉ ghi dữ liệu của chính service này
+    // (khóa dòng + khóa lạc quan @Version) và chạy trọn trong một @Transactional.
 
     @Override
-    public AppointmentResponse confirm(Long id) {
+    @Transactional
+    public AppointmentResponse confirm(UUID id) {
         Actor actor = currentActor();
         requireRole(actor, RoleCode.RECEPTIONIST);
-        UUID ownerId = resolveOwner(actor, findById(id).getPetId());
-        return transactionTemplate.execute(tx -> applyConfirm(actor, id, ownerId));
-    }
-
-    private AppointmentResponse applyConfirm(Actor actor, Long id, UUID ownerId) {
         Appointment appointment = lockForUpdate(id);
         if (appointment.getStatus() != AppointmentStatus.PENDING) {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
                     "Chỉ lịch hẹn đang chờ xác nhận (PENDING) mới được duyệt");
         }
         // Người duyệt và thời điểm duyệt nằm ở dòng lịch sử (changed_by_user_id, created_at)
-        transition(appointment, AppointmentStatus.CONFIRMED, actor.id(), "Lễ tân xác nhận lịch hẹn", null, ownerId);
-        return toResponse(appointment).withOwnerId(ownerId);
+        transition(appointment, AppointmentStatus.CONFIRMED, actor.id(), "Lễ tân xác nhận lịch hẹn", null);
+        return toResponse(appointment);
     }
 
     @Override
-    public AppointmentResponse cancel(Long id, CancelAppointmentRequest request) {
+    @Transactional
+    public AppointmentResponse cancel(UUID id, CancelAppointmentRequest request) {
         Actor actor = currentActor();
         if (actor.role() != RoleCode.PET_OWNER && actor.role() != RoleCode.RECEPTIONIST) {
             throw new AppException(ErrorCode.ACCESS_DENIED);
         }
-        UUID ownerId = resolveOwner(actor, findById(id).getPetId());
-        return transactionTemplate.execute(tx -> applyCancel(actor, id, request, ownerId));
-    }
-
-    private AppointmentResponse applyCancel(Actor actor, Long id, CancelAppointmentRequest request, UUID ownerId) {
         Appointment appointment = lockForUpdate(id);
+        assertVisibleTo(actor, appointment);
         if (!AppointmentStatus.MODIFIABLE.contains(appointment.getStatus())) {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
                     "Chỉ lịch hẹn đang chờ xác nhận hoặc đã xác nhận mới hủy được");
@@ -289,15 +281,15 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
         // Lý do hủy ghi nguyên văn vào appointment_status_histories.notes; ai hủy = changed_by_user_id
         String reason = request.reason().trim();
-        transition(appointment, AppointmentStatus.CANCELLED, actor.id(), reason, reason, ownerId);
-        return toResponse(appointment).withOwnerId(ownerId);
+        transition(appointment, AppointmentStatus.CANCELLED, actor.id(), reason, reason);
+        return toResponse(appointment);
     }
 
     /**
-     * Không đánh dấu @Transactional vì lý do giống create (Feign ngoài transaction, khóa khung giờ mới).
+     * Không đánh dấu @Transactional vì lý do giống create (khóa khung giờ phải còn giữ sau khi transaction commit).
      */
     @Override
-    public AppointmentResponse reschedule(Long id, RescheduleAppointmentRequest request) {
+    public AppointmentResponse reschedule(UUID id, RescheduleAppointmentRequest request) {
         Actor actor = currentActor();
         if (actor.role() != RoleCode.PET_OWNER && actor.role() != RoleCode.RECEPTIONIST) {
             throw new AppException(ErrorCode.ACCESS_DENIED);
@@ -307,7 +299,7 @@ public class AppointmentServiceImpl implements AppointmentService {
 
         // Đọc nhanh (không khóa) để biết thú cưng và kiểm tra quyền; điều kiện thật được kiểm tra lại trong transaction
         Appointment current = findById(id);
-        UUID ownerId = resolveOwner(actor, current.getPetId());
+        assertVisibleTo(actor, current);
         slotPolicy.assertBookable(newDate, newStart);
 
         int capacity = slotPolicy.activeDoctorCapacity();
@@ -319,11 +311,11 @@ public class AppointmentServiceImpl implements AppointmentService {
         List<String> locks = List.of(SlotLockService.slotLock(newDate, newStart),
                 SlotLockService.petDayLock(current.getPetId(), newDate));
         Appointment saved = slotLockService.runLocked(locks,
-                () -> transactionTemplate.execute(tx -> applyReschedule(actor, id, request, capacity, ownerId)));
-        return toResponse(saved).withOwnerId(ownerId);
+                () -> transactionTemplate.execute(tx -> applyReschedule(actor, id, request, capacity)));
+        return toResponse(saved);
     }
 
-    private Appointment applyReschedule(Actor actor, Long id, RescheduleAppointmentRequest request, int capacity, UUID ownerId) {
+    private Appointment applyReschedule(Actor actor, UUID id, RescheduleAppointmentRequest request, int capacity) {
         LocalDate newDate = request.newDate();
         LocalTime newStart = request.newStartTime();
 
@@ -359,7 +351,7 @@ public class AppointmentServiceImpl implements AppointmentService {
         recordHistory(appointment.getId(), appointment.getStatus(), appointment.getStatus(), actor.id(), note);
         // Lễ tân dời giờ hộ thì chủ nuôi cần được báo; chủ nuôi tự đổi thì không
         if (actor.role() != RoleCode.PET_OWNER) {
-            notifyOwner(appointment, ownerId, actor.id(), true, request.reason() == null ? null : request.reason().trim());
+            notifyOwner(appointment, actor.id(), true, request.reason() == null ? null : request.reason().trim());
         }
         return appointment;
     }
@@ -367,14 +359,10 @@ public class AppointmentServiceImpl implements AppointmentService {
     // ================================================================== vắng mặt (EX-01) và check-in
 
     @Override
-    public AppointmentResponse markNoShow(Long id) {
+    @Transactional
+    public AppointmentResponse markNoShow(UUID id) {
         Actor actor = currentActor();
         requireRole(actor, RoleCode.RECEPTIONIST);
-        UUID ownerId = resolveOwner(actor, findById(id).getPetId());
-        return transactionTemplate.execute(tx -> applyNoShow(actor, id, ownerId));
-    }
-
-    private AppointmentResponse applyNoShow(Actor actor, Long id, UUID ownerId) {
         Appointment appointment = lockForUpdate(id);
         if (appointment.getStatus() != AppointmentStatus.CONFIRMED) {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
@@ -384,22 +372,13 @@ public class AppointmentServiceImpl implements AppointmentService {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
                     "Chưa quá " + properties.noShowGraceMinutes() + " phút sau giờ hẹn nên chưa thể đánh dấu vắng mặt");
         }
-        transition(appointment, AppointmentStatus.NO_SHOW, actor.id(), "Lễ tân xác nhận khách vắng mặt (No-show)", null, ownerId);
-        return toResponse(appointment).withOwnerId(ownerId);
+        transition(appointment, AppointmentStatus.NO_SHOW, actor.id(), "Lễ tân xác nhận khách vắng mặt (No-show)", null);
+        return toResponse(appointment);
     }
 
     @Override
-    public boolean markNoShowBySystem(Long id) {
-        // Lọc nhanh ngoài transaction để không gọi Feign cho lịch không còn đủ điều kiện; điều kiện thật kiểm tra lại có khóa dòng
-        Appointment peek = appointmentRepository.findById(id).orElse(null);
-        if (peek == null || peek.getStatus() != AppointmentStatus.CONFIRMED || !isNoShowDue(peek)) {
-            return false;
-        }
-        UUID ownerId = lookupOwnerOfPet(peek.getPetId());
-        return Boolean.TRUE.equals(transactionTemplate.execute(tx -> applyNoShowBySystem(id, ownerId)));
-    }
-
-    private boolean applyNoShowBySystem(Long id, UUID ownerId) {
+    @Transactional
+    public boolean markNoShowBySystem(UUID id) {
         Appointment appointment = appointmentRepository.findByIdForUpdate(id).orElse(null);
         // Idempotent: khách vừa check-in hoặc lịch vừa bị hủy trong lúc tiến trình quét đang chạy thì bỏ qua
         if (appointment == null || appointment.getStatus() != AppointmentStatus.CONFIRMED || !isNoShowDue(appointment)) {
@@ -407,21 +386,13 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
         transition(appointment, AppointmentStatus.NO_SHOW, null,
                 "Hệ thống tự động chuyển NO_SHOW do quá " + properties.noShowGraceMinutes()
-                        + " phút sau giờ hẹn mà khách chưa làm thủ tục tiếp đón.", null, ownerId);
+                        + " phút sau giờ hẹn mà khách chưa làm thủ tục tiếp đón.", null);
         return true;
     }
 
     @Override
-    public boolean expirePendingBySystem(Long id) {
-        Appointment peek = appointmentRepository.findById(id).orElse(null);
-        if (peek == null || peek.getStatus() != AppointmentStatus.PENDING || !isPendingExpired(peek)) {
-            return false;
-        }
-        UUID ownerId = lookupOwnerOfPet(peek.getPetId());
-        return Boolean.TRUE.equals(transactionTemplate.execute(tx -> applyExpirePending(id, ownerId)));
-    }
-
-    private boolean applyExpirePending(Long id, UUID ownerId) {
+    @Transactional
+    public boolean expirePendingBySystem(UUID id) {
         Appointment appointment = appointmentRepository.findByIdForUpdate(id).orElse(null);
         // Idempotent: lễ tân vừa duyệt hoặc chủ nuôi vừa hủy trong lúc tiến trình quét chạy thì bỏ qua
         if (appointment == null || appointment.getStatus() != AppointmentStatus.PENDING || !isPendingExpired(appointment)) {
@@ -429,19 +400,19 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
         // changed_by_user_id = null: hệ thống tự hủy
         String reason = "Quá giờ hẹn mà phòng khám chưa xác nhận (hệ thống tự động hủy)";
-        transition(appointment, AppointmentStatus.CANCELLED, null, reason, reason, ownerId);
+        transition(appointment, AppointmentStatus.CANCELLED, null, reason, reason);
         return true;
     }
 
     @Override
     @Transactional
-    public void markCheckedIn(Long appointmentId, UUID actorUserId, String visitCode) {
+    public void markCheckedIn(UUID appointmentId, UUID actorUserId, String visitCode) {
         // Không tìm thấy là lỗi vĩnh viễn: ném lỗi để message sau khi hết retry được đẩy sang DLQ cho người xem xét
         Appointment appointment = lockForUpdate(appointmentId);
         switch (appointment.getStatus()) {
             case CHECKED_IN -> log.debug("Lịch hẹn {} đã CHECKED_IN, bỏ qua sự kiện trùng", appointmentId);
             case CONFIRMED -> transition(appointment, AppointmentStatus.CHECKED_IN, actorUserId,
-                    "Khách đã tiếp nhận tại quầy, đợt khám " + visitCode, null, null);
+                    "Khách đã tiếp nhận tại quầy, đợt khám " + visitCode, null);
             // FR-18: khách đến trễ sau khi đã bị NO_SHOW được tiếp nhận như khách vãng lai; lịch GIỮ NGUYÊN NO_SHOW (ghi nhận lịch sử uy tín)
             case NO_SHOW -> log.warn("Lịch hẹn {} đã NO_SHOW nhưng khách vẫn được tiếp nhận (đợt khám {}): giữ nguyên NO_SHOW (FR-18)",
                     appointmentId, visitCode);
@@ -450,9 +421,34 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
     }
 
+    // ================================================================== snapshot (consumer sự kiện)
+
+    @Override
+    @Transactional
+    public int refreshOwnerSnapshot(UUID ownerId, String ownerName, String ownerPhone) {
+        if (ownerId == null || ownerName == null || ownerPhone == null) {
+            return 0;
+        }
+        return appointmentRepository.updateOwnerSnapshot(ownerId, ownerName, ownerPhone);
+    }
+
+    @Override
+    @Transactional
+    public int refreshPetSnapshot(UUID petId, String petName, UUID ownerId, String ownerName, String ownerPhone) {
+        if (petId == null) {
+            return 0;
+        }
+        int updated = petName == null ? 0 : appointmentRepository.updatePetNameSnapshot(petId, petName);
+        if (ownerId != null && ownerName != null && ownerPhone != null) {
+            // Thú cưng chuyển sang chủ khác: lịch còn hiệu lực đi theo chủ mới
+            updated += appointmentRepository.transferOwner(petId, ownerId, ownerName, ownerPhone, AppointmentStatus.MODIFIABLE);
+        }
+        return updated;
+    }
+
     // ================================================================== helper
 
-    /** Thời điểm kết thúc khung hẹn = giờ bắt đầu + độ dài khung (appointments không còn cột end_time). */
+    /** Thời điểm kết thúc khung hẹn = giờ bắt đầu + độ dài khung (appointments không có cột end_time). */
     private LocalDateTime endOf(Appointment appointment) {
         return LocalDateTime.of(appointment.getAppointmentDate(), slotPolicy.endOf(appointment.getStartTime()));
     }
@@ -470,7 +466,7 @@ public class AppointmentServiceImpl implements AppointmentService {
         return slotPolicy.now().isAfter(endOf(appointment));
     }
 
-    /** Hình dạng response cũ vẫn có endTime: suy ra từ giờ bắt đầu (các trường còn lại do AppointmentEnricher gắn). */
+    /** Hình dạng response vẫn có endTime: suy ra từ giờ bắt đầu (các trường kiểm toán do AppointmentEnricher gắn). */
     private AppointmentResponse toResponse(Appointment appointment) {
         return mapper.toResponse(appointment).withEndTime(slotPolicy.endOf(appointment.getStartTime()));
     }
@@ -486,15 +482,20 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
     }
 
+    /** Chủ nuôi chỉ thao tác được trên lịch của mình; của người khác trả "không tìm thấy" để không lộ sự tồn tại. */
+    private void assertVisibleTo(Actor actor, Appointment appointment) {
+        if (actor.role() == RoleCode.PET_OWNER && !actor.id().equals(appointment.getOwnerId())) {
+            throw new AppException(ErrorCode.APPOINTMENT_NOT_FOUND);
+        }
+    }
+
     /**
      * Đổi trạng thái + ghi lịch sử (người thao tác, lý do ở notes) + báo chủ nuôi.
      *
-     * @param note    ghi chú ghi vào lịch sử (với CANCELLED: chính là lý do hủy)
-     * @param reason  lý do gửi kèm thông báo cho chủ nuôi; có thể null
-     * @param ownerId chủ nuôi của lịch hẹn nếu đã tra được (null thì không báo tin được)
+     * @param note   ghi chú ghi vào lịch sử (với CANCELLED: chính là lý do hủy)
+     * @param reason lý do gửi kèm thông báo cho chủ nuôi; có thể null
      */
-    private void transition(Appointment appointment, AppointmentStatus to, UUID actorId, String note,
-                            String reason, UUID ownerId) {
+    private void transition(Appointment appointment, AppointmentStatus to, UUID actorId, String note, String reason) {
         AppointmentStatus from = appointment.getStatus();
         appointment.setStatus(to);
         appointmentRepository.save(appointment);
@@ -502,100 +503,28 @@ public class AppointmentServiceImpl implements AppointmentService {
         // CHECKED_IN đã có thông báo riêng từ clinical-service (visit.checked_in); hành động của chính chủ nuôi không cần báo lại.
         // NO_SHOW có sự kiện riêng (appointment.no_show) nên KHÔNG phát thêm status_changed (nếu không chủ nuôi nhận hai thông báo).
         boolean ownerNotifiable = to == AppointmentStatus.CONFIRMED || to == AppointmentStatus.CANCELLED;
-        if (ownerNotifiable && (ownerId == null || !ownerId.equals(actorId))) {
-            notifyOwner(appointment, ownerId, actorId, false, reason);
+        if (ownerNotifiable && !appointment.getOwnerId().equals(actorId)) {
+            notifyOwner(appointment, actorId, false, reason);
         }
         if (to == AppointmentStatus.NO_SHOW) {
-            publishNoShow(appointment, ownerId, actorId);
+            publishNoShow(appointment, actorId);
         }
     }
 
-    private void publishNoShow(Appointment appointment, UUID ownerId, UUID actorId) {
-        if (ownerId == null) {
-            return;   // đã cảnh báo trong notifyOwner
-        }
+    private void publishNoShow(Appointment appointment, UUID actorId) {
         outboxWriter.write(AGGREGATE, appointment.getId(), new AppointmentNoShowEvent(UuidV7.generate(clock), clock.instant(), actorId,
-                appointment.getId(), appointment.getAppointmentCode(), ownerId, appointment.getPetId(),
+                appointment.getId(), appointment.getAppointmentCode(), appointment.getOwnerId(), appointment.getPetId(),
                 appointment.getAppointmentDate(), appointment.getStartTime()));
     }
 
-    /**
-     * Ghi sự kiện báo chủ nuôi vào outbox (cùng giao dịch); OutboxRelay gửi sang RabbitMQ sau khi commit.
-     * Không tra được chủ nuôi (clinical-service tạm sập) thì bỏ qua thông báo chứ không làm hỏng nghiệp vụ (CLAUDE.md §10 #3).
-     */
-    private void notifyOwner(Appointment appointment, UUID ownerId, UUID actorId, boolean rescheduled, String reason) {
-        if (ownerId == null) {
-            log.warn("Không tra được chủ nuôi của lịch hẹn {} (thú cưng {}), bỏ qua thông báo", appointment.getId(), appointment.getPetId());
-            return;
-        }
+    /** Ghi sự kiện báo chủ nuôi vào outbox (cùng giao dịch); OutboxRelay gửi sang RabbitMQ sau khi commit. */
+    private void notifyOwner(Appointment appointment, UUID actorId, boolean rescheduled, String reason) {
         outboxWriter.write(AGGREGATE, appointment.getId(), new AppointmentStatusChangedEvent(UuidV7.generate(clock), clock.instant(), actorId,
-                appointment.getId(), appointment.getAppointmentCode(), ownerId, appointment.getPetId(),
+                appointment.getId(), appointment.getAppointmentCode(), appointment.getOwnerId(), appointment.getPetId(),
                 appointment.getAppointmentDate(), appointment.getStartTime(), appointment.getStatus().name(), rescheduled, reason));
     }
 
-    // ---- tra chủ nuôi qua clinical-service (appointments không còn cột owner_id). PHẢI gọi NGOÀI transaction.
-
-    /**
-     * Chủ nuôi của lịch hẹn thuộc thú cưng {@code petId}.
-     * <ul>
-     *   <li>PET_OWNER: bắt buộc tra được và phải là chính họ, nếu không trả "không tìm thấy" (không lộ sự tồn tại của lịch người
-     *       khác; tra không được thì lỗi 503 - đóng cửa, không mở).</li>
-     *   <li>Nhân viên: tra được thì trả ownerId để báo tin; không tra được thì null (chỉ mất thông báo).</li>
-     * </ul>
-     */
-    private UUID resolveOwner(Actor actor, Long petId) {
-        if (actor.role() != RoleCode.PET_OWNER) {
-            return lookupOwnerOfPet(petId);
-        }
-        UUID owner = requireOwnerOfPet(petId);
-        if (!owner.equals(actor.id())) {
-            throw new AppException(ErrorCode.APPOINTMENT_NOT_FOUND);
-        }
-        return owner;
-    }
-
-    private UUID lookupOwnerOfPet(Long petId) {
-        try {
-            ApiResponse<PetSummaryResponse> response = petClient.getPet(petId);
-            return response == null || response.getData() == null ? null : response.getData().ownerId();
-        } catch (RuntimeException e) {
-            log.warn("Không tra được chủ nuôi của thú cưng {} từ clinical-service: {}", petId, e.getMessage());
-            return null;
-        }
-    }
-
-    private UUID requireOwnerOfPet(Long petId) {
-        ApiResponse<PetSummaryResponse> response;
-        try {
-            response = petClient.getPet(petId);
-        } catch (AppException e) {
-            throw e.getErrorCode() == ErrorCode.PET_NOT_FOUND ? new AppException(ErrorCode.APPOINTMENT_NOT_FOUND) : e;
-        } catch (RuntimeException e) {
-            log.warn("Không kiểm tra được quyền sở hữu thú cưng {}: {}", petId, e.getMessage());
-            throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
-        }
-        if (response == null || response.getData() == null || response.getData().ownerId() == null) {
-            throw new AppException(ErrorCode.APPOINTMENT_NOT_FOUND);
-        }
-        return response.getData().ownerId();
-    }
-
-    /**
-     * Các thú cưng của một chủ nuôi. Không tra được thì trả danh sách RỖNG (đóng cửa): tuyệt đối không bỏ điều kiện lọc,
-     * nếu không chủ nuôi sẽ thấy lịch của người khác.
-     */
-    private List<Long> petIdsOfOwner(UUID ownerId) {
-        try {
-            ApiResponse<List<PetSummaryResponse>> response = petClient.getPetsByOwner(ownerId);
-            List<PetSummaryResponse> pets = response == null || response.getData() == null ? List.of() : response.getData();
-            return pets.stream().map(PetSummaryResponse::id).toList();
-        } catch (RuntimeException e) {
-            log.warn("Không lấy được danh sách thú cưng của chủ nuôi {} từ clinical-service: {}", ownerId, e.getMessage());
-            return List.of();
-        }
-    }
-
-    private void recordHistory(Long appointmentId, AppointmentStatus from, AppointmentStatus to,
+    private void recordHistory(UUID appointmentId, AppointmentStatus from, AppointmentStatus to,
                                UUID actorId, String note) {
         historyRepository.save(AppointmentStatusHistory.builder()
                 .appointmentId(appointmentId)
@@ -606,12 +535,12 @@ public class AppointmentServiceImpl implements AppointmentService {
                 .build());
     }
 
-    private Appointment findById(Long id) {
+    private Appointment findById(UUID id) {
         return appointmentRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.APPOINTMENT_NOT_FOUND));
     }
 
-    private Appointment lockForUpdate(Long id) {
+    private Appointment lockForUpdate(UUID id) {
         return appointmentRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new AppException(ErrorCode.APPOINTMENT_NOT_FOUND));
     }
@@ -642,21 +571,40 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
     }
 
-    /** Thú cưng phải tồn tại và thuộc đúng chủ nuôi. Bật bằng vetclinic.booking.verify-pet. */
-    private void verifyPet(Long petId, UUID ownerId) {
-        if (!properties.verifyPet()) {
-            return;
+    /**
+     * Thú cưng phải tồn tại (chưa xóa) và thuộc đúng chủ nuôi; lấy tên + tên / SĐT chủ để chụp snapshot. Luôn gọi clinical-service (không còn
+     * công tắc verify-pet vì snapshot cần dữ liệu này); clinical sập thì đặt lịch trả 503 (đóng cửa).
+     */
+    private PetSummaryResponse loadPet(UUID petId, UUID ownerId) {
+        ApiResponse<PetSummaryResponse> response;
+        try {
+            response = petClient.getPet(petId);
+        } catch (AppException e) {
+            throw e;   // PET_NOT_FOUND do clinical-service trả
+        } catch (RuntimeException e) {
+            log.warn("Không kiểm tra được thú cưng {} ở clinical-service: {}", petId, e.getMessage());
+            throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
         }
-        ApiResponse<PetSummaryResponse> response = petClient.getPet(petId);
         PetSummaryResponse pet = response == null ? null : response.getData();
         // Thú cưng của người khác cũng trả PET_NOT_FOUND để không lộ sự tồn tại của hồ sơ
         if (pet == null || !ownerId.equals(pet.ownerId())) {
             throw new AppException(ErrorCode.PET_NOT_FOUND);
         }
+        return pet;
     }
 
-    /** APT-yyyyMMdd-NNNNN: ngày tạo + id nên luôn duy nhất, không cần sinh số rồi thử lại khi trùng. */
-    private String buildCode(Long id) {
-        return "APT-" + LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + String.format("%05d", id);
+    /**
+     * APT-yyyyMMdd-XXXXXX: khóa chính là UUID nên mã hiển thị dùng đuôi ngẫu nhiên; kiểm tra trùng rồi thử lại (UNIQUE là chốt chặn cuối).
+     * Chạy trong transaction đặt lịch.
+     */
+    private String newCode() {
+        String prefix = "APT-" + LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
+        for (int i = 0; i < CODE_ATTEMPTS; i++) {
+            String code = prefix + Codes.randomSuffix(6);
+            if (!appointmentRepository.existsByAppointmentCode(code)) {
+                return code;
+            }
+        }
+        throw new AppException(ErrorCode.UNCATEGORIZED_EXCEPTION, "Không sinh được mã lịch hẹn duy nhất, vui lòng thử lại");
     }
 }

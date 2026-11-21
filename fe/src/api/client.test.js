@@ -1,4 +1,4 @@
-import { ApiError, SESSION_EXPIRED, mapFieldErrors, request } from './client';
+import { ApiError, SESSION_EXPIRED, api, mapFieldErrors, request } from './client';
 import { clearSession, getSession, setSession } from './session';
 
 const ok = (data) => ({ ok: true, status: 200, text: async () => JSON.stringify({ status: 200, data }) });
@@ -15,6 +15,14 @@ describe('request', () => {
   test('gắn Access Token và trả về data của ApiResponse', async () => {
     fetch.mockResolvedValueOnce(ok({ id: 7 }));
     await expect(request('/api/v1/pets/7')).resolves.toEqual({ id: 7 });
+    expect(fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer old-access');
+  });
+
+  test('api.delete gửi DELETE (xóa mềm thú cưng) kèm Access Token', async () => {
+    fetch.mockResolvedValueOnce(ok(null));
+    await api.delete('/api/v1/pets/019a9442-d820-7000-8000-000000000001');
+    expect(fetch.mock.calls[0][1].method).toBe('DELETE');
+    expect(fetch.mock.calls[0][0]).toMatch(/\/api\/v1\/pets\/019a9442-d820-7000-8000-000000000001$/);
     expect(fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer old-access');
   });
 

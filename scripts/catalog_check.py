@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -60,7 +61,8 @@ def money(value):
 # ------------------------------------------------------------------ nhóm dịch vụ
 st, res = call("GET", "/api/v1/catalog/service-categories", VET)
 cats = {c["code"]: c for c in res.get("data", [])}
-check("GET service-categories: 9 nhóm seed", st == 200 and len(cats) == 9, (st, list(cats)))
+SEED_CATEGORIES = ("EXAMINATION", "VACCINATION", "DEWORMING", "EXTERNAL_PARASITE", "INJECTION_INFUSION", "LABORATORY", "IMAGING", "SURGERY", "PROCEDURE")
+check("GET service-categories: đủ 9 nhóm seed", st == 200 and all(c in cats for c in SEED_CATEGORIES), (st, list(cats)))
 check("EXAMINATION: hàng đợi DOCTOR, thu trước", cats["EXAMINATION"]["queueType"] == "DOCTOR" and cats["EXAMINATION"]["requiresPrepayment"])
 check("LABORATORY / IMAGING: hàng đợi riêng, thu trước", cats["LABORATORY"]["queueType"] == "LABORATORY" and cats["IMAGING"]["queueType"] == "IMAGING"
       and cats["LABORATORY"]["requiresPrepayment"] and cats["IMAGING"]["requiresPrepayment"])
@@ -145,9 +147,10 @@ check("Admin xem được cả dịch vụ đã ngừng", scode in [s["code"] fo
 
 # ------------------------------------------------------------------ hóa đơn chụp giá từ bảng giá
 owner_pet = f"PET-CK-{SUFFIX}"
-sql(f"INSERT INTO pet_clinic_clinical_db.pets (owner_id, species_id, pet_code, name) VALUES (UNHEX(REPLACE('{OWNER}','-','')), 1, '{owner_pet}', 'Thử giá')")
-pet_id = sql(f"SELECT id FROM pet_clinic_clinical_db.pets WHERE pet_code = '{owner_pet}'")
-st, res = call("POST", "/api/v1/clinical/pet-visits/check-in", RECEPTION, {"petId": int(pet_id), "isEmergency": False, "initialSymptoms": "thử giá"})
+pet_id = str(uuid.uuid4())   # pets.id là UUID (v4.0, bước 4.1)
+sql("INSERT INTO pet_clinic_clinical_db.pets (id, owner_id, owner_name_snapshot, owner_phone_snapshot, species_id, pet_code, name) VALUES "
+    f"(UNHEX(REPLACE('{pet_id}','-','')), UNHEX(REPLACE('{OWNER}','-','')), 'Hoàng Thị Lan', '0912000008', 1, '{owner_pet}', 'Thử giá')")
+st, res = call("POST", "/api/v1/clinical/pet-visits/check-in", RECEPTION, {"petId": pet_id, "isEmergency": False, "initialSymptoms": "thử giá"})
 check("check-in -> 201 (phí khám lập từ bảng giá)", st == 201, (st, res))
 if st == 201:
     visit_id = res["data"]["id"]

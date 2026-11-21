@@ -61,13 +61,23 @@ public final class TestData {
         return Species.builder().id((short) 2).code("CAT").name("Mèo").build();
     }
 
-    public static Pet pet(long id, Species species) {
-        return Pet.builder().id(id).ownerId(OWNER).species(species).petCode("PET-2026-" + id).name("Lu")
-                .gender(PetGender.MALE).build();
+    /** UUID cố định của thú cưng thử (dạng seed 019a9442-d820-7000-8000-0000000000NN). */
+    public static UUID pid(long n) {
+        return UUID.fromString(String.format("019a9442-d820-7000-8000-%012d", n));
+    }
+
+    /** UUID cố định của lịch hẹn thử (019a9442-d830-7000-8000-0000000000NN). */
+    public static UUID apid(long n) {
+        return UUID.fromString(String.format("019a9442-d830-7000-8000-%012d", n));
+    }
+
+    public static Pet pet(UUID id, Species species) {
+        return Pet.builder().id(id).ownerId(OWNER).ownerNameSnapshot("Hoàng Thị Lan").ownerPhoneSnapshot("0912000008")
+                .species(species).petCode("PET-2026-" + id.toString().substring(31)).name("Lu").gender(PetGender.MALE).build();
     }
 
     public static PetVisit visit(long id, VisitStatus status, UUID doctorId) {
-        return PetVisit.builder().id(id).visitCode("VIS-2026-" + id).pet(pet(11L, dog())).doctorId(doctorId)
+        return PetVisit.builder().id(id).visitCode("VIS-2026-" + id).pet(pet(pid(11), dog())).doctorId(doctorId)
                 .receptionistId(RECEPTIONIST).status(status)
                 .checkedInAt(Instant.parse("2026-10-30T01:00:00Z"))
                 .build();

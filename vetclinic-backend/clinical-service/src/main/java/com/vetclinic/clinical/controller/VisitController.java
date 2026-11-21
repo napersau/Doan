@@ -72,7 +72,7 @@ public class VisitController {
             @RequestParam(required = false) VisitStatus status,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestParam(required = false) UUID doctorId,
-            @RequestParam(required = false) Long petId,
+            @RequestParam(required = false) UUID petId,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {

@@ -46,7 +46,7 @@ public final class TestData {
     }
 
     public static VisitSummaryResponse visit(long id, VisitStatus status, UUID doctorId) {
-        return new VisitSummaryResponse(id, "VIS-2026-" + id, status, 11L, "Lu", OWNER, doctorId);
+        return new VisitSummaryResponse(id, "VIS-2026-" + id, status, uid(11), "Lu", OWNER, doctorId);
     }
 
     public static PrescriptionItem item(long id, Medicine medicine, int quantity) {

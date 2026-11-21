@@ -12,8 +12,8 @@ import jakarta.validation.constraints.Size;
  * Trường cấp cứu nhận cả "isEmergency" (theo tài liệu) lẫn "emergency" (cũ).
  */
 public record CheckInRequest(
-        Long petId,
-        Long appointmentId,
+        UUID petId,
+        UUID appointmentId,
         @Size(max = 2000, message = "Triệu chứng tối đa 2000 ký tự") String initialSymptoms,
         @JsonProperty("isEmergency") @JsonAlias("emergency") Boolean emergency,
         UUID doctorId

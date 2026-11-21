@@ -73,6 +73,7 @@ export const petsApi = {
   get: (id) => api.get(`/api/v1/pets/${id}`),
   create: (body) => api.post('/api/v1/pets', body),
   update: (id, body) => api.put(`/api/v1/pets/${id}`, body),
+  remove: (id) => api.delete(`/api/v1/pets/${id}`),   // xóa mềm (deleted_at)
   visits: (id) => api.get(`/api/v1/pets/${id}/visits`),
   medicalHistory: (id, query) => api.get(`/api/v1/pets/${id}/medical-history`, query),
 };

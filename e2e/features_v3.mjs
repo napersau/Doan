@@ -3,6 +3,7 @@
 // Chạy: node e2e/features_v3.mjs   (stack đang chạy + dữ liệu seed; chạy SAU backend_v3.mjs vì script này tạo thêm bác sĩ -> đổi sức chứa khung giờ)
 // CẢNH BÁO: tạo dữ liệu thật, không dọn lại.
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { API, APPT, AUTH, BILL, CLIN, PHARM, ROOT, RUN, brief, call, check, finish, login, loginRes, run, sleep, sql, step } from './lib/api.mjs';
 import { seedIds, uuidSql } from './lib/ids.mjs';
@@ -18,6 +19,13 @@ const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinu
 const dayOffset = (n) => { const d = clinicNow(); d.setDate(d.getDate() + n); return iso(d); };
 
 const T = {};
+/** Chèn thẳng một lịch hẹn vào CSDL (để dựng tình huống quá giờ / sát giờ): id UUID, owner + snapshot lấy từ chính hồ sơ thú cưng. */
+const insertAppointment = (code, petId, date, time, status) => {
+  const id = randomUUID();
+  sql(`INSERT INTO pet_clinic_appointment_db.appointments (id,appointment_code,pet_id,owner_id,pet_name_snapshot,owner_name_snapshot,owner_phone_snapshot,appointment_date,start_time,reason,booking_channel,status) `
+    + `SELECT ${uuidSql(id)},'${code}',p.id,p.owner_id,p.name,p.owner_name_snapshot,p.owner_phone_snapshot,'${date}','${time}','e2e','PHONE','${status}' FROM pet_clinic_clinical_db.pets p WHERE p.id=${uuidSql(petId)}`);
+  return id;
+};
 const newPet = async (name, owner = ID.user.khach_lan, species = ID.species.DOG) => {
   const res = await call('POST', '/api/v1/pets', { token: T.rec, body: { ownerId: owner, speciesId: species, name: `${name}-${RUN}` } });
   if (res.status !== 201) throw new Error(`newPet ${name}: ${brief(res)}`);
@@ -222,6 +230,19 @@ async function main() {
   check('chủ nuôi KHÔNG xem được thú cưng của người khác', [403, 404].includes((await call('GET', `/api/v1/pets/${petId}`, { token: T.owner2 })).status));
   check('chủ nuôi không xem bệnh án thú cưng người khác', [403, 404].includes((await call('GET', `/api/v1/pets/${petId}/medical-history`, { token: T.owner2 })).status));
   check('bác sĩ xem được bệnh án', (await call('GET', `/api/v1/pets/${petId}/medical-history`, { token: T.doc4 })).status === 200);
+  // v4.0 (4.1): UUID, vi mạch + dị ứng, snapshot chủ nuôi, PetUpdatedEvent, xóa mềm
+  const chip = `9001${RUN}`;
+  check('id thú cưng là UUID; thêm vi mạch + dị ứng', petId.length === 36 && (await call('PUT', `/api/v1/pets/${petId}`, { token: T.rec, body: { microchipNumber: chip, allergies: 'Dị ứng penicillin' } })).data?.allergies === 'Dị ứng penicillin');
+  check('số vi mạch đã dùng cho thú cưng khác → 409', (await call('PUT', `/api/v1/pets/${ID.pet.lu}`, { token: T.rec, body: { microchipNumber: chip } })).status === 409);
+  check('tìm thú cưng theo SĐT chủ (snapshot) và theo số vi mạch', (await call('GET', '/api/v1/pets?ownerPhone=0912000008&size=100', { token: T.rec })).data?.items?.some((p) => p.id === petId) && (await call('GET', `/api/v1/pets?keyword=${chip}`, { token: T.rec })).data?.items?.some((p) => p.id === petId));
+  const renamed = await call('PUT', `/api/v1/pets/${petId}`, { token: T.rec, body: { name: `Quầy-đổi-${RUN}` } });
+  check('đổi tên thú cưng ghi PetUpdatedEvent vào outbox cùng giao dịch', renamed.status === 200 && Number(sql(`SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type='PetUpdatedEvent' AND aggregate_id='${petId}'`)) >= 1);
+  const doomed = await newPet('XoaMem');
+  check('xóa mềm thú cưng: dòng còn (deleted_at), GET → 404, biến mất khỏi danh sách', (await call('DELETE', `/api/v1/pets/${doomed}`, { token: T.rec })).status === 200
+    && sql(`SELECT deleted_at IS NOT NULL FROM pet_clinic_clinical_db.pets WHERE id=${uuidSql(doomed)}`) === '1'
+    && (await call('GET', `/api/v1/pets/${doomed}`, { token: T.rec })).status === 404
+    && !(await call('GET', `/api/v1/pets?ownerId=${OWNER}&size=100`, { token: T.rec })).data?.items?.some((p) => p.id === doomed));
+  check('thú cưng đã xóa mềm không tiếp đón được (404)', (await checkIn(doomed, DOC4)).status === 404);
 
   // =====================================================================================================================
   step('D. Lịch hẹn: đặt, duyệt, đổi giờ, hủy (quy tắc 2 giờ), vắng mặt, tiếp nhận theo lịch, báo cáo');
@@ -233,6 +254,11 @@ async function main() {
   check('chủ nuôi đặt online → PENDING, kênh ONLINE (bỏ qua ownerId/kênh trong body)', byOwner.status === 201 && byOwner.data.status === 'PENDING' && byOwner.data.bookingChannel === 'ONLINE', brief(byOwner));
   check('cùng thú cưng cùng ngày: đặt lần hai bị từ chối (409)', (await call('POST', APPT, { token: T.rec, body: { petId: pA, ownerId: OWNER, appointmentDate: day1, startTime: '10:00', reason: 'Trùng ngày', bookingChannel: 'PHONE' } })).status === 409);
   check('đặt lịch ngày đã qua bị từ chối (400)', (await call('POST', APPT, { token: T.rec, body: { petId: pC, ownerId: OWNER, appointmentDate: dayOffset(-1), startTime: '09:00', reason: 'Quá khứ' } })).status === 400);
+  check('lịch hẹn có snapshot tên thú cưng + tên / SĐT chủ nuôi', byRec.data?.petName && byRec.data?.ownerName && byRec.data?.ownerPhone === '0912000008', brief(byRec));
+  const renamedA = `Lịch-đổi-${RUN}`;
+  await call('PUT', `/api/v1/pets/${pA}`, { token: T.rec, body: { name: renamedA } });
+  let petNameSynced = false; for (let i = 0; i < 30 && !petNameSynced; i += 1) { petNameSynced = (await call('GET', `${APPT}/${byRec.data.id}`, { token: T.rec })).data?.petName === renamedA; if (!petNameSynced) await sleep(500); }
+  check('PetUpdatedEvent (outbox → RabbitMQ) cập nhật tên thú cưng trên lịch hẹn', petNameSynced);
   check('chủ nuôi không đặt cho thú cưng của người khác (403/404)', [403, 404].includes((await call('POST', APPT, { token: T.owner2, body: { petId: pC, appointmentDate: day2, startTime: '09:00', reason: 'Của người khác' } })).status));
   check('chủ nuôi không duyệt lịch (403)', (await call('POST', `${APPT}/${byOwner.data.id}/confirm`, { token: T.owner })).status === 403);
   check('lễ tân duyệt lịch PENDING → CONFIRMED', (await call('POST', `${APPT}/${byOwner.data.id}/confirm`, { token: T.rec })).data?.status === 'CONFIRMED');
@@ -248,15 +274,13 @@ async function main() {
   check('lọc lịch theo mã / trạng thái / ngày', (await call('GET', `${APPT}?code=${byRec.data.appointmentCode}`, { token: T.rec })).data?.items?.length === 1 && (await call('GET', `${APPT}?status=CANCELLED&fromDate=${day1}&toDate=${day2}`, { token: T.rec })).data?.items?.some((a) => a.id === byOwner.data.id));
   // quy tắc 2 giờ: lịch hôm nay còn 1 giờ nữa
   const now = clinicNow(); const soon = new Date(now.getTime() + 3600000);
-  sql(`INSERT INTO pet_clinic_appointment_db.appointments (appointment_code,pet_id,appointment_date,start_time,reason,booking_channel,status) VALUES ('APT-E2E-${RUN}-A',${pC},'${iso(soon)}','${hhmm(soon)}','Sát giờ','PHONE','CONFIRMED')`);
-  const soonId = Number(sql(`SELECT id FROM pet_clinic_appointment_db.appointments WHERE appointment_code='APT-E2E-${RUN}-A'`));
+  const soonId = insertAppointment(`APT-E2E-${RUN}-A`, pC, iso(soon), hhmm(soon), 'CONFIRMED');
   const tooLate = await call('POST', `${APPT}/${soonId}/cancel`, { token: T.owner, body: { reason: 'Muộn' } });
   check('chủ nuôi hủy trong vòng 2 giờ trước giờ hẹn → APPT_1204', tooLate.code === 'APPT_1204', brief(tooLate));
   check('lễ tân hủy được dù sát giờ (không bị quy tắc 2 giờ)', (await call('POST', `${APPT}/${soonId}/cancel`, { token: T.rec, body: { reason: 'Phòng khám chủ động hủy' } })).data?.status === 'CANCELLED');
   // NO_SHOW + tiếp nhận muộn như vãng lai
   const pD = await newPet('NoShow'); const yesterday = dayOffset(-1);
-  sql(`INSERT INTO pet_clinic_appointment_db.appointments (appointment_code,pet_id,appointment_date,start_time,reason,booking_channel,status) VALUES ('APT-E2E-${RUN}-B',${pD},'${yesterday}','08:00:00','Quá giờ','PHONE','CONFIRMED')`);
-  const nsId = Number(sql(`SELECT id FROM pet_clinic_appointment_db.appointments WHERE appointment_code='APT-E2E-${RUN}-B'`));
+  const nsId = insertAppointment(`APT-E2E-${RUN}-B`, pD, yesterday, '08:00:00', 'CONFIRMED');
   check('lễ tân đánh dấu vắng mặt lịch đã quá giờ → NO_SHOW', (await call('POST', `${APPT}/${nsId}/no-show`, { token: T.rec })).data?.status === 'NO_SHOW');
   check('đánh dấu vắng mặt lịch tương lai bị từ chối (APPT_1206)', (await call('POST', `${APPT}/${byRec.data.id}/no-show`, { token: T.rec })).code === 'APPT_1206');
   const lateWalkin = await checkIn(pD, DOC4, { appointmentId: nsId });
@@ -266,8 +290,7 @@ async function main() {
   await call('POST', `${CLIN}/pet-visits/${asWalkIn.data.id}/cancel`, { token: T.rec, body: { reason: 'dọn' } });
   // tiếp nhận theo lịch hôm nay → lịch CHECKED_IN qua sự kiện
   const pE = await newPet('CheckInAppt'); const today = iso(clinicNow());
-  sql(`INSERT INTO pet_clinic_appointment_db.appointments (appointment_code,pet_id,appointment_date,start_time,reason,booking_channel,status) VALUES ('APT-E2E-${RUN}-C',${pE},'${today}','16:30:00','Có hẹn','PHONE','CONFIRMED')`);
-  const ciId = Number(sql(`SELECT id FROM pet_clinic_appointment_db.appointments WHERE appointment_code='APT-E2E-${RUN}-C'`));
+  const ciId = insertAppointment(`APT-E2E-${RUN}-C`, pE, today, '16:30:00', 'CONFIRMED');
   const ci = await checkIn(pE, DOC4, { appointmentId: ciId, petId: undefined });
   check('tiếp nhận theo lịch hẹn hôm nay thành công (petId lấy từ lịch)', ci.status === 201 && ci.data.petId === pE, brief(ci));
   let checkedIn = false; for (let i = 0; i < 20 && !checkedIn; i += 1) { checkedIn = (await call('GET', `${APPT}/${ciId}`, { token: T.rec })).data?.status === 'CHECKED_IN'; if (!checkedIn) await sleep(500); }

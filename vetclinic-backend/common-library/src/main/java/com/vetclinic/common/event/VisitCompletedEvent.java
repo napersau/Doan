@@ -14,7 +14,7 @@ public record VisitCompletedEvent(
         UUID actorUserId,        // thu ngân (T10) hoặc người thao tác "Khách bỏ về"
         Long visitId,
         String visitCode,
-        Long petId,
+        UUID petId,
         boolean abandoned        // true: khách bỏ về, hóa đơn dịch vụ còn lại giữ PENDING làm công nợ
 ) implements DomainEvent {
 

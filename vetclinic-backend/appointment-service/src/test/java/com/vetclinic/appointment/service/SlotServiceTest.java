@@ -46,7 +46,7 @@ class SlotServiceTest {
 
     @BeforeEach
     void setUp() {
-        BookingProperties properties = new BookingProperties("Asia/Ho_Chi_Minh", 30, STANDARD_SLOTS, 30, 2, 60, false, 5);
+        BookingProperties properties = new BookingProperties("Asia/Ho_Chi_Minh", 30, STANDARD_SLOTS, 30, 2, 60, 5);
         slotService = new SlotService(properties, new SlotPolicy(properties, CLOCK, authClient), appointmentRepository);
     }
 
@@ -142,11 +142,11 @@ class SlotServiceTest {
 
     @Test
     void properties_failFastOnBrokenConfiguration() {
-        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of("08:00", "25:99"), 30, 2, 60, false, 5))
+        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of("08:00", "25:99"), 30, 2, 60, 5))
                 .isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> new BookingProperties("Khong/Co", 30, STANDARD_SLOTS, 30, 2, 60, false, 5))
+        assertThatThrownBy(() -> new BookingProperties("Khong/Co", 30, STANDARD_SLOTS, 30, 2, 60, 5))
                 .isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of(), 30, 2, 60, false, 5))
+        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of(), 30, 2, 60, 5))
                 .isInstanceOf(IllegalStateException.class);
     }
 

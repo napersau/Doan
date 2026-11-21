@@ -8,7 +8,7 @@ public record VisitSummaryResponse(
         Long id,
         String visitCode,
         VisitStatus status,
-        Long petId,
+        UUID petId,
         String petName,
         UUID ownerId,
         UUID doctorId

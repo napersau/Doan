@@ -63,16 +63,16 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
      */
     @Query("select v.pet.id, v.weightAtVisit from PetVisit v where v.weightAtVisit is not null and v.id in "
             + "(select max(v2.id) from PetVisit v2 where v2.pet.id in :petIds and v2.weightAtVisit is not null group by v2.pet.id)")
-    List<Object[]> findLatestWeights(@Param("petIds") Collection<Long> petIds);
+    List<Object[]> findLatestWeights(@Param("petIds") Collection<UUID> petIds);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    List<PetVisit> findByPetIdOrderByIdDesc(Long petId);
+    List<PetVisit> findByPetIdOrderByIdDesc(UUID petId);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    Page<PetVisit> findByPetId(Long petId, Pageable pageable);
+    Page<PetVisit> findByPetId(UUID petId, Pageable pageable);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    Page<PetVisit> findByPetIdAndStatus(Long petId, VisitStatus status,
+    Page<PetVisit> findByPetIdAndStatus(UUID petId, VisitStatus status,
                                                                         Pageable pageable);
 
     /** Báo cáo vận hành: số ca theo trạng thái, ngày check-in trong [start, end). */
@@ -86,9 +86,9 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
             + "and v.checkedInAt >= :start and v.checkedInAt < :end group by v.doctorId, v.status")
     List<Object[]> countByDoctorAndStatusBetween(@Param("start") Instant start, @Param("end") Instant end);
 
-    boolean existsByPetIdAndStatusIn(Long petId, Collection<VisitStatus> statuses);
+    boolean existsByPetIdAndStatusIn(UUID petId, Collection<VisitStatus> statuses);
 
-    boolean existsByAppointmentId(Long appointmentId);
+    boolean existsByAppointmentId(UUID appointmentId);
 
     boolean existsByDoctorIdAndStatus(UUID doctorId, VisitStatus status);
 

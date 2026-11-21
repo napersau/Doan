@@ -2,5 +2,6 @@ package com.vetclinic.appointment.dto.response;
 
 import java.util.UUID;
 
-public record PetSummaryResponse(Long id, UUID ownerId, String name) {
+/** Phần của clinical-service {@code PetSummaryResponse} mà appointment cần: kiểm tra chủ sở hữu và chụp snapshot lên lịch hẹn. */
+public record PetSummaryResponse(UUID id, UUID ownerId, String name, String ownerName, String ownerPhone) {
 }

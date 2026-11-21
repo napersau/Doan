@@ -17,7 +17,7 @@ public record QueueTicketIssuedEvent(
         int ticketNo,
         Long visitId,
         String visitCode,
-        Long petId,
+        UUID petId,
         UUID doctorId,           // chỉ phiếu DOCTOR; null = danh sách chờ phân công
         int priority             // 2 cấp cứu, 1 ca có kết quả CLS, 0 thường
 ) implements DomainEvent {

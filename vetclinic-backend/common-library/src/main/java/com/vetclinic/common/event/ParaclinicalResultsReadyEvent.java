@@ -15,7 +15,7 @@ public record ParaclinicalResultsReadyEvent(
         Long visitId,
         String visitCode,
         UUID doctorId,
-        Long petId
+        UUID petId
 ) implements DomainEvent {
 
     @Override

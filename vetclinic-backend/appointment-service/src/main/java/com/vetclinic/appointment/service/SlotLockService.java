@@ -18,6 +18,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.Supplier;
+import java.util.UUID;
 
 /**
  * Khóa tên của MySQL (GET_LOCK) để "đếm chỗ rồi chèn lịch hẹn" là một bước không thể bị chen ngang.
@@ -99,8 +100,8 @@ public class SlotLockService {
         return "vetclinic:appt-slot:" + date + "T" + start;
     }
 
-    /** Khóa theo (thú cưng, ngày): chặn một thú cưng được đặt hai lịch trong ngày qua hai khung giờ khác nhau cùng lúc. */
-    public static String petDayLock(Long petId, LocalDate date) {
-        return "vetclinic:appt-pet:" + petId + ":" + date;
+    /** Khóa theo (thú cưng, ngày; tên ≤ 64 ký tự): chặn một thú cưng được đặt hai lịch trong ngày qua hai khung giờ khác nhau cùng lúc. */
+    public static String petDayLock(UUID petId, LocalDate date) {
+        return "vc:apt-pet:" + petId + ":" + date;   // GET_LOCK giới hạn 64 ký tự: UUID (36) + ngày (10) + tiền tố ngắn = 58
     }
 }

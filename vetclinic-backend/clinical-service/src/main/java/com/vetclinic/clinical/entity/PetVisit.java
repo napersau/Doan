@@ -34,7 +34,7 @@ public class PetVisit {
 
     /** Khóa ngoại logic -> pet_clinic_appointment_db.appointments(id). NULL = khách vãng lai. */
     @Column(name = "appointment_id", unique = true)
-    private Long appointmentId;
+    private UUID appointmentId;
 
     /** Khóa ngoại logic -> auth.users(id): Bác sĩ phụ trách (do Lễ tân phân công). */
     @Column(name = "doctor_id")

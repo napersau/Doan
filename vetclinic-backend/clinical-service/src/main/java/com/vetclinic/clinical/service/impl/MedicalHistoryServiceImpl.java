@@ -66,7 +66,7 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
     }
 
     @Override
-    public PageResponse<MedicalHistoryEntry> history(Long petId, int page, int size) {
+    public PageResponse<MedicalHistoryEntry> history(UUID petId, int page, int size) {
         UUID actorId = SecurityUtils.getCurrentUserId();
         RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
         boolean owner = role == RoleCode.PET_OWNER;
@@ -74,7 +74,7 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
                 Sort.by(Sort.Direction.DESC, "checkedInAt").and(Sort.by(Sort.Direction.DESC, "id")));
 
         Page<VisitResponse> visits = readTx.execute(status -> {
-            Pet pet = petRepository.findWithSpeciesById(petId).orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
+            Pet pet = petRepository.findWithSpeciesByIdAndDeletedAtIsNull(petId).orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
             if (owner && !pet.getOwnerId().equals(actorId)) {
                 throw new AppException(ErrorCode.PET_NOT_FOUND);   // không lộ sự tồn tại của hồ sơ người khác
             }

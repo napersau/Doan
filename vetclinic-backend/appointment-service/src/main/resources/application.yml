@@ -98,6 +98,4 @@ vetclinic:
     # Lịch PENDING quá giờ kết thúc khung mà chưa được duyệt thì tự hủy để trả suất
     pending-expiry-cron: "${BOOKING_PENDING_EXPIRY_CRON:0 5,20,35,50 7-21 * * *}"
     slot-lock-timeout-seconds: 5       # Thời gian chờ khóa khung giờ khi có nhiều người đặt cùng lúc
-    # Kiểm tra thú cưng tồn tại và thuộc đúng chủ nuôi qua clinical-service (GET /internal/clinical/pets/{id}).
-    # Mặc định BẬT. Chỉ tắt (BOOKING_VERIFY_PET=false) khi chạy appointment-service riêng mà không có clinical-service.
-    verify-pet: ${BOOKING_VERIFY_PET:true}
+    # v4.0: đặt lịch luôn gọi clinical-service (GET /internal/pets/{id}) để kiểm tra chủ sở hữu và chụp snapshot nên không còn công tắc verify-pet.

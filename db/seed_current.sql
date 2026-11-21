@@ -88,18 +88,20 @@ INSERT INTO pet_owner_profiles (user_id, customer_code, registered_channel) VALU
 
 USE pet_clinic_clinical_db;
 -- species_id: 1 = Chó (DOG), 2 = Mèo (CAT) theo seed của schema_current.sql
-INSERT INTO pets (id, owner_id, species_id, pet_code, name, breed, gender) VALUES
-(1, @u_khach_lan, 2, 'PET-2026-0001', 'Lu', 'Mèo Anh lông ngắn', 'FEMALE'),
-(2, @u_khach_lan, 1, 'PET-2026-0002', 'Milo', 'Poodle', 'MALE'),
-(3, @u_khach_nam, 1, 'PET-2026-0003', 'Bông', 'Poodle', 'FEMALE'),
-(4, @u_khach_nam, 1, 'PET-2026-0004', 'Mực', 'Labrador', 'MALE'),
-(5, @u_khach_huong, 2, 'PET-2026-0005', 'Kitty', 'Mèo Ba Tư', 'FEMALE'),
-(6, @u_khach_huong, 2, 'PET-2026-0006', 'Tom', 'Mèo mướp', 'MALE'),
-(7, @u_khach_huong, 2, 'PET-2026-0007', 'Luna', 'Mèo Anh lông dài', 'FEMALE'),
-(8, @u_khach_duc, 1, 'PET-2026-0008', 'Béo', 'Corgi', 'MALE'),
-(9, @u_khach_duc, 1, 'PET-2026-0009', 'Sóc', 'Phốc sóc', 'FEMALE'),
-(10, @u_khach_thao, 1, 'PET-2026-0010', 'Vàng', 'Golden Retriever', 'MALE'),
-(11, @u_khach_thao, 2, 'PET-2026-0011', 'Mimi', 'Mèo Xiêm', 'FEMALE'),
-(12, @u_khach_binh, 1, 'PET-2026-0012', 'Rex', 'Becgie Đức', 'MALE'),
-(13, @u_khach_binh, 1, 'PET-2026-0013', 'Nâu', 'Chó ta', 'UNKNOWN'),
-(14, @u_khach_binh, 2, 'PET-2026-0014', 'Cam', 'Mèo tam thể', 'FEMALE');
+-- Thú cưng: UUID cố định 019a9442-d820-7000-8000-0000000000NN (D11, NN = số thứ tự cũ: Lu = 01, Milo = 02...).
+-- owner_*_snapshot lấy từ user_profiles của chủ nuôi (cùng máy MySQL; ứng dụng cập nhật bằng UserProfileUpdatedEvent).
+INSERT INTO pets (id, owner_id, owner_name_snapshot, owner_phone_snapshot, species_id, pet_code, name, breed, gender) VALUES
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000001'), @u_khach_lan, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_lan), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_lan), 2, 'PET-2026-0001', 'Lu', 'Mèo Anh lông ngắn', 'FEMALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000002'), @u_khach_lan, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_lan), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_lan), 1, 'PET-2026-0002', 'Milo', 'Poodle', 'MALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000003'), @u_khach_nam, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_nam), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_nam), 1, 'PET-2026-0003', 'Bông', 'Poodle', 'FEMALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000004'), @u_khach_nam, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_nam), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_nam), 1, 'PET-2026-0004', 'Mực', 'Labrador', 'MALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000005'), @u_khach_huong, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_huong), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_huong), 2, 'PET-2026-0005', 'Kitty', 'Mèo Ba Tư', 'FEMALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000006'), @u_khach_huong, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_huong), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_huong), 2, 'PET-2026-0006', 'Tom', 'Mèo mướp', 'MALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000007'), @u_khach_huong, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_huong), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_huong), 2, 'PET-2026-0007', 'Luna', 'Mèo Anh lông dài', 'FEMALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000008'), @u_khach_duc, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_duc), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_duc), 1, 'PET-2026-0008', 'Béo', 'Corgi', 'MALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000009'), @u_khach_duc, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_duc), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_duc), 1, 'PET-2026-0009', 'Sóc', 'Phốc sóc', 'FEMALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000010'), @u_khach_thao, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_thao), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_thao), 1, 'PET-2026-0010', 'Vàng', 'Golden Retriever', 'MALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000011'), @u_khach_thao, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_thao), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_thao), 2, 'PET-2026-0011', 'Mimi', 'Mèo Xiêm', 'FEMALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000012'), @u_khach_binh, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_binh), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_binh), 1, 'PET-2026-0012', 'Rex', 'Becgie Đức', 'MALE'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000013'), @u_khach_binh, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_binh), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_binh), 1, 'PET-2026-0013', 'Nâu', 'Chó ta', 'UNKNOWN'),
+(UUID_TO_BIN('019a9442-d820-7000-8000-000000000014'), @u_khach_binh, (SELECT full_name FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_binh), (SELECT phone_number FROM pet_clinic_auth_db.user_profiles WHERE user_id = @u_khach_binh), 2, 'PET-2026-0014', 'Cam', 'Mèo tam thể', 'FEMALE');

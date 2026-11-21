@@ -15,7 +15,6 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -34,17 +33,20 @@ class VisitCheckedInListenerTest {
     private final VisitCheckedInListener listener = new VisitCheckedInListener(appointmentService,
             new IdempotentConsumer(processedRepository, Clock.fixed(NOW, ZoneOffset.UTC)));
 
-    private static VisitCheckedInEvent event(UUID eventId, Long appointmentId) {
-        return new VisitCheckedInEvent(eventId, NOW, ACTOR, 42L, "VIS-2026-00042", 1L, appointmentId, false, UuidV7.generate());
+    private static final UUID APPT = UUID.fromString("019a9442-d830-7000-8000-000000000009");
+    private static final UUID PET = UUID.fromString("019a9442-d820-7000-8000-000000000001");
+
+    private static VisitCheckedInEvent event(UUID eventId, UUID appointmentId) {
+        return new VisitCheckedInEvent(eventId, NOW, ACTOR, 42L, "VIS-2026-00042", PET, appointmentId, false, UuidV7.generate());
     }
 
     @Test
     void aNewEventMarksTheAppointmentCheckedIn_andIsRecordedForThisListener() {
         UUID eventId = UuidV7.generate();
 
-        listener.onVisitCheckedIn(event(eventId, 9L));
+        listener.onVisitCheckedIn(event(eventId, APPT));
 
-        verify(appointmentService).markCheckedIn(9L, ACTOR, "VIS-2026-00042");
+        verify(appointmentService).markCheckedIn(APPT, ACTOR, "VIS-2026-00042");
         verify(processedRepository).saveAndFlush(any(ProcessedEvent.class));
     }
 
@@ -53,9 +55,9 @@ class VisitCheckedInListenerTest {
         UUID eventId = UuidV7.generate();
         when(processedRepository.existsById(new ProcessedEventId(eventId, VisitCheckedInListener.CONSUMER))).thenReturn(true);
 
-        listener.onVisitCheckedIn(event(eventId, 9L));
+        listener.onVisitCheckedIn(event(eventId, APPT));
 
-        verify(appointmentService, never()).markCheckedIn(anyLong(), any(), anyString());
+        verify(appointmentService, never()).markCheckedIn(any(), any(), anyString());
         verify(processedRepository, never()).saveAndFlush(any());
     }
 
@@ -63,22 +65,22 @@ class VisitCheckedInListenerTest {
     void aWalkInVisitHasNoAppointmentToUpdate_andRecordsNothing() {
         listener.onVisitCheckedIn(event(UuidV7.generate(), null));
 
-        verify(appointmentService, never()).markCheckedIn(anyLong(), any(), anyString());
+        verify(appointmentService, never()).markCheckedIn(any(), any(), anyString());
         verify(processedRepository, never()).saveAndFlush(any());
     }
 
     @Test
     void aFailingTransitionIsNotRecorded_soRabbitMqRetryRunsItAgain() {
         UUID eventId = UuidV7.generate();
-        doThrow(new IllegalStateException("db down")).when(appointmentService).markCheckedIn(9L, ACTOR, "VIS-2026-00042");
+        doThrow(new IllegalStateException("db down")).when(appointmentService).markCheckedIn(APPT, ACTOR, "VIS-2026-00042");
 
         try {
-            listener.onVisitCheckedIn(event(eventId, 9L));
+            listener.onVisitCheckedIn(event(eventId, APPT));
         } catch (IllegalStateException expected) {
             // RabbitMQ sẽ thử lại
         }
 
         verify(processedRepository, never()).saveAndFlush(any());
-        verify(appointmentService, times(1)).markCheckedIn(9L, ACTOR, "VIS-2026-00042");
+        verify(appointmentService, times(1)).markCheckedIn(APPT, ACTOR, "VIS-2026-00042");
     }
 }

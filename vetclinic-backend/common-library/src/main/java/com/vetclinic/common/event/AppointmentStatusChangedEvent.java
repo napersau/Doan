@@ -15,10 +15,10 @@ public record AppointmentStatusChangedEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,        // null = hệ thống (tự hủy lịch PENDING quá hạn, tự quét NO_SHOW)
-        Long appointmentId,
+        UUID appointmentId,
         String appointmentCode,
         UUID ownerId,
-        Long petId,
+        UUID petId,
         LocalDate appointmentDate,
         LocalTime startTime,
         String status,           // trạng thái SAU thay đổi

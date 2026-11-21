@@ -14,10 +14,10 @@ public record AppointmentNoShowEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,        // null = hệ thống tự quét
-        Long appointmentId,
+        UUID appointmentId,
         String appointmentCode,
         UUID ownerId,
-        Long petId,
+        UUID petId,
         LocalDate appointmentDate,
         LocalTime startTime
 ) implements DomainEvent {

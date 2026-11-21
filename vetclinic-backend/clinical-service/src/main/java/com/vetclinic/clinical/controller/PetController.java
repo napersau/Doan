@@ -40,23 +40,32 @@ public class PetController {
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<PetResponse>>> search(
             @RequestParam(required = false) UUID ownerId,
+            @RequestParam(required = false) String ownerPhone,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.success(petService.search(ownerId, keyword, page, size)));
+        return ResponseEntity.ok(ApiResponse.success(petService.search(ownerId, ownerPhone, keyword, page, size)));
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','LAB_TECHNICIAN','IMAGING_TECHNICIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<PetResponse>> getById(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<PetResponse>> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(petService.getById(id)));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<PetResponse>> update(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<PetResponse>> update(@PathVariable UUID id,
                                                            @Valid @RequestBody UpdatePetRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Cập nhật hồ sơ thành công", petService.update(id, request)));
+    }
+
+    /** Xóa mềm hồ sơ thú cưng (không xóa được khi đang có đợt khám mở); bệnh án cũ vẫn được giữ. */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST')")
+    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
+        petService.delete(id);
+        return ResponseEntity.ok(ApiResponse.<Void>success("Đã xóa hồ sơ thú cưng", null));
     }
 
     /**
@@ -66,14 +75,14 @@ public class PetController {
     @GetMapping("/{id}/medical-history")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<MedicalHistoryEntry>>> medicalHistory(
-            @PathVariable Long id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
+            @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
         return ResponseEntity.ok(ApiResponse.success(medicalHistoryService.history(id, page, size)));
     }
 
     /** Danh sách gọn các đợt khám của thú cưng, mới nhất trước. */
     @GetMapping("/{id}/visits")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<List<VisitResponse>>> visits(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<VisitResponse>>> visits(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(petService.getVisits(id)));
     }
 }

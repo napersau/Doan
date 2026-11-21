@@ -18,7 +18,7 @@ import java.time.LocalTime;
  */
 public record CreateAppointmentRequest(
         @NotNull(message = "Thú cưng không được để trống")
-        Long petId,
+        UUID petId,
 
         UUID ownerId,
 

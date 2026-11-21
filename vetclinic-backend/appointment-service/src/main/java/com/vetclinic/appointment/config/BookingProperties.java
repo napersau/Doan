@@ -14,7 +14,6 @@ import java.util.List;
  * @param noShowGraceMinutes   quá giờ BẮT ĐẦU khung hẹn thêm bấy nhiêu phút mà chưa check-in thì coi là vắng mặt (EX-01, FR-17)
  * @param minCancelHoursBefore chủ nuôi chỉ tự hủy / đổi lịch trước giờ hẹn tối thiểu bấy nhiêu giờ (FR-14)
  * @param maxAdvanceDays       đặt trước tối đa bấy nhiêu ngày
- * @param verifyPet            kiểm tra thú cưng tồn tại và thuộc đúng chủ nuôi qua clinical-service
  * @param slotLockTimeoutSeconds thời gian chờ khóa khung giờ
  */
 @ConfigurationProperties(prefix = "vetclinic.booking")
@@ -25,7 +24,6 @@ public record BookingProperties(
         @DefaultValue("30") int noShowGraceMinutes,
         @DefaultValue("2") int minCancelHoursBefore,
         @DefaultValue("60") int maxAdvanceDays,
-        @DefaultValue("false") boolean verifyPet,
         @DefaultValue("5") int slotLockTimeoutSeconds) {
 
     public BookingProperties {

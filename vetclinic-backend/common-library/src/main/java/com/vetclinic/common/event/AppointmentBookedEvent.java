@@ -13,10 +13,10 @@ public record AppointmentBookedEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,
-        Long appointmentId,
+        UUID appointmentId,
         String appointmentCode,
-        UUID ownerId,            // lấy từ pets.owner_id qua clinical-service (appointments không còn cột owner_id)
-        Long petId,
+        UUID ownerId,            // appointments.owner_id (chủ nuôi tại thời điểm đặt)
+        UUID petId,
         LocalDate appointmentDate,
         LocalTime startTime,
         String status            // PENDING (đặt online) hoặc CONFIRMED (lễ tân đặt)

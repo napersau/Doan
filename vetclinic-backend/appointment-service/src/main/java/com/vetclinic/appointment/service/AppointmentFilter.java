@@ -12,7 +12,7 @@ import java.time.LocalDate;
  */
 public record AppointmentFilter(
         UUID ownerId,
-        Long petId,
+        UUID petId,
         String code,
         LocalDate fromDate,
         LocalDate toDate,

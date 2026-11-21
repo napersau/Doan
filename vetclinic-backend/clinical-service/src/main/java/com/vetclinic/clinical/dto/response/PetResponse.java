@@ -1,14 +1,17 @@
 package com.vetclinic.clinical.dto.response;
 
-import java.util.UUID;
 import com.vetclinic.clinical.constant.PetGender;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.UUID;
 
 public record PetResponse(
-        Long id,
+        UUID id,
         UUID ownerId,
+        String ownerName,
+        String ownerPhone,
         Short speciesId,
         String speciesCode,
         String speciesName,
@@ -20,18 +23,19 @@ public record PetResponse(
         String color,
         BigDecimal weight,
         boolean neutered,
+        String microchipNumber,
         String identifyingCharacteristics,
+        String allergies,
         String notes,
         Instant createdAt,
         Instant updatedAt
 ) {
 
     /**
-     * Lược đồ v3.0 bỏ cột pets.weight: cân nặng hiện tại = weight_at_visit của đợt khám gần nhất (PetServiceImpl gắn vào đây),
-     * null nếu thú cưng chưa từng được cân.
+     * Cân nặng hiện tại không lưu ở hồ sơ thú cưng: lấy từ đợt khám gần nhất (PetServiceImpl gắn vào đây), null nếu chưa từng được cân.
      */
     public PetResponse withWeight(BigDecimal weight) {
-        return new PetResponse(id, ownerId, speciesId, speciesCode, speciesName, petCode, name, breed, gender, dateOfBirth,
-                color, weight, neutered, identifyingCharacteristics, notes, createdAt, updatedAt);
+        return new PetResponse(id, ownerId, ownerName, ownerPhone, speciesId, speciesCode, speciesName, petCode, name, breed, gender,
+                dateOfBirth, color, weight, neutered, microchipNumber, identifyingCharacteristics, allergies, notes, createdAt, updatedAt);
     }
 }

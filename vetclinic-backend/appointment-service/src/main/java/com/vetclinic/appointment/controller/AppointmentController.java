@@ -67,7 +67,7 @@ public class AppointmentController {
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<AppointmentResponse>>> search(
             @RequestParam(required = false) UUID ownerId,
-            @RequestParam(required = false) Long petId,
+            @RequestParam(required = false) UUID petId,
             @RequestParam(required = false) String code,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
@@ -86,28 +86,28 @@ public class AppointmentController {
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','ADMIN')")
-    public ResponseEntity<ApiResponse<AppointmentResponse>> getById(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<AppointmentResponse>> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(enricher.enrich(appointmentService.getById(id))));
     }
 
     /** Audit Trail vòng đời lịch hẹn. */
     @GetMapping("/{id}/history")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','ADMIN')")
-    public ResponseEntity<ApiResponse<List<AppointmentHistoryResponse>>> history(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<AppointmentHistoryResponse>>> history(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(appointmentService.getHistory(id)));
     }
 
     /** UC-17: duyệt lịch hẹn trực tuyến. */
     @PostMapping("/{id}/confirm")
     @PreAuthorize("hasRole('RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<AppointmentResponse>> confirm(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<AppointmentResponse>> confirm(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success("Đã xác nhận lịch hẹn", enricher.enrich(appointmentService.confirm(id))));
     }
 
     /** UC-15 (chủ nuôi tự hủy) và UC-17 (lễ tân từ chối / hủy). Bắt buộc có lý do. */
     @PostMapping("/{id}/cancel")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<AppointmentResponse>> cancel(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<AppointmentResponse>> cancel(@PathVariable UUID id,
                                                                    @Valid @RequestBody CancelAppointmentRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã hủy lịch hẹn", enricher.enrich(appointmentService.cancel(id, request))));
     }
@@ -115,7 +115,7 @@ public class AppointmentController {
     /** UC-15: đổi ngày / khung giờ. */
     @PostMapping("/{id}/reschedule")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<AppointmentResponse>> reschedule(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<AppointmentResponse>> reschedule(@PathVariable UUID id,
                                                                        @Valid @RequestBody RescheduleAppointmentRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đổi lịch hẹn thành công", enricher.enrich(appointmentService.reschedule(id, request))));
     }
@@ -123,7 +123,7 @@ public class AppointmentController {
     /** EX-01: lễ tân xác nhận khách vắng mặt (ngoài tiến trình quét tự động). */
     @PostMapping("/{id}/no-show")
     @PreAuthorize("hasRole('RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<AppointmentResponse>> noShow(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<AppointmentResponse>> noShow(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success("Đã đánh dấu khách vắng mặt", enricher.enrich(appointmentService.markNoShow(id))));
     }
 

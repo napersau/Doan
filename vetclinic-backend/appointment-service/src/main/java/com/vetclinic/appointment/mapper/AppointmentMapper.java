@@ -11,11 +11,12 @@ import org.mapstruct.ReportingPolicy;
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.WARN)
 public interface AppointmentMapper {
 
-    // Các trường dưới đây không còn là cột của appointments (lược đồ v3.0) nên được gắn sau:
+    // petName / ownerName / ownerPhone đọc từ 3 cột snapshot của appointments (v4.0). Các trường còn lại không phải cột nên được gắn sau:
     //  - endTime: AppointmentServiceImpl (start + độ dài khung)
-    //  - ownerId, ownerName, ownerPhone, petName: AppointmentEnricher (pets ở clinical-service, users ở auth-service)
     //  - cancelReason, confirmedBy/At, cancelledBy/At, updatedAt: AppointmentEnricher (appointment_status_histories)
-    @Mapping(target = "ownerId", ignore = true)
+    @Mapping(target = "petName", source = "petNameSnapshot")
+    @Mapping(target = "ownerName", source = "ownerNameSnapshot")
+    @Mapping(target = "ownerPhone", source = "ownerPhoneSnapshot")
     @Mapping(target = "endTime", ignore = true)
     @Mapping(target = "cancelReason", ignore = true)
     @Mapping(target = "confirmedBy", ignore = true)
@@ -23,9 +24,6 @@ public interface AppointmentMapper {
     @Mapping(target = "cancelledBy", ignore = true)
     @Mapping(target = "cancelledAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
-    @Mapping(target = "petName", ignore = true)
-    @Mapping(target = "ownerName", ignore = true)
-    @Mapping(target = "ownerPhone", ignore = true)
     AppointmentResponse toResponse(Appointment appointment);
 
     AppointmentHistoryResponse toHistoryResponse(AppointmentStatusHistory history);

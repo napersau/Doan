@@ -14,8 +14,8 @@ public record VisitCheckedInEvent(
         UUID actorUserId,
         Long visitId,
         String visitCode,
-        Long petId,
-        Long appointmentId,   // null nếu khách vãng lai (walk-in)
+        UUID petId,
+        UUID appointmentId,   // null nếu khách vãng lai (walk-in)
         boolean emergency,
         UUID doctorId         // Bác sĩ được xếp ngay khi tiếp nhận (hàng đợi riêng của Bác sĩ); null = vào danh sách chờ phân công
 ) implements DomainEvent {

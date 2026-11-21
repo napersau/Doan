@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Lịch đặt online (PENDING) mà đến hết khung giờ hẹn vẫn chưa được lễ tân duyệt thì tự hủy, nếu không nó chiếm sức chứa
@@ -32,12 +33,12 @@ public class PendingAppointmentExpiryScheduler {
     public void expireStalePendingAppointments() {
         // Hết hạn khi đã qua giờ kết thúc khung (= bắt đầu + độ dài khung): lọc theo giờ bắt đầu trước (now - độ dài khung)
         LocalDateTime cutoff = LocalDateTime.now(clock).minusMinutes(properties.slotMinutes());
-        List<Long> ids = appointmentRepository.findIdsStartedBefore(AppointmentStatus.PENDING, cutoff.toLocalDate(), cutoff.toLocalTime());
+        List<UUID> ids = appointmentRepository.findIdsStartedBefore(AppointmentStatus.PENDING, cutoff.toLocalDate(), cutoff.toLocalTime());
         if (ids.isEmpty()) {
             return;
         }
         int expired = 0;
-        for (Long id : ids) {
+        for (UUID id : ids) {
             try {
                 if (appointmentService.expirePendingBySystem(id)) {
                     expired++;

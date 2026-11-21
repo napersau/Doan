@@ -9,7 +9,7 @@ import jakarta.persistence.criteria.Root;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.domain.Specification;
 
-import java.util.Collection;
+import java.util.UUID;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -30,35 +30,39 @@ class AppointmentSpecificationsTest {
     private final Predicate predicate = mock(Predicate.class);
 
     @Test
-    void nullPetIds_addsNoOwnerCondition() {
+    void nullOwner_addsNoOwnerCondition() {
         when(cb.and(any(Predicate[].class))).thenReturn(predicate);
 
         AppointmentSpecifications.filter(null, null, null, null, null, null).toPredicate(root, query, cb);
 
-        verify(cb, never()).disjunction();
+        verify(root, never()).get("ownerId");
         verify(root, never()).get("petId");
     }
 
     @Test
-    void emptyPetIds_matchesNoAppointmentAtAll() {
-        when(cb.disjunction()).thenReturn(predicate);
+    void ownerId_isFilteredDirectlyOnTheOwnerColumn() {
+        UUID owner = UUID.fromString("019a9442-d810-7000-8000-000000000008");
+        Path<Object> ownerPath = mock(Path.class);
+        when(root.get("ownerId")).thenReturn(ownerPath);
+        when(cb.equal(ownerPath, owner)).thenReturn(predicate);
         when(cb.and(any(Predicate[].class))).thenReturn(predicate);
 
-        AppointmentSpecifications.filter(List.of(), null, null, null, null, null).toPredicate(root, query, cb);
+        AppointmentSpecifications.filter(owner, null, null, null, null, null).toPredicate(root, query, cb);
 
-        verify(cb).disjunction();   // chủ nuôi không có thú cưng => không được thấy lịch nào (không phải "tất cả")
+        verify(cb).equal(ownerPath, owner);   // owner_id nằm ngay trên appointments (v4.0): không còn danh sách pet_id từ clinical-service
+        verify(cb, never()).disjunction();
     }
 
     @Test
-    void petIds_areFilteredWithAnInClause() {
+    void petId_isFilteredByEquality() {
+        UUID pet = UUID.fromString("019a9442-d820-7000-8000-000000000001");
         Path<Object> petPath = mock(Path.class);
         when(root.get("petId")).thenReturn(petPath);
-        when(petPath.in(any(Collection.class))).thenReturn(predicate);
+        when(cb.equal(petPath, pet)).thenReturn(predicate);
         when(cb.and(any(Predicate[].class))).thenReturn(predicate);
 
-        AppointmentSpecifications.filter(List.of(11L, 12L), null, null, null, null, null).toPredicate(root, query, cb);
+        AppointmentSpecifications.filter(null, pet, null, null, null, null).toPredicate(root, query, cb);
 
-        verify(petPath).in(List.of(11L, 12L));
-        verify(cb, never()).disjunction();
+        verify(cb).equal(petPath, pet);
     }
 }

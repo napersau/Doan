@@ -86,6 +86,7 @@ import static com.vetclinic.clinical.testsupport.TestData.loginAs;
 import static com.vetclinic.clinical.testsupport.TestData.pet;
 import static com.vetclinic.clinical.testsupport.TestData.service;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
+import static com.vetclinic.clinical.testsupport.TestData.pid;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -458,7 +459,7 @@ class ParaclinicServiceImplTest {
     void submitLab_usesTheRangeOfThePetsOwnSpecies() {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         PetVisit catVisit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
-        catVisit.setPet(pet(12L, cat()));
+        catVisit.setPet(pet(pid(12), cat()));
         VisitServiceDetail d = detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS);
         when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d));
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(catVisit));

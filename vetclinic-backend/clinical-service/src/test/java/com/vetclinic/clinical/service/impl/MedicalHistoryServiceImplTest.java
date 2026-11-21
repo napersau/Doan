@@ -41,6 +41,7 @@ import static com.vetclinic.clinical.testsupport.TestData.dog;
 import static com.vetclinic.clinical.testsupport.TestData.loginAs;
 import static com.vetclinic.clinical.testsupport.TestData.pet;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
+import static com.vetclinic.clinical.testsupport.TestData.pid;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -71,7 +72,7 @@ class MedicalHistoryServiceImplTest {
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new MedicalHistoryServiceImpl(petRepository, visitRepository, assembler, authClient, billingClient, tm);
-        lenient().when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
+        lenient().when(petRepository.findWithSpeciesByIdAndDeletedAtIsNull(pid(11))).thenReturn(Optional.of(pet(pid(11), dog())));
     }
 
     @AfterEach
@@ -80,15 +81,15 @@ class MedicalHistoryServiceImplTest {
     }
 
     private static VisitResponse response(long id) {
-        return new VisitResponse(id, "VIS-2026-" + id, 11L, "Lu", "PET-2026-11", "Chó", OWNER, null, DOCTOR, RECEPTIONIST, "P01",
+        return new VisitResponse(id, "VIS-2026-" + id, pid(11), "Lu", "PET-2026-11", "Chó", OWNER, null, DOCTOR, RECEPTIONIST, "P01",
                 false, VisitStatus.COMPLETED, true, null, BigDecimal.TEN, BigDecimal.TEN, null, null, "Viêm da", null, null,
                 null, null, null, null, null, List.of(), List.of(), List.of());
     }
 
     private void stubVisits(long... ids) {
         List<PetVisit> visits = Arrays.stream(ids).mapToObj(i -> visit(i, VisitStatus.COMPLETED, DOCTOR)).toList();
-        lenient().when(visitRepository.findByPetId(eq(11L), any(Pageable.class))).thenReturn(new PageImpl<>(visits));
-        lenient().when(visitRepository.findByPetIdAndStatus(eq(11L), eq(VisitStatus.COMPLETED), any(Pageable.class)))
+        lenient().when(visitRepository.findByPetId(eq(pid(11)), any(Pageable.class))).thenReturn(new PageImpl<>(visits));
+        lenient().when(visitRepository.findByPetIdAndStatus(eq(pid(11)), eq(VisitStatus.COMPLETED), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(visits));
         lenient().when(assembler.detail(any(PetVisit.class))).thenAnswer(inv -> response(((PetVisit) inv.getArgument(0)).getId()));
     }
@@ -105,13 +106,13 @@ class MedicalHistoryServiceImplTest {
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(
                 new UserSummaryResponse(DOCTOR, "BS Lan", "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), "P01", "ACTIVE"))));
 
-        PageResponse<MedicalHistoryEntry> page = service.history(11L, 0, 10);
+        PageResponse<MedicalHistoryEntry> page = service.history(pid(11), 0, 10);
 
         assertThat(page.getItems()).hasSize(2);
         assertThat(page.getItems()).extracting(MedicalHistoryEntry::doctorName).containsOnly("BS Lan");
         assertThat(page.getItems().get(0).prescription()).isNull();              // ca 7 không kê đơn
         assertThat(page.getItems().get(1).prescription().id()).isEqualTo(3L);   // đơn thuốc v3.0 không có trạng thái
-        verify(visitRepository).findByPetId(eq(11L), any(Pageable.class));
+        verify(visitRepository).findByPetId(eq(pid(11)), any(Pageable.class));
     }
 
     @Test
@@ -121,10 +122,10 @@ class MedicalHistoryServiceImplTest {
         when(billingClient.getPrescriptions(any())).thenReturn(ApiResponse.success(List.of()));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of()));
 
-        PageResponse<MedicalHistoryEntry> page = service.history(11L, 0, 10);
+        PageResponse<MedicalHistoryEntry> page = service.history(pid(11), 0, 10);
 
         assertThat(page.getItems()).hasSize(1);
-        verify(visitRepository).findByPetIdAndStatus(eq(11L), eq(VisitStatus.COMPLETED), any(Pageable.class));
+        verify(visitRepository).findByPetIdAndStatus(eq(pid(11)), eq(VisitStatus.COMPLETED), any(Pageable.class));
         verify(visitRepository, never()).findByPetId(any(), any(Pageable.class));
     }
 
@@ -132,7 +133,7 @@ class MedicalHistoryServiceImplTest {
     void owner_ofAnotherPetGetsNotFound() {
         loginAs(uid(6), RoleCode.PET_OWNER);
 
-        assertError(ErrorCode.PET_NOT_FOUND, () -> service.history(11L, 0, 10));
+        assertError(ErrorCode.PET_NOT_FOUND, () -> service.history(pid(11), 0, 10));
         verify(visitRepository, never()).findByPetIdAndStatus(any(), any(), any(Pageable.class));
     }
 
@@ -140,7 +141,7 @@ class MedicalHistoryServiceImplTest {
     void unknownPet() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
 
-        assertError(ErrorCode.PET_NOT_FOUND, () -> service.history(404L, 0, 10));
+        assertError(ErrorCode.PET_NOT_FOUND, () -> service.history(pid(404), 0, 10));
     }
 
     @Test
@@ -150,7 +151,7 @@ class MedicalHistoryServiceImplTest {
         when(billingClient.getPrescriptions(any())).thenThrow(new RuntimeException("billing down"));
         when(authClient.getUsers(any())).thenThrow(new RuntimeException("auth down"));
 
-        PageResponse<MedicalHistoryEntry> page = service.history(11L, 0, 10);
+        PageResponse<MedicalHistoryEntry> page = service.history(pid(11), 0, 10);
 
         assertThat(page.getItems()).hasSize(1);
         assertThat(page.getItems().get(0).prescription()).isNull();
@@ -161,9 +162,9 @@ class MedicalHistoryServiceImplTest {
     @Test
     void emptyHistory_makesNoExternalCalls() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(visitRepository.findByPetId(eq(11L), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        when(visitRepository.findByPetId(eq(pid(11)), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
-        assertThat(service.history(11L, 0, 10).getItems()).isEmpty();
+        assertThat(service.history(pid(11), 0, 10).getItems()).isEmpty();
         verify(billingClient, never()).getPrescriptions(any());
         verify(authClient, never()).getUsers(any());
     }

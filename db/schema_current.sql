@@ -14,7 +14,7 @@
 -- 4 Cơ sở dữ liệu logic:
 -- 1. pet_clinic_auth_db             : auth-service (:8081)             - 9 bảng (v4.0, bước 2.1)
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
--- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 19 bảng (v4.0, bước 3.1: + service_categories, service_prices, species/lab_test_items SMALLINT)
+-- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 20 bảng (v4.0, bước 3.1 + 4.1 processed_events: + service_categories, service_prices, species/lab_test_items SMALLINT)
 -- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 6 bảng
 -- TỔNG CỘNG: 27 BẢNG
 --
@@ -232,30 +232,36 @@ INSERT INTO staff_profiles (user_id, employee_code, position_title, department, 
 CREATE DATABASE IF NOT EXISTS pet_clinic_appointment_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE pet_clinic_appointment_db;
 
--- 4. APPOINTMENTS (LỊCH HẸN KHÁM)
--- Đã bỏ: end_time (= start_time + 30 phút cố định), owner_id (suy ra từ pets.owner_id),
---        confirmed_by/at, cancelled_by/at, cancel_reason, updated_at (lấy từ bảng lịch sử).
+-- 10. APPOINTMENTS (LỊCH HẸN KHÁM)
+-- booking_channel: ONLINE | PHONE | WALK_IN. status: PENDING | CONFIRMED | CHECKED_IN | CANCELLED | NO_SHOW.
+-- owner_id + *_snapshot: tránh gọi chéo N+1 khi liệt kê lịch theo chủ nuôi / theo ngày;
+-- cập nhật bất đồng bộ khi nhận UserProfileUpdatedEvent, PetUpdatedEvent.
 CREATE TABLE IF NOT EXISTS appointments (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
     appointment_code VARCHAR(50) NOT NULL UNIQUE,
-    pet_id BIGINT NOT NULL, -- LFK: clinical.pets
+    pet_id BINARY(16) NOT NULL, -- LFK: clinical.pets
+    owner_id BINARY(16) NOT NULL, -- LFK: auth.users (chủ nuôi tại thời điểm đặt)
+    pet_name_snapshot VARCHAR(100) NOT NULL,
+    owner_name_snapshot VARCHAR(150) NOT NULL,
+    owner_phone_snapshot VARCHAR(20) NOT NULL,
     appointment_date DATE NOT NULL,
     start_time TIME NOT NULL, -- Giờ bắt đầu khung 30 phút
     reason TEXT NOT NULL,
-    booking_channel ENUM('ONLINE', 'PHONE', 'WALK_IN') NOT NULL DEFAULT 'ONLINE',
-    status ENUM('PENDING', 'CONFIRMED', 'CHECKED_IN', 'CANCELLED', 'NO_SHOW') NOT NULL DEFAULT 'PENDING',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    booking_channel VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_appointments_slot ON appointments(appointment_date, start_time, status);
 CREATE INDEX idx_appointments_pet ON appointments(pet_id);
+CREATE INDEX idx_appointments_owner ON appointments(owner_id, appointment_date);
 
--- 5. APPOINTMENT_STATUS_HISTORIES (AUDIT TRAIL LỊCH HẸN)
--- Người duyệt / người hủy / lý do hủy / thời điểm đều được ghi ở đây.
+-- 11. APPOINTMENT_STATUS_HISTORIES (AUDIT TRAIL LỊCH HẸN)
 CREATE TABLE IF NOT EXISTS appointment_status_histories (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    appointment_id BIGINT NOT NULL,
-    from_status ENUM('PENDING', 'CONFIRMED', 'CHECKED_IN', 'CANCELLED', 'NO_SHOW') NULL,
-    to_status ENUM('PENDING', 'CONFIRMED', 'CHECKED_IN', 'CANCELLED', 'NO_SHOW') NOT NULL,
+    appointment_id BINARY(16) NOT NULL,
+    from_status VARCHAR(20) NULL,
+    to_status VARCHAR(20) NOT NULL,
     changed_by_user_id BINARY(16) NULL, -- LFK: auth.users (NULL = hệ thống tự quét NO_SHOW)
     notes TEXT NULL, -- Lý do hủy / từ chối / ghi chú
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -309,26 +315,34 @@ CREATE TABLE IF NOT EXISTS species (
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- 7. PETS (HỒ SƠ THÚ CƯNG)
--- Đã bỏ: weight (cân nặng hiện tại = weight_at_visit của đợt khám gần nhất).
+-- 21. PETS (HỒ SƠ THÚ CƯNG)
+-- gender: MALE | FEMALE | UNKNOWN. Cân nặng hiện tại = vital_signs.weight_kg gần nhất.
+-- owner_*_snapshot: hiển thị danh sách tiếp đón không cần gọi auth-service (cập nhật qua UserProfileUpdatedEvent).
+-- Xóa mềm: deleted_at (hồ sơ khám cũ vẫn tham chiếu được).
 CREATE TABLE IF NOT EXISTS pets (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
     owner_id BINARY(16) NOT NULL, -- LFK: auth.users
+    owner_name_snapshot VARCHAR(150) NOT NULL,
+    owner_phone_snapshot VARCHAR(20) NOT NULL,
     species_id SMALLINT NOT NULL,
     pet_code VARCHAR(50) NOT NULL UNIQUE,
     name VARCHAR(100) NOT NULL,
     breed VARCHAR(100) NULL,
-    gender ENUM('MALE', 'FEMALE', 'UNKNOWN') NOT NULL DEFAULT 'UNKNOWN',
+    gender VARCHAR(10) NOT NULL DEFAULT 'UNKNOWN',
     date_of_birth DATE NULL,
     color VARCHAR(100) NULL,
     is_neutered BOOLEAN NOT NULL DEFAULT FALSE,
+    microchip_number VARCHAR(30) NULL UNIQUE,
     identifying_characteristics TEXT NULL,
+    allergies TEXT NULL, -- Tiền sử dị ứng thuốc (cảnh báo khi kê đơn)
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL,
     CONSTRAINT fk_pets_species FOREIGN KEY (species_id) REFERENCES species(id)
 );
 CREATE INDEX idx_pets_owner ON pets(owner_id);
+CREATE INDEX idx_pets_owner_phone ON pets(owner_phone_snapshot);
 
 -- 15. SERVICE_CATEGORIES (NHÓM DỊCH VỤ - THAY ENUM services.category)
 -- queue_type: DOCTOR | LABORATORY | IMAGING | NULL (NULL = làm tại phòng Bác sĩ, không xếp hàng riêng).
@@ -423,8 +437,8 @@ CREATE TABLE IF NOT EXISTS lab_test_reference_ranges (
 CREATE TABLE IF NOT EXISTS pet_visits (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     visit_code VARCHAR(50) NOT NULL UNIQUE,
-    pet_id BIGINT NOT NULL,
-    appointment_id BIGINT NULL UNIQUE, -- LFK: appointment.appointments (NULL = khách vãng lai)
+    pet_id BINARY(16) NOT NULL, -- LFK-nội-bộ: pets.id (UUIDv7)
+    appointment_id BINARY(16) NULL UNIQUE, -- LFK: appointment.appointments (NULL = khách vãng lai)
     doctor_id BINARY(16) NULL, -- LFK: auth.users (bác sĩ được phân công)
     receptionist_id BINARY(16) NOT NULL, -- LFK: auth.users (lễ tân tiếp đón)
     is_emergency BOOLEAN NOT NULL DEFAULT FALSE,
@@ -695,7 +709,6 @@ JOIN species s ON s.code = v.sp;
 -- clinical phát qua outbox: VisitCheckedInEvent, ParaclinicalResultsReadyEvent, VisitCompletedEvent.
 -- QueueTicketIssuedEvent và PatientCalledEvent gửi thẳng (quyết định D9: thông báo tức thời, mất cũng không sai dữ liệu).
 -- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
--- (processed_events của clinical sẽ thêm khi clinical bắt đầu NHẬN sự kiện – chưa có listener nào.)
 CREATE TABLE IF NOT EXISTS outbox_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_id BINARY(16) NOT NULL UNIQUE,
@@ -712,6 +725,15 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     published_at TIMESTAMP NULL
 );
 CREATE INDEX idx_outbox_pending ON outbox_events(status, next_attempt_at, id);
+
+-- 37. PROCESSED_EVENTS (cấu trúc như mục 13)
+-- clinical nhận: UserProfileUpdatedEvent, UserStatusChangedEvent (cập nhật snapshot, gỡ phân công Bác sĩ bị khóa).
+CREATE TABLE IF NOT EXISTS processed_events (
+    event_id BINARY(16) NOT NULL,
+    consumer VARCHAR(100) NOT NULL,
+    processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_id, consumer)
+);
 
 
 -- ==============================================================================

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import CustomerLayout from '../../layouts/CustomerLayout';
 import PetAvatar from '../../components/customer/PetAvatar';
 import PetFormDialog from '../../components/shared/PetFormDialog';
-import { AsyncView, Button, Notice, PageHead, Pager, SearchBox } from '../../components/ui';
+import { AsyncView, Button, ConfirmDialog, Notice, PageHead, Pager, SearchBox } from '../../components/ui';
 import { petsApi } from '../../api/endpoints';
 import useAsync from '../../hooks/useAsync';
 import useDebounced from '../../hooks/useDebounced';
@@ -15,6 +15,7 @@ export default function PetsPage() {
   const [page, setPage] = useState(0);
   const [editing, setEditing] = useState(null); // null | 'new' | pet
   const [notice, setNotice] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const search = useDebounced(keyword);
   const pets = useAsync(() => petsApi.list({ keyword: search, page, size: 12 }), [search, page]);
 
@@ -34,7 +35,7 @@ export default function PetsPage() {
                 <h2 style={{ margin: '0 0 4px', fontSize: 18 }}><Link className="ui-link" to={`/portal/pets/${pet.id}`}>{pet.name}</Link></h2>
                 <p className="ui-muted" style={{ margin: 0, fontSize: 13 }}>{pet.speciesName}{pet.breed ? ` · ${pet.breed}` : ''} · {PET_GENDER[pet.gender] || ''}</p>
                 <p className="ui-muted" style={{ margin: '2px 0 8px', fontSize: 12 }}>{formatAge(pet.dateOfBirth)} · Mã {pet.petCode}</p>
-                <div className="ui-actions"><Link className="ui-button small" to={`/portal/pets/${pet.id}`}>Hồ sơ</Link><Button className="small" onClick={() => setEditing(pet)}>Sửa</Button><Link className="ui-button small primary" to={`/portal/booking?petId=${pet.id}`}>Đặt lịch</Link></div>
+                <div className="ui-actions"><Link className="ui-button small" to={`/portal/pets/${pet.id}`}>Hồ sơ</Link><Button className="small" onClick={() => setEditing(pet)}>Sửa</Button><Button className="small danger" onClick={() => setDeleting(pet)}>Xóa</Button><Link className="ui-button small primary" to={`/portal/booking?petId=${pet.id}`}>Đặt lịch</Link></div>
               </div>
             </div>
           </article>)}
@@ -42,6 +43,7 @@ export default function PetsPage() {
         <Pager page={data} onChange={setPage} />
       </>}
     </AsyncView>
+    {deleting && <ConfirmDialog title={`Xóa hồ sơ ${deleting.name}?`} danger confirmLabel="Xóa hồ sơ" onClose={() => setDeleting(null)} onConfirm={async () => { await petsApi.remove(deleting.id); setNotice({ type: 'success', text: `Đã xóa hồ sơ của ${deleting.name}.` }); pets.refresh(); }}>Hồ sơ sẽ bị ẩn khỏi danh sách và không đặt lịch được nữa; bệnh án cũ vẫn được lưu. Không xóa được khi bé đang có đợt khám chưa kết thúc.</ConfirmDialog>}
     {editing && <PetFormDialog pet={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={(saved) => { setNotice({ type: 'success', text: `Đã lưu hồ sơ của ${saved.name}.` }); pets.refresh(); }} />}
   </CustomerLayout>;
 }

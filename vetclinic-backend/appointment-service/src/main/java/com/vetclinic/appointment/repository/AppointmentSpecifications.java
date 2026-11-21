@@ -10,22 +10,20 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 public final class AppointmentSpecifications {
 
     private AppointmentSpecifications() {
     }
 
-    /**
-     * Tham số null thì bỏ qua điều kiện tương ứng. appointments không còn cột owner_id nên "lịch của một chủ nuôi" được lọc
-     * bằng {@code petIds} = các thú cưng của chủ đó (lấy từ clinical-service); danh sách rỗng nghĩa là không có lịch nào.
-     */
-    public static Specification<Appointment> filter(Collection<Long> petIds, Long petId, String code,
+    /** Tham số null thì bỏ qua điều kiện tương ứng. "Lịch của một chủ nuôi" lọc thẳng bằng {@code owner_id} (cột của appointments, v4.0). */
+    public static Specification<Appointment> filter(UUID ownerId, UUID petId, String code,
                                                     LocalDate fromDate, LocalDate toDate, AppointmentStatus status) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            if (petIds != null) {
-                predicates.add(petIds.isEmpty() ? cb.disjunction() : root.get("petId").in(petIds));
+            if (ownerId != null) {
+                predicates.add(cb.equal(root.get("ownerId"), ownerId));
             }
             if (petId != null) {
                 predicates.add(cb.equal(root.get("petId"), petId));

@@ -208,7 +208,7 @@ public class VisitSupport {
                 "Đã có đủ kết quả cận lâm sàng: hệ thống tự chuyển và phát phiếu ưu tiên vào hàng đợi Bác sĩ");
         // Phiếu phòng còn chờ (dịch vụ đã bị hủy hết) đóng lại; phiếu DOCTOR ưu tiên mới cho Bác sĩ khám chính
         ticketIssuer.issueResultsReady(visit);
-        Long petId = visit.getPet().getId();
+        UUID petId = visit.getPet().getId();
         outboxWriter.write(OUTBOX_AGGREGATE, visit.getId(), new ParaclinicalResultsReadyEvent(UuidV7.generate(clock), clock.instant(), null,
                 visit.getId(), visit.getVisitCode(), doctorId, petId));
         log.info("Đợt khám {} đã có đủ kết quả cận lâm sàng (RESULTS_READY), đã phát phiếu ưu tiên cho bác sĩ", visit.getVisitCode());

@@ -17,36 +17,48 @@ public interface AppointmentService {
 
     PageResponse<AppointmentResponse> search(AppointmentFilter filter);
 
-    AppointmentResponse getById(Long id);
+    AppointmentResponse getById(UUID id);
 
-    List<AppointmentHistoryResponse> getHistory(Long id);
+    List<AppointmentHistoryResponse> getHistory(UUID id);
 
     /** UC-17: PENDING -> CONFIRMED (lễ tân). */
-    AppointmentResponse confirm(Long id);
+    AppointmentResponse confirm(UUID id);
 
     /** UC-15 / UC-17: hủy (chủ nuôi tự hủy) hoặc từ chối (lễ tân). PENDING / CONFIRMED -> CANCELLED. */
-    AppointmentResponse cancel(Long id, CancelAppointmentRequest request);
+    AppointmentResponse cancel(UUID id, CancelAppointmentRequest request);
 
     /** UC-15: đổi ngày / khung giờ, giữ nguyên trạng thái. */
-    AppointmentResponse reschedule(Long id, RescheduleAppointmentRequest request);
+    AppointmentResponse reschedule(UUID id, RescheduleAppointmentRequest request);
 
     /** EX-01: lễ tân xác nhận vắng mặt. CONFIRMED -> NO_SHOW, chỉ khi đã quá giờ hẹn + thời gian chờ. */
-    AppointmentResponse markNoShow(Long id);
+    AppointmentResponse markNoShow(UUID id);
 
     // ------------------------------------------------------------------ không cần người dùng đăng nhập
 
     /** Tiến trình quét tự động. Trả về true nếu đã chuyển NO_SHOW. Idempotent. */
-    boolean markNoShowBySystem(Long id);
+    boolean markNoShowBySystem(UUID id);
 
     /**
      * Tiến trình quét tự động: lịch PENDING đã quá giờ KẾT THÚC khung hẹn mà chưa ai duyệt thì hủy để trả suất. Trả về true
      * nếu đã hủy. Idempotent.
      */
-    boolean expirePendingBySystem(Long id);
+    boolean expirePendingBySystem(UUID id);
 
     /** Consumer của VisitCheckedInEvent. CONFIRMED -> CHECKED_IN. Idempotent. */
-    void markCheckedIn(Long appointmentId, UUID actorUserId, String visitCode);
+    void markCheckedIn(UUID appointmentId, UUID actorUserId, String visitCode);
 
     /** Cho clinical-service tra cứu lịch hẹn trước khi check-in (không kiểm tra chủ sở hữu). */
-    AppointmentResponse getForInternal(Long id);
+    AppointmentResponse getForInternal(UUID id);
+
+    /**
+     * Consumer của {@code UserProfileUpdatedEvent}: cập nhật snapshot tên / SĐT chủ nuôi trên mọi lịch hẹn của {@code ownerId}.
+     * Trả số lịch đã cập nhật.
+     */
+    int refreshOwnerSnapshot(UUID ownerId, String ownerName, String ownerPhone);
+
+    /**
+     * Consumer của {@code PetUpdatedEvent}: cập nhật snapshot tên thú cưng; nếu thú cưng được chuyển sang chủ khác thì các lịch còn hiệu lực
+     * (chờ duyệt / đã duyệt) đi theo chủ mới. Trả tổng số lịch đã cập nhật.
+     */
+    int refreshPetSnapshot(UUID petId, String petName, UUID ownerId, String ownerName, String ownerPhone);
 }

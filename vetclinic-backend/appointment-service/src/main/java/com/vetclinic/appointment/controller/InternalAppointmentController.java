@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.UUID;
 
 /**
  * Cho clinical-service tra cứu lịch hẹn trước khi tiếp nhận (check-in) khách có hẹn: lịch phải đang CONFIRMED.
@@ -22,7 +23,7 @@ public class InternalAppointmentController {
     private final AppointmentService appointmentService;
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<AppointmentResponse>> getById(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<AppointmentResponse>> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(appointmentService.getForInternal(id)));
     }
 }

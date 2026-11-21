@@ -157,7 +157,6 @@ services:
     image: vetclinic/appointment-service:latest
     environment:
       <<: *spring-env
-      BOOKING_VERIFY_PET: ${BOOKING_VERIFY_PET:-true}
       BOOKING_NO_SHOW_CRON: ${BOOKING_NO_SHOW_CRON:-0 */15 7-21 * * *}
       BOOKING_PENDING_EXPIRY_CRON: ${BOOKING_PENDING_EXPIRY_CRON:-0 5,20,35,50 7-21 * * *}
     depends_on: *depends-on-infra

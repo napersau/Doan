@@ -5,9 +5,9 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 
 public record AppointmentSummaryResponse(
-        Long id,
+        UUID id,
         String appointmentCode,
-        Long petId,
+        UUID petId,
         UUID ownerId,
         LocalDate appointmentDate,
         LocalTime startTime,

@@ -20,7 +20,7 @@ public record QueueItemResponse(
         Long serviceDetailId,
         Long visitId,
         String visitCode,
-        Long petId,
+        UUID petId,
         String petName,
         String speciesName,
         UUID serviceId,

@@ -8,41 +8,28 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
-import java.util.List;
 
 /**
- * Endpoint cho các service khác gọi qua OpenFeign. Nằm dưới /internal/**: không cần header người dùng và Gateway
+ * Endpoint cho các service khác gọi qua OpenFeign (Kiến trúc v4.0 §5.1). Nằm dưới /internal/**: không cần header người dùng và Gateway
  * không định tuyến ra ngoài, nên chỉ truy cập được trong mạng Docker.
  */
 @RestController
-@RequestMapping("/internal/clinical")
+@RequestMapping("/internal/pets")
 @RequiredArgsConstructor
 public class InternalClinicalController {
 
     private final PetService petService;
 
-    /** appointment-service kiểm tra thú cưng tồn tại và thuộc đúng chủ nuôi khi đặt lịch. */
-    @GetMapping("/pets/{id}")
-    public ResponseEntity<ApiResponse<PetSummaryResponse>> pet(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success(petService.getSummary(id)));
-    }
-
-    /** appointment-service làm giàu danh sách lịch hẹn bằng tên thú cưng, theo lô. */
-    @GetMapping(value = "/pets", params = "ids")
-    public ResponseEntity<ApiResponse<List<PetSummaryResponse>>> pets(@RequestParam("ids") List<Long> ids) {
-        return ResponseEntity.ok(ApiResponse.success(petService.getSummaries(ids)));
-    }
-
     /**
-     * appointment-service lọc "lịch hẹn của tôi" / theo chủ nuôi: appointments không còn cột owner_id (lược đồ v3.0) nên
-     * hỏi danh sách thú cưng của chủ rồi lọc {@code pet_id IN (...)}.
+     * appointment-service kiểm tra thú cưng tồn tại, thuộc đúng chủ nuôi khi đặt lịch và lấy tên thú cưng + tên / SĐT chủ để chụp snapshot.
+     * Thú cưng đã xóa mềm trả 404 PET_NOT_FOUND. (Danh sách lịch hẹn của chủ nuôi nay lọc bằng {@code appointments.owner_id}, nên
+     * không còn endpoint tra thú cưng theo chủ hay theo lô.)
      */
-    @GetMapping(value = "/pets", params = "ownerId")
-    public ResponseEntity<ApiResponse<List<PetSummaryResponse>>> petsOfOwner(@RequestParam("ownerId") UUID ownerId) {
-        return ResponseEntity.ok(ApiResponse.success(petService.getSummariesByOwner(ownerId)));
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<PetSummaryResponse>> pet(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success(petService.getSummary(id)));
     }
 }

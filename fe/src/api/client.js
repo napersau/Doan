@@ -94,6 +94,7 @@ export const api = {
   get: (path, query, options) => request(path, { ...options, query }),
   post: (path, body, options) => request(path, { ...options, method: 'POST', body: body === undefined ? {} : body }),
   put: (path, body, options) => request(path, { ...options, method: 'PUT', body }),
+  delete: (path, options) => request(path, { ...options, method: 'DELETE' }),
   upload: (path, form) => request(path, { method: 'POST', form }),
   blob: (path) => request(path, { as: 'blob' }),
 };

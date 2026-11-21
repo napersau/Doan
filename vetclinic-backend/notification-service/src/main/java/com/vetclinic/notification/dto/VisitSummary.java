@@ -6,7 +6,7 @@ import java.util.UUID;
 public record VisitSummary(
         Long id,
         String visitCode,
-        Long petId,
+        UUID petId,
         String petName,
         UUID ownerId,
         UUID doctorId

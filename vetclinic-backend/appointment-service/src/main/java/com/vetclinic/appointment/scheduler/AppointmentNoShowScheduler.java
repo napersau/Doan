@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * EX-01 / FR-17: tự động chuyển NO_SHOW các lịch hẹn CONFIRMED mà khách không đến, để trả suất cho khách vãng lai.
@@ -35,14 +36,14 @@ public class AppointmentNoShowScheduler {
     public void scanAndMarkNoShowAppointments() {
         // Hạn vắng mặt = giờ BẮT ĐẦU khung + noShowGraceMinutes (30 phút, EX-01 / FR-17): lịch bắt đầu trước (now - 30 phút) là quá hạn
         LocalDateTime cutoff = LocalDateTime.now(clock).minusMinutes(properties.noShowGraceMinutes());
-        List<Long> ids = appointmentRepository.findIdsStartedBefore(
+        List<UUID> ids = appointmentRepository.findIdsStartedBefore(
                 AppointmentStatus.CONFIRMED, cutoff.toLocalDate(), cutoff.toLocalTime());
         if (ids.isEmpty()) {
             return;
         }
 
         int marked = 0;
-        for (Long id : ids) {
+        for (UUID id : ids) {
             try {
                 if (appointmentService.markNoShowBySystem(id)) {
                     marked++;

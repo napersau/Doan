@@ -16,7 +16,7 @@ public record PatientCalledEvent(
         String station,          // DOCTOR_ROOM | LAB | IMAGING
         Long visitId,
         String visitCode,
-        Long petId,
+        UUID petId,
         UUID doctorId,           // Bác sĩ của hàng đợi (null nếu gọi ở Lab/CĐHA cho ca chưa có bác sĩ)
         Long ticketId,           // phiếu xếp hàng được gọi (queue_tickets.id)
         Integer ticketNo,        // số in trên phiếu (đánh lại từ 1 mỗi ngày theo loại hàng đợi)

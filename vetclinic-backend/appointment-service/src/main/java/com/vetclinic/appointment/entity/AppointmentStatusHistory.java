@@ -37,14 +37,14 @@ public class AppointmentStatusHistory {
     private Long id;
 
     @Column(name = "appointment_id", nullable = false)
-    private Long appointmentId;
+    private UUID appointmentId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "from_status")
+    @Column(name = "from_status", length = 20)
     private AppointmentStatus fromStatus;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "to_status", nullable = false)
+    @Column(name = "to_status", nullable = false, length = 20)
     private AppointmentStatus toStatus;
 
     @Column(name = "changed_by_user_id")

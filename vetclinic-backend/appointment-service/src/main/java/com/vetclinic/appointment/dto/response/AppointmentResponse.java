@@ -1,17 +1,17 @@
 package com.vetclinic.appointment.dto.response;
 
-import java.util.UUID;
 import com.vetclinic.appointment.constant.AppointmentStatus;
 import com.vetclinic.appointment.constant.BookingChannel;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.UUID;
 
 public record AppointmentResponse(
-        Long id,
+        UUID id,
         String appointmentCode,
-        Long petId,
+        UUID petId,
         UUID ownerId,
         LocalDate appointmentDate,
         LocalTime startTime,
@@ -32,22 +32,15 @@ public record AppointmentResponse(
 ) {
 
     /**
-     * Từ lược đồ v3.0, bảng appointments chỉ có 9 cột. Các trường dưới đây KHÔNG còn lưu mà được suy ra:
-     * endTime = startTime + độ dài khung; ownerId = pets.owner_id (clinical-service); cancelReason / confirmedBy / confirmedAt /
-     * cancelledBy / cancelledAt / updatedAt lấy từ appointment_status_histories (AppointmentEnricher). Hình dạng response giữ
-     * nguyên để Frontend và clinical-service không phải đổi.
+     * Từ v4.0 bảng appointments có {@code owner_id} và 3 cột snapshot nên {@code ownerId, petName, ownerName, ownerPhone} đọc thẳng từ
+     * bảng (không còn gọi clinical / auth). Các trường dưới đây KHÔNG lưu mà được suy ra: endTime = startTime + độ dài khung;
+     * cancelReason / confirmedBy / confirmedAt / cancelledBy / cancelledAt / updatedAt lấy từ appointment_status_histories
+     * (AppointmentEnricher).
      */
     public AppointmentResponse withEndTime(LocalTime endTime) {
         return new AppointmentResponse(id, appointmentCode, petId, ownerId, appointmentDate, startTime, endTime, reason,
                 bookingChannel, status, cancelReason, confirmedBy, confirmedAt, cancelledBy, cancelledAt, createdAt, updatedAt,
                 petName, ownerName, ownerPhone);
-    }
-
-    /** Gắn chủ nuôi (suy ra từ thú cưng). Tham số null thì giữ nguyên giá trị hiện có. */
-    public AppointmentResponse withOwnerId(UUID ownerId) {
-        return new AppointmentResponse(id, appointmentCode, petId, ownerId != null ? ownerId : this.ownerId, appointmentDate,
-                startTime, endTime, reason, bookingChannel, status, cancelReason, confirmedBy, confirmedAt, cancelledBy,
-                cancelledAt, createdAt, updatedAt, petName, ownerName, ownerPhone);
     }
 
     /** Gắn người/lý do/thời điểm duyệt, hủy và lần cập nhật cuối (lấy từ lịch sử trạng thái). */
@@ -56,13 +49,5 @@ public record AppointmentResponse(
         return new AppointmentResponse(id, appointmentCode, petId, ownerId, appointmentDate, startTime, endTime, reason,
                 bookingChannel, status, cancelReason, confirmedBy, confirmedAt, cancelledBy, cancelledAt, createdAt,
                 updatedAt != null ? updatedAt : this.updatedAt, petName, ownerName, ownerPhone);
-    }
-
-    /** Gắn tên thú cưng / chủ nuôi (lấy từ clinical và auth). Tham số null thì giữ nguyên giá trị hiện có. */
-    public AppointmentResponse withNames(String petName, String ownerName, String ownerPhone) {
-        return new AppointmentResponse(id, appointmentCode, petId, ownerId, appointmentDate, startTime, endTime, reason,
-                bookingChannel, status, cancelReason, confirmedBy, confirmedAt, cancelledBy, cancelledAt, createdAt, updatedAt,
-                petName != null ? petName : this.petName, ownerName != null ? ownerName : this.ownerName,
-                ownerPhone != null ? ownerPhone : this.ownerPhone);
     }
 }

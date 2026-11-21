@@ -29,7 +29,7 @@ class VisitEnricherTest {
     private AuthClient authClient;
 
     private static VisitResponse visit(long id, UUID doctorId) {
-        return new VisitResponse(id, "VIS-" + id, 11L, "Lu", "PET-11", "Chó", uid(5), null, doctorId, uid(9), null, false,
+        return new VisitResponse(id, "VIS-" + id, uid(11), "Lu", "PET-11", "Chó", uid(5), null, doctorId, uid(9), null, false,
                 VisitStatus.WAITING, false, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null);
     }
