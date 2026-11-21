@@ -87,7 +87,7 @@ export default function MedicalEntry({ entry }) {
   const record = visit.medicalRecord;
   const vitals = visit.vitalSigns || [];
   return <article className="ui-panel">
-    <header className="ui-panel-head"><div><h2>{visit.visitCode} · {formatDateTime(visit.checkedInAt)}</h2><p>Bác sĩ phụ trách: {doctorName || (visit.doctorId ? `#${visit.doctorId}` : 'Chưa ghi nhận')}{visit.emergency ? ' · Cấp cứu' : ''}</p></div><Badge map={VISIT_STATUS} value={visit.status} /></header>
+    <header className="ui-panel-head"><div><h2>{visit.visitCode} · {formatDateTime(visit.checkedInAt)}</h2><p>Bác sĩ phụ trách: {doctorName || visit.doctorName || (visit.doctorId ? `#${visit.doctorId}` : 'Chưa ghi nhận')}{visit.doctorActive === false && <> <Badge tone="red">Đã khóa</Badge></>}{visit.emergency ? ' · Cấp cứu' : ''}</p></div><Badge map={VISIT_STATUS} value={visit.status} /></header>
     <div className="ui-panel-body ui-stack" style={{ gap: 20 }}>
       <Facts items={[['Lý do đến khám', visit.reasonForVisit], ['Bệnh sử', record?.anamnesis], ['Kết quả khám lâm sàng', record?.clinicalFindings], ['Chẩn đoán sơ bộ', record?.preliminaryDiagnosis],
         ['Chẩn đoán xác định', record?.finalDiagnosis], ['Phác đồ điều trị', record?.treatmentPlan], ['Lời dặn của bác sĩ', record?.doctorAdvice], ['Hẹn tái khám', record?.followUpDate ? formatDate(record.followUpDate) : null]]} />

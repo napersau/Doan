@@ -85,7 +85,7 @@ class MedicalHistoryServiceImplTest {
 
     private static VisitResponse response(UUID id) {
         MedicalRecordResponse record = new MedicalRecordResponse(id, null, null, null, "Viêm da", null, null, null, null, null, 1L, true);
-        return new VisitResponse(id, "VIS-2026-" + id.toString().substring(31), pid(11), "Lu", "PET-2026-11", "Chó", OWNER, null, DOCTOR, null,
+        return new VisitResponse(id, "VIS-2026-" + id.toString().substring(31), pid(11), "Lu", "PET-2026-11", "Chó", OWNER, null, DOCTOR, null, null,
                 RECEPTIONIST, "P01", false, VisitStatus.COMPLETED, true, null, null, null,
                 null, null, null, null, List.of(), List.of(), List.of(), List.of(), record);
     }

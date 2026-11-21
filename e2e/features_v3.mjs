@@ -452,6 +452,29 @@ async function main() {
   await call('POST', `${CLIN}/pet-visits/${g1.v}/abandon`, { token: T.rec });
   await call('POST', `${CLIN}/pet-visits/${g2.v}/abandon`, { token: T.rec });
 
+  // EX-17: Bác sĩ bị khóa khi còn ca đang chờ (BR-39): phân công mới hỏi auth-service ngay lúc ghi, ca chờ về danh sách chờ phân công
+  const ex1 = (await checkIn(await newPet('Ex17a'), DOC4)).data.id; await payExam(ex1);
+  const ex2 = (await checkIn(await newPet('Ex17b'), DOC4)).data.id; await payExam(ex2);
+  const ticketRow = (v) => sql(`SELECT CONCAT(ticket_no, '|', status, '|', IFNULL(HEX(doctor_id), 'NULL')) FROM pet_clinic_clinical_db.queue_tickets WHERE visit_id=${uuidSql(v)} AND queue_type='DOCTOR'`);
+  const ex17Before = [ticketRow(ex1), ticketRow(ex2)];
+  const exWorking = await inProgress('Ex17c', DOC4);
+  check('EX-17: dựng hàng đợi Bác sĩ Mai: 2 phiếu chờ + 1 ca đang khám', ex17Before.every((r) => r.includes('|WAITING|')) && (await visitOf(exWorking.v)).status === 'IN_PROGRESS', ex17Before.join(' ; '));
+  check('EX-17: Admin khóa Bác sĩ Mai', (await call('POST', `${USERS}/${DOC4}/lock`, { token: T.admin })).status === 200);
+  check('EX-17: phân công cho Bác sĩ đã khóa bị từ chối CLIN_1316 ngay (hỏi auth-service lúc ghi, không dựa vào sự kiện)', (await call('POST', `${CLIN}/pet-visits/${ex1}/assign-doctor`, { token: T.rec, body: { doctorId: DOC4 } })).code === 'CLIN_1316');
+  let released = false;
+  for (let i = 0; i < 30 && !released; i += 1) { released = sql(`SELECT COUNT(*) FROM pet_clinic_clinical_db.pet_visits WHERE id IN (${uuidSql(ex1)}, ${uuidSql(ex2)}) AND doctor_id IS NULL`) === '2'; if (!released) await sleep(500); }
+  check('EX-17: UserStatusChangedEvent (outbox → RabbitMQ) gỡ phân công 2 ca đang chờ của Bác sĩ Mai', released);
+  const ex17After = [ticketRow(ex1), ticketRow(ex2)];
+  check('EX-17: phiếu về danh sách chờ phân công, GIỮ NGUYÊN số phiếu', ex17After.every((r, i) => r.split('|')[0] === ex17Before[i].split('|')[0] && r.endsWith('|WAITING|NULL')), ex17After.join(' ; '));
+  const ex17Board = (await call('GET', `${CLIN}/pet-visits/queue`, { token: T.rec })).data;
+  check('EX-17: hai ca hiện ở "chờ phân công" và Bác sĩ Mai không còn trong danh sách bác sĩ hoạt động', [ex1, ex2].every((v) => ex17Board.unassigned.some((u) => u.id === v)) && !ex17Board.doctors.some((d) => d.doctorId === DOC4));
+  const working = await visitOf(exWorking.v);
+  check('EX-17: ca đang khám KHÔNG bị ngắt; vẫn hiện tên Bác sĩ (bản chụp) kèm doctorActive = false ("Đã khóa")', working.status === 'IN_PROGRESS' && working.doctorId === DOC4 && Boolean(working.doctorName) && working.doctorActive === false, brief({ status: 200, data: working }));
+  check('EX-17: Lễ tân phân công lại cho Bác sĩ khác được, phiếu giữ số', (await call('POST', `${CLIN}/pet-visits/${ex1}/assign-doctor`, { token: T.rec, body: { doctorId: DOC3 } })).status === 200 && ticketRow(ex1).split('|')[0] === ex17Before[0].split('|')[0]);
+  check('EX-17: Admin mở khóa → nhận ca được lại', (await call('POST', `${USERS}/${DOC4}/unlock`, { token: T.admin })).status === 200 && (await call('POST', `${CLIN}/pet-visits/${ex2}/assign-doctor`, { token: T.rec, body: { doctorId: DOC4 } })).status === 200);
+  for (const v of [ex1, ex2]) await call('POST', `${CLIN}/pet-visits/${v}/cancel`, { token: T.rec, body: { reason: 'dọn dẹp EX-17' } });
+  await call('POST', `${CLIN}/pet-visits/${exWorking.v}/cancel-exam`, { token: exWorking.token, body: { reason: 'dọn dẹp EX-17' } });
+
   // =====================================================================================================================
   step('F. Báo cáo');
   const r1 = await call('GET', `${CLIN}/reports/operations?fromDate=${dayOffset(-1)}&toDate=${dayOffset(1)}`, { token: T.admin });

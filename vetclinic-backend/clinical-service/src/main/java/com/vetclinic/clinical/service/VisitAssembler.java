@@ -152,7 +152,7 @@ public class VisitAssembler {
         Pet pet = v.getPet();
         // assignedRoom = null ở đây: số phòng là users.room_number của Bác sĩ, VisitEnricher gắn sau commit (không gọi Feign trong transaction)
         return new VisitResponse(v.getId(), v.getVisitCode(), pet.getId(), pet.getName(), pet.getPetCode(),
-                pet.getSpecies().getName(), pet.getOwnerId(), v.getAppointmentId(), v.getDoctorId(), v.getDoctorNameSnapshot(),
+                pet.getSpecies().getName(), pet.getOwnerId(), v.getAppointmentId(), v.getDoctorId(), v.getDoctorNameSnapshot(), null,
                 v.getReceptionistId(), null, v.isEmergency(), v.getStatus(), isLocked(v.getStatus()), null,
                 v.getReasonForVisit(), times.cancelReason(), v.getCheckedInAt(), times.startedAt(),
                 times.closedAt(), times.completedAt(), services, labs, imaging, null, null);

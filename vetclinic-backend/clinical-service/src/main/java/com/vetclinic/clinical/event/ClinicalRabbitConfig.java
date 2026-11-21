@@ -12,7 +12,8 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Queue của clinical-service (mẫu &lt;service&gt;.&lt;routing-key&gt;, bền vững, có DLQ). clinical NHẬN các sự kiện của auth-service để giữ
- * snapshot đúng (Kiến trúc v4.0 §5.2): {@code user.profile_updated} (bước 4.1: tên / SĐT chủ nuôi trên thú cưng).
+ * snapshot đúng và xử lý ngoại lệ phân tán (Kiến trúc v4.0 §5.2): {@code user.profile_updated} (bước 4.1: tên / SĐT chủ nuôi trên thú cưng;
+ * bước 4.2: tên Bác sĩ trên đợt khám) và {@code user.status_changed} (bước 4.4, EX-17: Bác sĩ bị khóa thì gỡ phân công các ca đang chờ).
  */
 @Configuration
 public class ClinicalRabbitConfig {
@@ -20,6 +21,7 @@ public class ClinicalRabbitConfig {
     public static final String SERVICE_NAME = "clinical-service";
     // Hằng số compile-time (dùng trong @RabbitListener)
     public static final String USER_PROFILE_UPDATED_QUEUE = SERVICE_NAME + "." + EventRouting.USER_PROFILE_UPDATED;
+    public static final String USER_STATUS_CHANGED_QUEUE = SERVICE_NAME + "." + EventRouting.USER_STATUS_CHANGED;
 
     @Bean
     public Queue userProfileUpdatedQueue() {
@@ -40,5 +42,26 @@ public class ClinicalRabbitConfig {
     public Binding userProfileUpdatedDeadLetterBinding(DirectExchange clinicEventsDeadLetterExchange) {
         return BindingBuilder.bind(userProfileUpdatedDeadLetterQueue()).to(clinicEventsDeadLetterExchange)
                 .with(USER_PROFILE_UPDATED_QUEUE);
+    }
+
+    @Bean
+    public Queue userStatusChangedQueue() {
+        return RabbitCommonConfig.durableQueueWithDlq(USER_STATUS_CHANGED_QUEUE);
+    }
+
+    @Bean
+    public Queue userStatusChangedDeadLetterQueue() {
+        return RabbitCommonConfig.deadLetterQueue(USER_STATUS_CHANGED_QUEUE);
+    }
+
+    @Bean
+    public Binding userStatusChangedBinding(TopicExchange clinicEventsExchange) {
+        return BindingBuilder.bind(userStatusChangedQueue()).to(clinicEventsExchange).with(EventRouting.USER_STATUS_CHANGED);
+    }
+
+    @Bean
+    public Binding userStatusChangedDeadLetterBinding(DirectExchange clinicEventsDeadLetterExchange) {
+        return BindingBuilder.bind(userStatusChangedDeadLetterQueue()).to(clinicEventsDeadLetterExchange)
+                .with(USER_STATUS_CHANGED_QUEUE);
     }
 }

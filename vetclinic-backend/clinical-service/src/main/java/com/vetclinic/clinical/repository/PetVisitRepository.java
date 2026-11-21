@@ -71,6 +71,11 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, UUID>, JpaSp
     @Query("update PetVisit v set v.doctorNameSnapshot = :name where v.doctorId = :doctorId and (v.doctorNameSnapshot is null or v.doctorNameSnapshot <> :name)")
     int updateDoctorNameSnapshot(@Param("doctorId") UUID doctorId, @Param("name") String name);
 
+    /** EX-17: các đợt khám đang chờ của một Bác sĩ, khóa dòng (FOR UPDATE) để gỡ phân công không đè lên một lần phân công đồng thời. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select v from PetVisit v where v.doctorId = :doctorId and v.status = :status order by v.id")
+    List<PetVisit> findByDoctorIdAndStatusForUpdate(@Param("doctorId") UUID doctorId, @Param("status") VisitStatus status);
+
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     List<PetVisit> findByPetIdOrderByIdDesc(UUID petId);
 

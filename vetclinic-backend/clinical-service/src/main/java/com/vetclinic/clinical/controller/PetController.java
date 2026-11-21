@@ -7,6 +7,7 @@ import com.vetclinic.clinical.dto.response.PetResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.service.MedicalHistoryService;
 import com.vetclinic.clinical.service.PetService;
+import com.vetclinic.clinical.service.VisitEnricher;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
 import jakarta.validation.Valid;
@@ -27,6 +28,7 @@ public class PetController {
 
     private final PetService petService;
     private final MedicalHistoryService medicalHistoryService;
+    private final VisitEnricher enricher;
 
     /** Chủ nuôi tự thêm (ownerId bị bỏ qua) hoặc Lễ tân thêm hộ (bắt buộc ownerId). */
     @PostMapping
@@ -76,7 +78,13 @@ public class PetController {
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<MedicalHistoryEntry>>> medicalHistory(
             @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
-        return ResponseEntity.ok(ApiResponse.success(medicalHistoryService.history(id, page, size)));
+        var history = medicalHistoryService.history(id, page, size);
+        // EX-17: Bác sĩ đã khóa vẫn hiện tên (snapshot) kèm nhãn "Đã khóa": tra trạng thái một lần theo lô, ngoài transaction
+        var visits = enricher.enrichAll(history.getItems().stream().map(MedicalHistoryEntry::visit).toList());
+        var entries = history.getItems();
+        history.setItems(java.util.stream.IntStream.range(0, entries.size())
+                .mapToObj(i -> new MedicalHistoryEntry(visits.get(i), entries.get(i).doctorName(), entries.get(i).prescription())).toList());
+        return ResponseEntity.ok(ApiResponse.success(history));
     }
 
     /** Danh sách gọn các đợt khám của thú cưng, mới nhất trước. */

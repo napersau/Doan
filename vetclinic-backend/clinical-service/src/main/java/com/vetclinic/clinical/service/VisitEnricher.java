@@ -17,7 +17,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Gắn số phòng của Bác sĩ phụ trách vào VisitResponse. pet_visits v3.0 không còn cột assigned_room: phòng suy ra từ
+ * Gắn số phòng và trạng thái hoạt động (EX-17) của Bác sĩ phụ trách vào VisitResponse. pet_visits v3.0 không còn cột assigned_room: phòng suy ra từ
  * {@code users.room_number} của Bác sĩ (auth-service) bằng MỘT lời gọi theo lô. Gọi ở tầng controller, NGOÀI transaction
  * (quy chuẩn §9.1). Chỉ là phần hiển thị: auth-service tạm sập thì để null, không làm hỏng response.
  */
@@ -37,26 +37,29 @@ public class VisitEnricher {
         if (doctorIds.isEmpty()) {
             return visits;
         }
-        Map<UUID, String> rooms = roomsOf(doctorIds);
-        return visits.stream()
-                .map(v -> v.doctorId() == null ? v : v.withAssignedRoom(rooms.get(v.doctorId())))
-                .toList();
+        Map<UUID, UserSummaryResponse> doctors = doctorsOf(doctorIds);
+        return visits.stream().map(v -> {
+            if (v.doctorId() == null) {
+                return v;
+            }
+            UserSummaryResponse doctor = doctors.get(v.doctorId());
+            // EX-17: Bác sĩ bị khóa / ngừng -> doctorActive = false; không tra được (auth-service sập) -> null, giao diện không gắn nhãn
+            return v.withDoctorInfo(doctor == null ? null : doctor.roomNumber(), doctor == null ? null : "ACTIVE".equals(doctor.status()));
+        }).toList();
     }
 
-    private Map<UUID, String> roomsOf(Set<UUID> doctorIds) {
+    private Map<UUID, UserSummaryResponse> doctorsOf(Set<UUID> doctorIds) {
         try {
             ApiResponse<List<UserSummaryResponse>> response = authClient.getUsers(List.copyOf(doctorIds));
-            Map<UUID, String> rooms = new HashMap<>();
+            Map<UUID, UserSummaryResponse> doctors = new HashMap<>();
             if (response != null && response.getData() != null) {
                 for (UserSummaryResponse u : response.getData()) {
-                    if (u.roomNumber() != null) {
-                        rooms.put(u.id(), u.roomNumber());
-                    }
+                    doctors.put(u.id(), u);
                 }
             }
-            return rooms;
+            return doctors;
         } catch (RuntimeException e) {
-            log.warn("Không lấy được số phòng của Bác sĩ từ auth-service: {}", e.getMessage());
+            log.warn("Không lấy được thông tin Bác sĩ từ auth-service: {}", e.getMessage());
             return Map.of();
         }
     }

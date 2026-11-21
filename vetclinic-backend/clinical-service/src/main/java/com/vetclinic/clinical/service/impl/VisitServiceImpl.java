@@ -316,7 +316,7 @@ public class VisitServiceImpl implements VisitService {
         visit.setDoctorNameSnapshot(doctor.fullName());   // chụp tên Bác sĩ lúc phân công (tránh N+1 khi liệt kê)
         visitRepository.save(visit);
         ticketIssuer.reassignDoctorTicket(visit.getId(), doctor.id());
-        return assembler.summary(visit).withAssignedRoom(doctor.roomNumber());
+        return assembler.summary(visit).withDoctorInfo(doctor.roomNumber(), true);
     }
 
     @Override

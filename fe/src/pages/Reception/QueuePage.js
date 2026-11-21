@@ -85,6 +85,10 @@ export default function QueuePage() {
     <AsyncView state={board}>
       {({ board: d, active }) => {
         const doctorName = (id) => d.doctors.find((doctor) => sameId(doctor.doctorId, id))?.fullName || (id ? `#${id}` : '—');
+        // EX-17: Bác sĩ đã bị khóa không còn trong danh sách đang hoạt động; ca của họ vẫn hiện tên (bản chụp) kèm nhãn "Đã khóa"
+        const doctorCell = (row) => (row.doctorId
+          ? <>{d.doctors.find((doctor) => sameId(doctor.doctorId, row.doctorId))?.fullName || row.doctorName || doctorName(row.doctorId)}{row.doctorActive === false && <> <Badge tone="red">Đã khóa</Badge></>}</>
+          : <span className="ui-muted">Chưa chọn</span>);
         const waitingTotal = d.unassigned.length + d.doctors.reduce((sum, doctor) => sum + doctor.waitingCount, 0);
         const emergencies = [...d.unassigned, ...d.doctors.flatMap((doctor) => doctor.visits)].filter((visit) => visit.emergency).length;
         const awaiting = d.awaitingPayment || [];
@@ -100,7 +104,7 @@ export default function QueuePage() {
             <Table caption="Chờ nộp phí khám" empty="Không có ca nào chờ nộp phí khám." rows={awaiting} columns={[
               { title: 'Thú cưng', render: (row) => <VisitCell visit={row} /> },
               { title: 'Giờ đến', render: (row) => <>{formatTimeOfInstant(row.checkedInAt)}<small>chờ {waitedMinutes(row.checkedInAt)} phút</small></> },
-              { title: 'Bác sĩ đã chọn', render: (row) => (row.doctorId ? doctorName(row.doctorId) : <span className="ui-muted">Chưa chọn</span>) },
+              { title: 'Bác sĩ đã chọn', render: (row) => doctorCell(row) },
               { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
                 <Link className="ui-button small primary" to={`/reception/invoices/${row.id}`}>Thu phí khám</Link>
                 <Button className="small" onClick={() => setDialog({ type: 'assign', visit: row })}>{row.doctorId ? 'Đổi bác sĩ' : 'Chọn bác sĩ'}</Button>
@@ -137,7 +141,7 @@ export default function QueuePage() {
             <Table caption="Các ca đang xử lý" empty="Không có ca nào đang xử lý." rows={active} columns={[
               { title: 'Mã ca', render: (row) => <><strong>{row.visitCode}</strong><small>{formatDateTime(row.checkedInAt)}</small></> },
               { title: 'Thú cưng', render: (row) => <>{row.petName}{row.emergency && <span className="ui-emergency"> · CẤP CỨU</span>}<small>{row.speciesName}</small></> },
-              { title: 'Bác sĩ', render: (row) => doctorName(row.doctorId) },
+              { title: 'Bác sĩ', render: (row) => (row.doctorId ? doctorCell(row) : '—') },
               { title: 'Trạng thái', render: (row) => <Badge map={VISIT_STATUS} value={row.status} /> },
               { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
                 {row.status === 'WAITING_PAYMENT' && <Link className="ui-button small primary" to={`/reception/invoices/${row.id}`}>Thu tiền</Link>}

@@ -31,7 +31,7 @@ class VisitEnricherTest {
 
     private static VisitResponse visit(long id, UUID doctorId) {
         return new VisitResponse(com.vetclinic.clinical.testsupport.TestData.lid(id), "VIS-" + id, uid(11), "Lu", "PET-11", "Chó", uid(5), null,
-                doctorId, null, uid(9), null, false, VisitStatus.WAITING, false, null, null, null, null, null, null, null,
+                doctorId, null, null, uid(9), null, false, VisitStatus.WAITING, false, null, null, null, null, null, null, null,
                 null, null, null, null, null);
     }
 
@@ -48,6 +48,24 @@ class VisitEnricherTest {
 
         assertThat(result).extracting(VisitResponse::assignedRoom).containsExactly("P101", "P102", "P101", null);
         verify(authClient).getUsers(any());   // đúng một lời gọi dù 4 ca khám: không N+1
+    }
+
+    @Test
+    void enrichAll_marksADoctorWhoWasLockedAsNotActive_EX17_whileKeepingTheSnapshotName() {
+        UserSummaryResponse locked = new UserSummaryResponse(uid(3), "BS 3", "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), "P102", "LOCKED");
+        when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(doctor(2L, "P101"), locked)));
+
+        List<VisitResponse> result = new VisitEnricher(authClient).enrichAll(List.of(visit(1, uid(2)), visit(2, uid(3)), visit(3, null)));
+
+        assertThat(result).extracting(VisitResponse::doctorActive).containsExactly(true, false, null);   // ca chưa có Bác sĩ: không biết
+        assertThat(result.get(1).assignedRoom()).isEqualTo("P102");
+    }
+
+    @Test
+    void enrich_whenAuthServiceIsDown_doesNotClaimTheDoctorIsLocked() {
+        when(authClient.getUsers(any())).thenThrow(new RuntimeException("auth down"));
+
+        assertThat(new VisitEnricher(authClient).enrich(visit(1, uid(2))).doctorActive()).isNull();   // null = chưa biết, không gắn nhãn "Đã khóa"
     }
 
     @Test
