@@ -22,10 +22,11 @@ LOG="${TMPDIR:-/tmp}/service-check-$MODULE.log"
 if [ "$RESET" = "--reset" ]; then docker rm -f "$CONTAINER" >/dev/null 2>&1; fi
 if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   docker rm -f "$CONTAINER" >/dev/null 2>&1
-  ROOT_DIR="$(pwd -W 2>/dev/null || pwd)"
-  docker run -d --name "$CONTAINER" -p "$MYSQL_PORT:3306" -e MYSQL_ROOT_PASSWORD=check -e TZ=Asia/Ho_Chi_Minh \
-    -v "$ROOT_DIR/db/schema_current.sql:/docker-entrypoint-initdb.d/01-schema_init.sql:ro" \
-    -v "$ROOT_DIR/db/seed_current.sql:/docker-entrypoint-initdb.d/02-seed_demo_data.sql:ro" mysql:8.0 >/dev/null || exit 1
+  # docker create + cp + start (không bind-mount: tránh lỗi mount thư mục máy chủ của Docker Desktop trên Windows)
+  docker create --name "$CONTAINER" -p "$MYSQL_PORT:3306" -e MYSQL_ROOT_PASSWORD=check -e TZ=Asia/Ho_Chi_Minh mysql:8.0 >/dev/null || exit 1
+  docker cp db/schema_current.sql "$CONTAINER:/docker-entrypoint-initdb.d/01-schema_init.sql" || exit 1
+  docker cp db/seed_current.sql "$CONTAINER:/docker-entrypoint-initdb.d/02-seed_demo_data.sql" || exit 1
+  docker start "$CONTAINER" >/dev/null || exit 1
   echo "đã tạo MySQL tạm, chờ nạp lược đồ + seed..."
   for _ in $(seq 1 60); do
     sleep 3
@@ -73,5 +74,9 @@ assert len(c['userId'])==36, 'userId phải là UUID'
 print('OK: đăng nhập seed thật, JWT mang userId UUID + roles danh sách')" || exit 1
   # Bước 2.2: nhân sự, hồ sơ, vai trò, khóa/mở khóa, outbox (chạy thật trên MySQL tạm)
   PYTHONIOENCODING=utf-8 python scripts/auth_staff_check.py "$PORT" "$CONTAINER" || exit 1
+fi
+if [ "$MODULE" = "clinical-service" ]; then
+  # Bước 3.1: nhóm dịch vụ, dịch vụ UUID, bảng giá có lịch sử, xét nghiệm (chạy thật trên MySQL tạm)
+  PYTHONIOENCODING=utf-8 python scripts/catalog_check.py "$PORT" "$CONTAINER" || exit 1
 fi
 exit 0

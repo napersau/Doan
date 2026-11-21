@@ -2,8 +2,9 @@ package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AppointmentClient;
 import com.vetclinic.clinical.client.AuthClient;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
+import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.AssignDoctorRequest;
 import com.vetclinic.clinical.dto.request.CheckInRequest;
@@ -341,7 +342,7 @@ public class VisitServiceImpl implements VisitService {
 
         // Dịch vụ khám (lập lúc tiếp đón - T01) PENDING -> IN_PROGRESS. KHÔNG lập hóa đơn mới.
         for (VisitServiceDetail d : detailRepository.findByVisitIdOrderByIdAsc(visit.getId())) {
-            if (d.getService().getCategory() == ServiceCategory.EXAMINATION && d.getStatus() == ServiceDetailStatus.PENDING) {
+            if (d.getService().getCategory().is(ServiceCategory.EXAMINATION) && d.getStatus() == ServiceDetailStatus.PENDING) {
                 d.setStatus(ServiceDetailStatus.IN_PROGRESS);
                 detailRepository.save(d);
                 support.recordDetail(d.getId(), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING",
@@ -379,7 +380,7 @@ public class VisitServiceImpl implements VisitService {
     @Transactional
     public VisitResponse orderParaclinical(Long id, ParaclinicalOrderRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
-        List<Long> serviceIds = request.serviceIds().stream().distinct().toList();
+        List<UUID> serviceIds = request.serviceIds().stream().distinct().toList();
         List<ClinicService> services = loadActiveServices(serviceIds);
         if (services.stream().anyMatch(s -> !s.getCategory().isParaclinical())) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA,
@@ -397,7 +398,7 @@ public class VisitServiceImpl implements VisitService {
             throw new AppException(ErrorCode.VITAL_SIGNS_REQUIRED);
         }
         // T04: các dịch vụ làm tại phòng đã chỉ định ở Giai đoạn 1 phải xong (COMPLETED) hoặc hủy (CANCELLED)
-        if (detailRepository.countByVisitAndCategoriesAndStatuses(visit.getId(), ServiceCategory.IN_ROOM, ServiceDetailStatus.OPEN) > 0) {
+        if (detailRepository.countByVisitAndKindAndStatuses(visit.getId(), ServiceKind.IN_ROOM, ServiceDetailStatus.OPEN) > 0) {
             throw new AppException(ErrorCode.IN_ROOM_SERVICE_PENDING);
         }
 
@@ -425,8 +426,8 @@ public class VisitServiceImpl implements VisitService {
     @Transactional
     public VisitResponse orderInRoomServices(Long id, OrderServicesRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
-        List<Long> serviceIds = request.services().stream().map(ServiceOrderItem::serviceId).distinct().toList();
-        Map<Long, ClinicService> found = loadActiveServices(serviceIds).stream()
+        List<UUID> serviceIds = request.services().stream().map(ServiceOrderItem::serviceId).distinct().toList();
+        Map<UUID, ClinicService> found = loadActiveServices(serviceIds).stream()
                 .collect(Collectors.toMap(ClinicService::getId, Function.identity()));
         if (found.values().stream().anyMatch(s -> !s.getCategory().isInRoom())) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA,
@@ -445,7 +446,7 @@ public class VisitServiceImpl implements VisitService {
         return assembler.detail(visit);
     }
 
-    private List<ClinicService> loadActiveServices(List<Long> serviceIds) {
+    private List<ClinicService> loadActiveServices(List<UUID> serviceIds) {
         List<ClinicService> found = serviceRepository.findByIdInAndActiveTrue(serviceIds);
         if (found.size() != serviceIds.size()) {
             throw new AppException(ErrorCode.SERVICE_NOT_FOUND);
@@ -504,14 +505,14 @@ public class VisitServiceImpl implements VisitService {
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
         support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ chốt được ca đang khám (IN_PROGRESS)");
-        if (detailRepository.countByVisitAndCategoriesAndStatuses(visit.getId(), ServiceCategory.PARACLINICAL,
+        if (detailRepository.countByVisitAndKindAndStatuses(visit.getId(), ServiceKind.PARACLINICAL,
                 ServiceDetailStatus.OPEN) > 0) {
             throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION, "Còn dịch vụ cận lâm sàng chưa hoàn tất");
         }
         if (visit.getWeightAtVisit() == null || visit.getTemperature() == null || visit.getTemperature().signum() <= 0) {
             throw new AppException(ErrorCode.VITAL_SIGNS_REQUIRED);
         }
-        if (detailRepository.countByVisitAndCategoriesAndStatuses(visit.getId(), ServiceCategory.IN_ROOM, ServiceDetailStatus.OPEN) > 0) {
+        if (detailRepository.countByVisitAndKindAndStatuses(visit.getId(), ServiceKind.IN_ROOM, ServiceDetailStatus.OPEN) > 0) {
             throw new AppException(ErrorCode.IN_ROOM_SERVICE_PENDING);
         }
 
@@ -540,7 +541,7 @@ public class VisitServiceImpl implements VisitService {
             throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION,
                     "Ca đã có kết quả cận lâm sàng: không hủy ca, hãy chốt ca để thu phí các dịch vụ đã làm");
         }
-        if (detailRepository.countByVisitAndCategoriesAndStatuses(visit.getId(), ServiceCategory.IN_ROOM,
+        if (detailRepository.countByVisitAndKindAndStatuses(visit.getId(), ServiceKind.IN_ROOM,
                 List.of(ServiceDetailStatus.COMPLETED)) > 0) {
             throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION,
                     "Đã thực hiện dịch vụ tại phòng: không hủy ca, hãy chốt ca để thu phí dịch vụ đã làm");
@@ -611,7 +612,7 @@ public class VisitServiceImpl implements VisitService {
                     "Chỉ đóng ca \"khách bỏ về\" được với ca đang chờ kết quả (WAITING_RESULTS) hoặc đã có kết quả (RESULTS_READY)");
         }
         // T12: không đóng ca khi kỹ thuật viên đang thực hiện dở một chỉ định (khách đang ở trong phòng)
-        if (detailRepository.countByVisitAndCategoriesAndStatuses(visit.getId(), ServiceCategory.PARACLINICAL,
+        if (detailRepository.countByVisitAndKindAndStatuses(visit.getId(), ServiceKind.PARACLINICAL,
                 List.of(ServiceDetailStatus.IN_PROGRESS)) > 0) {
             throw new AppException(ErrorCode.PARACLINICAL_SERVICE_IN_PROGRESS);
         }

@@ -37,6 +37,8 @@ export const SERVICE_CATEGORY = {
   EXAMINATION: 'Khám tổng quát', VACCINATION: 'Tiêm phòng', DEWORMING: 'Tẩy giun', EXTERNAL_PARASITE: 'Ký sinh trùng ngoài da',
   INJECTION_INFUSION: 'Tiêm / truyền dịch', LABORATORY: 'Xét nghiệm', IMAGING: 'Chẩn đoán hình ảnh', SURGERY: 'Phẫu thuật', PROCEDURE: 'Thủ thuật',
 };
+/** Nhóm dịch vụ do Admin tạo thêm không có nhãn cố định: hiện mã nhóm. */
+export const serviceCategoryLabel = (code) => SERVICE_CATEGORY[code] || code;
 export const DOCTOR_STATUS = {
   AVAILABLE: { label: 'Rảnh', tone: 'green' },
   BUSY: { label: 'Đang bận', tone: 'red' },

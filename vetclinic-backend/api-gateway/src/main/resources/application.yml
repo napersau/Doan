@@ -21,7 +21,7 @@ spring:
             - id: clinical-service
               uri: lb://clinical-service
               predicates:
-                - Path=/api/v1/clinical/**,/api/v1/pets/**,/api/v1/species/**
+                - Path=/api/v1/clinical/**,/api/v1/pets/**,/api/v1/species/**,/api/v1/catalog/**
             - id: billing-pharmacy-service
               uri: lb://billing-pharmacy-service
               predicates:

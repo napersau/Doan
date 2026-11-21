@@ -43,7 +43,7 @@ export const ids = {
   user: (username) => lookup('tài khoản', 'username', username, [`${AUTH}/users?keyword=${q(username)}&size=100`]),
   pet: (petCode) => lookup('thú cưng', 'petCode', petCode, [`/api/v1/pets?keyword=${q(petCode)}&size=100`]),
   species: (code) => lookup('loài', 'code', code, ['/api/v1/species']),
-  service: (code) => lookup('dịch vụ', 'code', code, [`${CLIN}/services?includeInactive=true`]),
+  service: (code) => lookup('dịch vụ', 'code', code, ['/api/v1/catalog/services?includeInactive=true']),
   medicine: (code) => lookup('thuốc', 'code', code, [`${PHARM}/medicines?keyword=${q(code)}&size=100`, `${PHARM}/medicines?size=100`]),
 };
 

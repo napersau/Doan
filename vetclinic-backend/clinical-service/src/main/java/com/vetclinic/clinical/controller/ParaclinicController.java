@@ -3,7 +3,7 @@ package com.vetclinic.clinical.controller;
 import com.vetclinic.clinical.dto.request.CancelServiceRequest;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.dto.request.LabResultRequest;
 import com.vetclinic.clinical.dto.request.OptionalReasonRequest;
 import com.vetclinic.clinical.dto.request.ReasonRequest;
@@ -36,13 +36,13 @@ public class ParaclinicController {
     @GetMapping("/lab-queue")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<List<QueueItemResponse>>> labQueue() {
-        return ResponseEntity.ok(ApiResponse.success(paraclinicService.queue(ServiceCategory.LABORATORY)));
+        return ResponseEntity.ok(ApiResponse.success(paraclinicService.queue(QueueType.LABORATORY)));
     }
 
     @GetMapping("/imaging-queue")
     @PreAuthorize("hasAnyRole('IMAGING_TECHNICIAN','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<List<QueueItemResponse>>> imagingQueue() {
-        return ResponseEntity.ok(ApiResponse.success(paraclinicService.queue(ServiceCategory.IMAGING)));
+        return ResponseEntity.ok(ApiResponse.success(paraclinicService.queue(QueueType.IMAGING)));
     }
 
     /** Phòng Lab: đã lấy mẫu xong (huy hiệu liên phòng cho CĐHA). */

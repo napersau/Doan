@@ -1,10 +1,10 @@
 package com.vetclinic.clinical.dto.response;
 
-import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 
 import com.vetclinic.clinical.constant.TicketStatus;
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * Một dịch vụ trong hàng đợi phòng Lab / CĐHA, kèm PHIẾU XẾP HÀNG chứa nó (17/11/2026). Danh sách đã xếp theo phiếu:
@@ -23,9 +23,9 @@ public record QueueItemResponse(
         Long petId,
         String petName,
         String speciesName,
-        Long serviceId,
+        UUID serviceId,
         String serviceName,
-        ServiceCategory category,
+        String category,
         boolean emergency,
         ServiceDetailStatus status,
         String stage,

@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.io.Serializable;
+import java.util.UUID;
 
 /** Dịch vụ xét nghiệm gồm chỉ số nào (câu hỏi mở #2). Dịch vụ không có dòng nào thì được coi là gồm mọi chỉ số. */
 @Entity
@@ -22,14 +23,14 @@ import java.io.Serializable;
 @AllArgsConstructor
 public class ServiceLabTestItem {
 
-    public record Key(Long serviceId, Long labTestItemId) implements Serializable {
+    public record Key(UUID serviceId, Short labTestItemId) implements Serializable {
     }
 
     @Id
     @Column(name = "service_id")
-    private Long serviceId;
+    private UUID serviceId;
 
     @Id
     @Column(name = "lab_test_item_id")
-    private Long labTestItemId;
+    private Short labTestItemId;
 }

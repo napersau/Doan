@@ -1,7 +1,7 @@
 package com.vetclinic.clinical.service;
 
 import com.vetclinic.clinical.constant.QueueType;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -57,7 +57,8 @@ public class TicketIssuer {
         int priority = visit.isEmergency() ? QueueTicket.PRIORITY_EMERGENCY : QueueTicket.PRIORITY_NORMAL;
         for (VisitServiceDetail d : details) {
             ServiceCategory category = d.getService().getCategory();
-            if (category == ServiceCategory.EXAMINATION) {
+            QueueType queue = category.queueTypeOrNull();   // hàng đợi đọc từ service_categories, không suy ra từ tên nhóm
+            if (queue == QueueType.DOCTOR) {
                 // Phí khám thu SAU khi đã khám (ca cấp cứu) thì không phát phiếu nữa; tối đa 1 phiếu DOCTOR còn hiệu lực
                 if (visit.getStatus() == VisitStatus.WAITING && activeDoctorTicket(visit.getId()).isEmpty()) {
                     issue(visit, QueueType.DOCTOR, visit.getDoctorId(), priority, issuedBy);
@@ -67,7 +68,7 @@ public class TicketIssuer {
                         || itemRepository.findByVisitServiceDetailId(d.getId()).isPresent()) {
                     continue;   // đã có phiếu (ca cấp cứu), đã làm / hủy, hoặc ca đã rời bước chờ kết quả
                 }
-                QueueType type = QueueType.ofRoom(category);
+                QueueType type = queue;
                 QueueTicket ticket = ticketRepository
                         .findFirstByVisitIdAndQueueTypeAndStatus(visit.getId(), type, TicketStatus.WAITING)
                         .orElseGet(() -> issue(visit, type, null, priority, issuedBy));   // gộp dịch vụ cùng phòng vào phiếu đang chờ

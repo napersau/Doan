@@ -11,10 +11,12 @@ import useAsync from '../../hooks/useAsync';
 import usePolling from '../../hooks/usePolling';
 import { blankToNull, formatDateTime, formatMoney, formatNumber } from '../../lib/format';
 import { sameId } from '../../lib/ids';
-import { SERVICE_CATEGORY, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
+import { serviceCategoryLabel, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
 
-const PARACLINICAL = ['LABORATORY', 'IMAGING'];
-const IN_ROOM = ['VACCINATION', 'DEWORMING', 'EXTERNAL_PARASITE', 'INJECTION_INFUSION', 'PROCEDURE', 'SURGERY'];
+// Cách thực hiện một dịch vụ do NHÓM quyết định (service_categories.queue_type): vào hàng đợi phòng XN / CĐHA = cận lâm sàng; không có hàng đợi = làm tại phòng
+const PARACLINICAL_QUEUES = ['LABORATORY', 'IMAGING'];
+const isParaclinical = (item) => PARACLINICAL_QUEUES.includes(item.queueType);
+const isInRoom = (item) => item.queueType === null || item.queueType === undefined;
 
 /** T02: bắt đầu khám (giai đoạn 1). Bác sĩ tự cân / đo trong phòng; sinh hiệu có thể nhập sau nhưng bắt buộc trước khi chỉ định CLS hoặc chốt ca. */
 function StartExam({ visit, onDone }) {
@@ -82,7 +84,7 @@ function ServicePicker({ services, picked, setPicked, withQuantity }) {
   const patch = (id, key, value) => setPicked({ ...picked, [id]: { quantity: 1, notes: '', checked: true, ...picked[id], [key]: value } });
   return <div className="ui-stack" style={{ gap: 10 }}>
     {services.map((service) => <div key={service.id} style={{ display: 'grid', gridTemplateColumns: withQuantity ? 'minmax(0, 1fr) 80px minmax(0, 1fr)' : 'minmax(0, 1fr)', gap: 12, alignItems: 'center' }}>
-      <label className="ui-check"><input type="checkbox" checked={Boolean(picked[service.id]?.checked)} onChange={() => toggle(service.id)} /><span><strong>{service.name}</strong> <small className="ui-muted">{SERVICE_CATEGORY[service.category]} · {formatMoney(service.price)}</small></span></label>
+      <label className="ui-check"><input type="checkbox" checked={Boolean(picked[service.id]?.checked)} onChange={() => toggle(service.id)} /><span><strong>{service.name}</strong> <small className="ui-muted">{service.categoryName} · {service.price == null ? 'chưa có giá' : formatMoney(service.price)}</small></span></label>
       {withQuantity && <Input type="number" min="1" max="20" aria-label={`Số lượng ${service.name}`} disabled={!picked[service.id]?.checked} value={picked[service.id]?.quantity ?? 1} onChange={(event) => patch(service.id, 'quantity', event.target.value)} />}
       {withQuantity && <Input aria-label={`Ghi chú ${service.name}`} placeholder="Ghi chú" disabled={!picked[service.id]?.checked} value={picked[service.id]?.notes ?? ''} onChange={(event) => patch(service.id, 'notes', event.target.value)} maxLength={500} />}
     </div>)}
@@ -97,8 +99,8 @@ function ServicesTab({ visit, onChanged }) {
   const action = useAction();
   const navigate = useNavigate();
   const all = catalog.data || [];
-  const inRoomServices = all.filter((service) => IN_ROOM.includes(service.category));
-  const paraclinicalServices = all.filter((service) => PARACLINICAL.includes(service.category));
+  const inRoomServices = all.filter(isInRoom);
+  const paraclinicalServices = all.filter(isParaclinical);
   const chosen = (picked) => Object.entries(picked).filter(([, value]) => value.checked);
 
   const orderInRoom = async () => {
@@ -115,12 +117,12 @@ function ServicesTab({ visit, onChanged }) {
     <Notice notice={action.notice} onClose={action.clear} />
     <Panel title="Dịch vụ đã chỉ định" subtitle="Mỗi dịch vụ có một hóa đơn riêng. Hủy dịch vụ thì hóa đơn của nó tự hủy; dịch vụ đã thu tiền không hủy được." flush>
       <Table caption="Dịch vụ đã chỉ định" empty="Chưa có dịch vụ nào." rows={visit.services || []} columns={[
-        { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{SERVICE_CATEGORY[row.category]}{row.notes ? ` · ${row.notes}` : ''}</small></> },
+        { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{serviceCategoryLabel(row.category)}{row.notes ? ` · ${row.notes}` : ''}</small></> },
         { title: 'SL', key: 'quantity' }, { title: 'Thành tiền', align: 'right', render: (row) => formatMoney(row.subtotal) },
         { title: 'Trạng thái', render: (row) => <Badge map={SERVICE_DETAIL_STATUS} value={row.status} /> },
         { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
-          {IN_ROOM.includes(row.category) && ['PENDING', 'IN_PROGRESS'].includes(row.status) && <Button className="small primary" onClick={() => perform(row)}>Đã thực hiện</Button>}
-          {row.category !== 'EXAMINATION' && ['PENDING', 'IN_PROGRESS'].includes(row.status) && <Button className="small danger" onClick={() => setDialog({ row })}>Hủy</Button>}</div> }]} />
+          {isInRoom(row) && ['PENDING', 'IN_PROGRESS'].includes(row.status) && <Button className="small primary" onClick={() => perform(row)}>Đã thực hiện</Button>}
+          {row.queueType !== 'DOCTOR' && ['PENDING', 'IN_PROGRESS'].includes(row.status) && <Button className="small danger" onClick={() => setDialog({ row })}>Hủy</Button>}</div> }]} />
     </Panel>
     <Panel title="Dịch vụ tại phòng" subtitle="Tiêm phòng, tẩy giun, thủ thuật, phẫu thuật… làm ngay tại phòng khám (không qua hàng đợi cận lâm sàng). Ca vẫn đang khám.">
       <AsyncView state={catalog} isEmpty={() => false}>
@@ -243,7 +245,7 @@ function CloseTab({ visit, draft, onClosed, goTo }) {
   const prescription = useAsync(() => pharmacyApi.prescriptionByVisit(visit.id).catch((problem) => { if (problem.status === 404) return null; throw problem; }), [visit.id]);
   const [confirming, setConfirming] = useState(false);
   const diagnosis = draft.diagnosis.trim();
-  const unfinished = (visit.services || []).filter((row) => ['PENDING', 'IN_PROGRESS'].includes(row.status) && !['LABORATORY', 'IMAGING'].includes(row.category) && row.category !== 'EXAMINATION');
+  const unfinished = (visit.services || []).filter((row) => ['PENDING', 'IN_PROGRESS'].includes(row.status) && isInRoom(row));
   const noVitals = !visit.weightAtVisit || !visit.temperature;
   const medicines = prescription.data?.items?.length || 0;
   return <Panel title="Chốt ca" subtitle="Bước cuối: sau khi chốt, hồ sơ bị khóa (không sửa kết luận, dịch vụ, đơn thuốc) và ca chuyển sang chờ thanh toán. Hóa đơn dịch vụ đã có sẵn cho thu ngân; thuốc bán theo đơn nếu khách chọn mua.">
@@ -322,7 +324,7 @@ export default function VisitPage() {
             {v.status === 'WAITING_PAYMENT' && (mine || user.role === 'ADMIN') && <Button className="small" onClick={() => setDialog('reopen')}>Mở lại hồ sơ</Button>}</div>}
 
           {(v.services?.length > 0 && v.status !== 'IN_PROGRESS') && <Panel title="Dịch vụ đã chỉ định" flush><Table caption="Dịch vụ" rows={v.services} columns={[
-            { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{SERVICE_CATEGORY[row.category]}</small></> }, { title: 'Trạng thái', render: (row) => <Badge map={SERVICE_DETAIL_STATUS} value={row.status} /> }]} /></Panel>}
+            { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{serviceCategoryLabel(row.category)}</small></> }, { title: 'Trạng thái', render: (row) => <Badge map={SERVICE_DETAIL_STATUS} value={row.status} /> }]} /></Panel>}
           {hasResults && <Panel title="Kết quả cận lâm sàng">
             <div className="ui-stack">{v.labResults?.length > 0 && <LabResultsTable results={v.labResults} />}{v.imagingResults?.length > 0 && <ImagingResults results={v.imagingResults} />}</div>
           </Panel>}

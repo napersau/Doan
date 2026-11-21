@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Size;
 public record UpdateLabTestItemRequest(
         @NotBlank @Size(max = 100) String name,
         @NotBlank @Size(max = 30) String unit,
-        @Size(max = 255) String description
+        @Size(max = 255) String description,
+        Boolean active
 ) {
 }

@@ -10,10 +10,10 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface LabTestReferenceRangeRepository extends JpaRepository<LabTestReferenceRange, Long> {
+public interface LabTestReferenceRangeRepository extends JpaRepository<LabTestReferenceRange, LabTestReferenceRange.Key> {
 
-    Optional<LabTestReferenceRange> findByLabTestItemIdAndSpeciesId(Long labTestItemId, Long speciesId);
+    Optional<LabTestReferenceRange> findByLabTestItemIdAndSpeciesId(Short labTestItemId, Short speciesId);
 
     @EntityGraph(attributePaths = "species")
-    List<LabTestReferenceRange> findByLabTestItemIdIn(Collection<Long> labTestItemIds);
+    List<LabTestReferenceRange> findByLabTestItemIdIn(Collection<Short> labTestItemIds);
 }

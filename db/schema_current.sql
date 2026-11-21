@@ -14,7 +14,7 @@
 -- 4 Cơ sở dữ liệu logic:
 -- 1. pet_clinic_auth_db             : auth-service (:8081)             - 9 bảng (v4.0, bước 2.1)
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
--- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 16 bảng
+-- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 19 bảng (v4.0, bước 3.1: + service_categories, service_prices, species/lab_test_items SMALLINT)
 -- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 6 bảng
 -- TỔNG CỘNG: 27 BẢNG
 --
@@ -57,6 +57,13 @@ SET NAMES utf8mb4;
 
 -- UUIDv7 cố định cho dữ liệu mẫu (giống docs/schema_init.sql v4.0). Chỉ khai báo biến đang được dùng; thêm dần ở các bước sau.
 SET @u_admin = UUID_TO_BIN('019a9442-d800-7729-87cc-fbb1ceda8817');
+SET @s_exam       = UUID_TO_BIN('019a9442-d801-7f29-8461-94154bf4727d');
+SET @s_vac7       = UUID_TO_BIN('019a9442-d802-7c82-b68c-5a5bee6bd708');
+SET @s_vac4       = UUID_TO_BIN('019a9442-d803-72f9-b7bc-77684d1d19b3');
+SET @s_deworm     = UUID_TO_BIN('019a9442-d804-747b-9728-edfcf134959d');
+SET @s_cbc        = UUID_TO_BIN('019a9442-d805-75c3-86cd-1efc7485f972');
+SET @s_us         = UUID_TO_BIN('019a9442-d806-7fe9-aab6-60023c504ab3');
+SET @s_xray       = UUID_TO_BIN('019a9442-d807-7b9e-8308-4bc685f447d1');
 
 
 -- ==============================================================================
@@ -293,12 +300,13 @@ CREATE TABLE IF NOT EXISTS processed_events (
 CREATE DATABASE IF NOT EXISTS pet_clinic_clinical_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE pet_clinic_clinical_db;
 
--- 6. SPECIES (DANH MỤC LOÀI)
+-- 14. SPECIES (DANH MỤC LOÀI)
 CREATE TABLE IF NOT EXISTS species (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    code VARCHAR(50) NOT NULL UNIQUE,
+    id SMALLINT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
     name VARCHAR(100) NOT NULL,
-    description VARCHAR(255) NULL
+    description VARCHAR(255) NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- 7. PETS (HỒ SƠ THÚ CƯNG)
@@ -306,7 +314,7 @@ CREATE TABLE IF NOT EXISTS species (
 CREATE TABLE IF NOT EXISTS pets (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     owner_id BINARY(16) NOT NULL, -- LFK: auth.users
-    species_id BIGINT NOT NULL,
+    species_id SMALLINT NOT NULL,
     pet_code VARCHAR(50) NOT NULL UNIQUE,
     name VARCHAR(100) NOT NULL,
     breed VARCHAR(100) NULL,
@@ -322,49 +330,89 @@ CREATE TABLE IF NOT EXISTS pets (
 );
 CREATE INDEX idx_pets_owner ON pets(owner_id);
 
--- 8. SERVICES (DANH MỤC DỊCH VỤ)
-CREATE TABLE IF NOT EXISTS services (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    code VARCHAR(50) NOT NULL UNIQUE,
-    name VARCHAR(150) NOT NULL,
-    category ENUM('EXAMINATION', 'VACCINATION', 'DEWORMING', 'EXTERNAL_PARASITE', 'INJECTION_INFUSION', 'LABORATORY', 'IMAGING', 'SURGERY', 'PROCEDURE') NOT NULL,
-    price DECIMAL(12, 2) NOT NULL, -- Giá niêm yết hiện tại
-    vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.00, -- Thuế suất VAT hiện hành của dịch vụ
-    description TEXT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    requires_prepayment BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE: thu tiền xong mới phát phiếu xếp hàng
-    CONSTRAINT chk_services_price CHECK (price >= 0),
-    CONSTRAINT chk_services_vat CHECK (vat_rate >= 0 AND vat_rate <= 1)
+-- 15. SERVICE_CATEGORIES (NHÓM DỊCH VỤ - THAY ENUM services.category)
+-- queue_type: DOCTOR | LABORATORY | IMAGING | NULL (NULL = làm tại phòng Bác sĩ, không xếp hàng riêng).
+-- requires_prepayment: TRUE = thu tiền xong mới phát phiếu xếp hàng (khám, XN, CĐHA);
+--                      FALSE = làm ngay tại phòng, thu khi chốt ca.
+CREATE TABLE IF NOT EXISTS service_categories (
+    id SMALLINT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    queue_type VARCHAR(20) NULL,
+    requires_prepayment BOOLEAN NOT NULL DEFAULT FALSE,
+    display_order SMALLINT NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- 9. LAB_TEST_ITEMS (DANH MỤC CHỈ SỐ XÉT NGHIỆM)
-CREATE TABLE IF NOT EXISTS lab_test_items (
+-- 16. SERVICES (THÔNG TIN DỊCH VỤ - KHÔNG CHỨA GIÁ)
+-- Không xóa cứng: ngừng cung cấp = is_active FALSE (hóa đơn cũ vẫn tra được).
+CREATE TABLE IF NOT EXISTS services (
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
+    category_id SMALLINT NOT NULL,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    name VARCHAR(150) NOT NULL,
+    description TEXT NULL,
+    unit VARCHAR(30) NOT NULL DEFAULT 'Lần', -- Đơn vị tính: lần, mũi, tư thế...
+    estimated_minutes SMALLINT NULL, -- Thời gian thực hiện dự kiến
+    preparation_notes VARCHAR(255) NULL, -- Ví dụ: nhịn ăn 8 giờ trước khi siêu âm
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_services_category FOREIGN KEY (category_id) REFERENCES service_categories(id)
+);
+CREATE INDEX idx_services_category ON services(category_id, is_active);
+
+-- 17. SERVICE_PRICES (LỊCH SỬ GIÁ DỊCH VỤ)
+-- Giá hiệu lực tại thời điểm t: effective_from <= t AND (effective_to IS NULL OR effective_to > t).
+-- Đổi giá = đóng dòng đang mở (gán effective_to) + thêm dòng mới, trong cùng giao dịch.
+-- Dòng giá không bao giờ bị sửa số tiền hay xóa.
+CREATE TABLE IF NOT EXISTS service_prices (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    service_id BINARY(16) NOT NULL,
+    price DECIMAL(12, 2) NOT NULL,
+    vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.00,
+    effective_from DATETIME NOT NULL,
+    effective_to DATETIME NULL, -- NULL = giá đang áp dụng
+    change_reason VARCHAR(255) NULL,
+    created_by BINARY(16) NOT NULL, -- LFK: auth.users (ADMIN)
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_sprice_service FOREIGN KEY (service_id) REFERENCES services(id),
+    CONSTRAINT uq_sprice_from UNIQUE (service_id, effective_from),
+    CONSTRAINT chk_sprice_price CHECK (price >= 0),
+    CONSTRAINT chk_sprice_vat CHECK (vat_rate >= 0 AND vat_rate <= 1),
+    CONSTRAINT chk_sprice_period CHECK (effective_to IS NULL OR effective_to > effective_from)
+);
+CREATE INDEX idx_sprice_lookup ON service_prices(service_id, effective_from, effective_to);
+
+-- 18. LAB_TEST_ITEMS (DANH MỤC CHỈ SỐ XÉT NGHIỆM)
+CREATE TABLE IF NOT EXISTS lab_test_items (
+    id SMALLINT AUTO_INCREMENT PRIMARY KEY,
     code VARCHAR(50) NOT NULL UNIQUE,
     name VARCHAR(100) NOT NULL,
     unit VARCHAR(30) NOT NULL,
-    description VARCHAR(255) NULL
+    description VARCHAR(255) NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- 10. SERVICE_LAB_TEST_ITEMS (BẢNG NỐI: GÓI XÉT NGHIỆM GỒM NHỮNG CHỈ SỐ NÀO) - MỚI
+-- 19. SERVICE_LAB_TEST_ITEMS (BẢNG NỐI: GÓI XÉT NGHIỆM GỒM NHỮNG CHỈ SỐ NÀO)
 CREATE TABLE IF NOT EXISTS service_lab_test_items (
-    service_id BIGINT NOT NULL,
-    lab_test_item_id BIGINT NOT NULL,
+    service_id BINARY(16) NOT NULL,
+    lab_test_item_id SMALLINT NOT NULL,
     PRIMARY KEY (service_id, lab_test_item_id),
     CONSTRAINT fk_slti_service FOREIGN KEY (service_id) REFERENCES services(id),
     CONSTRAINT fk_slti_item FOREIGN KEY (lab_test_item_id) REFERENCES lab_test_items(id)
 );
 
--- 11. LAB_TEST_REFERENCE_RANGES (KHOẢNG THAM CHIẾU THEO LOÀI)
+-- 20. LAB_TEST_REFERENCE_RANGES (KHOẢNG THAM CHIẾU THEO LOÀI)
+-- Khóa chính tự nhiên (chỉ số, loài): mỗi cặp có đúng 1 khoảng, không cần khóa đại diện.
 CREATE TABLE IF NOT EXISTS lab_test_reference_ranges (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    lab_test_item_id BIGINT NOT NULL,
-    species_id BIGINT NOT NULL,
+    lab_test_item_id SMALLINT NOT NULL,
+    species_id SMALLINT NOT NULL,
     min_value DECIMAL(8, 2) NOT NULL,
     max_value DECIMAL(8, 2) NOT NULL,
+    PRIMARY KEY (lab_test_item_id, species_id),
     CONSTRAINT fk_ltrr_item FOREIGN KEY (lab_test_item_id) REFERENCES lab_test_items(id),
     CONSTRAINT fk_ltrr_species FOREIGN KEY (species_id) REFERENCES species(id),
-    CONSTRAINT uq_ltrr_item_species UNIQUE (lab_test_item_id, species_id),
     CONSTRAINT chk_ltrr_range CHECK (min_value <= max_value)
 );
 
@@ -416,7 +464,7 @@ CREATE INDEX idx_pvsh_user ON pet_visit_status_histories(changed_by_user_id);
 CREATE TABLE IF NOT EXISTS visit_service_details (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     visit_id BIGINT NOT NULL,
-    service_id BIGINT NOT NULL,
+    service_id BINARY(16) NOT NULL,
     quantity INT NOT NULL DEFAULT 1,
     status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
     notes TEXT NULL,
@@ -426,6 +474,7 @@ CREATE TABLE IF NOT EXISTS visit_service_details (
     CONSTRAINT chk_vsd_quantity CHECK (quantity > 0)
 );
 CREATE INDEX idx_vsd_visit ON visit_service_details(visit_id);
+CREATE INDEX idx_vsd_service ON visit_service_details(service_id);
 
 -- 15. VISIT_SERVICE_DETAIL_HISTORIES (AUDIT TRAIL TIẾN ĐỘ DỊCH VỤ)
 -- "Gọi" / "Gọi lại" không ghi lịch sử vì không đổi trạng thái hay thứ tự.
@@ -449,7 +498,7 @@ CREATE INDEX idx_vsdh_user ON visit_service_detail_histories(changed_by_user_id)
 CREATE TABLE IF NOT EXISTS lab_test_results (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     visit_service_detail_id BIGINT NOT NULL,
-    lab_test_item_id BIGINT NOT NULL,
+    lab_test_item_id SMALLINT NOT NULL,
     result_value DECIMAL(8, 2) NOT NULL,
     min_value_snapshot DECIMAL(8, 2) NOT NULL,
     max_value_snapshot DECIMAL(8, 2) NOT NULL,
@@ -554,7 +603,7 @@ SELECT si.id AS invoice_id,
        vsd.visit_id,
        s.id AS service_id,
        s.name AS service_name,
-       s.category,
+       sc.code AS category_code,
        vsd.quantity,
        si.unit_price,
        si.vat_rate,
@@ -566,22 +615,55 @@ SELECT si.id AS invoice_id,
        si.paid_at
 FROM service_invoices si
 JOIN visit_service_details vsd ON vsd.id = si.visit_service_detail_id
-JOIN services s ON s.id = vsd.service_id;
+JOIN services s ON s.id = vsd.service_id
+JOIN service_categories sc ON sc.id = s.category_id;
+
+-- VIEW giá dịch vụ đang áp dụng
+CREATE OR REPLACE VIEW v_current_service_prices AS
+SELECT s.id AS service_id, s.code, s.name, sc.code AS category_code,
+       sp.price, sp.vat_rate, sp.effective_from
+FROM services s
+JOIN service_categories sc ON sc.id = s.category_id
+JOIN service_prices sp ON sp.service_id = s.id
+WHERE sp.effective_from <= NOW() AND (sp.effective_to IS NULL OR sp.effective_to > NOW());
 
 -- Seed clinical-service
 INSERT INTO species (code, name, description) VALUES
 ('DOG', 'Chó', 'Loài chó (Canis lupus familiaris)'),
 ('CAT', 'Mèo', 'Loài mèo (Felis catus)');
 
--- requires_prepayment: TRUE = thu tiền xong mới phát phiếu xếp hàng (khám, XN, CĐHA); FALSE = làm tại phòng, thu khi chốt ca
-INSERT INTO services (code, name, category, price, vat_rate, description, is_active, requires_prepayment) VALUES
-('EXAM_GEN', 'Khám lâm sàng tổng quát', 'EXAMINATION', 100000.00, 0.00, 'Khám tổng thể, kiểm tra thân nhiệt, cân nặng và triệu chứng', TRUE, TRUE),
-('VAC_7B', 'Tiêm phòng Vaccine 7 bệnh (Chó)', 'VACCINATION', 150000.00, 0.00, 'Công tiêm phòng vaccine phòng 7 bệnh truyền nhiễm', TRUE, FALSE),
-('VAC_4B', 'Tiêm phòng Vaccine 4 bệnh (Mèo)', 'VACCINATION', 150000.00, 0.00, 'Công tiêm phòng vaccine cho mèo', TRUE, FALSE),
-('DEWORM', 'Dịch vụ tẩy giun đường ruột', 'DEWORMING', 50000.00, 0.00, 'Công kiểm tra và hỗ trợ cho uống thuốc tẩy giun', TRUE, FALSE),
-('LAB_CBC', 'Xét nghiệm tổng phân tích tế bào máu (CBC)', 'LABORATORY', 250000.00, 0.00, 'Xét nghiệm chỉ số tế bào máu tự động', TRUE, TRUE),
-('IMG_US_AB', 'Siêu âm ổ bụng tổng quát', 'IMAGING', 200000.00, 0.00, 'Siêu âm màu kiểm tra các cơ quan nội tạng ổ bụng', TRUE, TRUE),
-('IMG_XRAY', 'Chụp X-quang kỹ thuật số (1 tư thế)', 'IMAGING', 180000.00, 0.00, 'Chụp X-quang tim phổi / xương khớp', TRUE, TRUE);
+INSERT INTO service_categories (code, name, queue_type, requires_prepayment, display_order) VALUES
+('EXAMINATION', 'Khám bệnh', 'DOCTOR', TRUE, 1),
+('VACCINATION', 'Tiêm phòng', NULL, FALSE, 2),
+('DEWORMING', 'Tẩy giun', NULL, FALSE, 3),
+('EXTERNAL_PARASITE', 'Trị ký sinh trùng ngoài da', NULL, FALSE, 4),
+('INJECTION_INFUSION', 'Tiêm, truyền dịch', NULL, FALSE, 5),
+('LABORATORY', 'Xét nghiệm', 'LABORATORY', TRUE, 6),
+('IMAGING', 'Chẩn đoán hình ảnh', 'IMAGING', TRUE, 7),
+('SURGERY', 'Phẫu thuật', NULL, FALSE, 8),
+('PROCEDURE', 'Thủ thuật', NULL, FALSE, 9);
+
+INSERT INTO services (id, category_id, code, name, unit, estimated_minutes, description, preparation_notes)
+SELECT v.id, c.id, v.code, v.name, v.unit, v.minutes, v.descr, v.prep
+FROM (
+    SELECT @s_exam AS id, 'EXAMINATION' AS cat, 'EXAM_GEN' AS code, 'Khám lâm sàng tổng quát' AS name, 'Lần' AS unit, 20 AS minutes, 'Khám tổng thể, kiểm tra thân nhiệt, cân nặng và triệu chứng' AS descr, NULL AS prep
+    UNION ALL SELECT @s_vac7, 'VACCINATION', 'VAC_7B', 'Tiêm phòng Vaccine 7 bệnh (Chó)', 'Mũi', 10, 'Công tiêm phòng vaccine phòng 7 bệnh truyền nhiễm', 'Thú cưng khỏe mạnh, không sốt'
+    UNION ALL SELECT @s_vac4, 'VACCINATION', 'VAC_4B', 'Tiêm phòng Vaccine 4 bệnh (Mèo)', 'Mũi', 10, 'Công tiêm phòng vaccine cho mèo', 'Thú cưng khỏe mạnh, không sốt'
+    UNION ALL SELECT @s_deworm, 'DEWORMING', 'DEWORM', 'Dịch vụ tẩy giun đường ruột', 'Lần', 10, 'Công kiểm tra và hỗ trợ cho uống thuốc tẩy giun', NULL
+    UNION ALL SELECT @s_cbc, 'LABORATORY', 'LAB_CBC', 'Xét nghiệm tổng phân tích tế bào máu (CBC)', 'Lần', 30, 'Xét nghiệm chỉ số tế bào máu tự động', NULL
+    UNION ALL SELECT @s_us, 'IMAGING', 'IMG_US_AB', 'Siêu âm ổ bụng tổng quát', 'Lần', 20, 'Siêu âm màu kiểm tra các cơ quan nội tạng ổ bụng', 'Nhịn ăn 6 - 8 giờ trước khi siêu âm'
+    UNION ALL SELECT @s_xray, 'IMAGING', 'IMG_XRAY', 'Chụp X-quang kỹ thuật số (1 tư thế)', 'Tư thế', 15, 'Chụp X-quang tim phổi / xương khớp', NULL
+) v JOIN service_categories c ON c.code = v.cat;
+
+-- Bảng giá ban đầu (dòng đang mở effective_to = NULL)
+INSERT INTO service_prices (service_id, price, vat_rate, effective_from, change_reason, created_by) VALUES
+(@s_exam, 100000.00, 0.00, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@s_vac7, 150000.00, 0.00, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@s_vac4, 150000.00, 0.00, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@s_deworm, 50000.00, 0.00, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@s_cbc, 250000.00, 0.00, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@s_us, 200000.00, 0.00, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin),
+(@s_xray, 180000.00, 0.00, '2026-01-01 00:00:00', 'Bảng giá khởi tạo', @u_admin);
 
 INSERT INTO lab_test_items (code, name, unit, description) VALUES
 ('WBC', 'Bạch cầu (White Blood Cells)', '10^9/L', 'Số lượng bạch cầu tổng số'),
@@ -589,23 +671,24 @@ INSERT INTO lab_test_items (code, name, unit, description) VALUES
 ('HGB', 'Huyết sắc tố (Hemoglobin)', 'g/dL', 'Nồng độ huyết sắc tố'),
 ('PLT', 'Tiểu cầu (Platelets)', '10^9/L', 'Số lượng tiểu cầu');
 
--- Gói LAB_CBC (services.id = 5) gồm 4 chỉ số
-INSERT INTO service_lab_test_items (service_id, lab_test_item_id) VALUES
-(5, 1), (5, 2), (5, 3), (5, 4);
+-- Gói LAB_CBC gồm 4 chỉ số
+INSERT INTO service_lab_test_items (service_id, lab_test_item_id)
+SELECT @s_cbc, id FROM lab_test_items WHERE code IN ('WBC', 'RBC', 'HGB', 'PLT');
 
--- Chó (species_id = 1)
-INSERT INTO lab_test_reference_ranges (lab_test_item_id, species_id, min_value, max_value) VALUES
-(1, 1, 6.00, 17.00),
-(2, 1, 5.50, 8.50),
-(3, 1, 12.00, 18.00),
-(4, 1, 200.00, 500.00);
-
--- Mèo (species_id = 2)
-INSERT INTO lab_test_reference_ranges (lab_test_item_id, species_id, min_value, max_value) VALUES
-(1, 2, 5.50, 19.50),
-(2, 2, 5.00, 10.00),
-(3, 2, 8.00, 15.00),
-(4, 2, 300.00, 700.00);
+INSERT INTO lab_test_reference_ranges (lab_test_item_id, species_id, min_value, max_value)
+SELECT i.id, s.id, v.min_v, v.max_v
+FROM (
+    SELECT 'WBC' AS item, 'DOG' AS sp, 6.00 AS min_v, 17.00 AS max_v
+    UNION ALL SELECT 'RBC', 'DOG', 5.50, 8.50
+    UNION ALL SELECT 'HGB', 'DOG', 12.00, 18.00
+    UNION ALL SELECT 'PLT', 'DOG', 200.00, 500.00
+    UNION ALL SELECT 'WBC', 'CAT', 5.50, 19.50
+    UNION ALL SELECT 'RBC', 'CAT', 5.00, 10.00
+    UNION ALL SELECT 'HGB', 'CAT', 8.00, 15.00
+    UNION ALL SELECT 'PLT', 'CAT', 300.00, 700.00
+) v
+JOIN lab_test_items i ON i.code = v.item
+JOIN species s ON s.code = v.sp;
 
 
 -- 17. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 36): sự kiện được ghi cùng giao dịch với nghiệp vụ, OutboxRelay gửi sang RabbitMQ.

@@ -21,14 +21,14 @@ public interface ServiceInvoiceRepository extends JpaRepository<ServiceInvoice, 
     List<ServiceInvoice> findByVisitServiceDetailIdIn(Collection<Long> visitServiceDetailIds);
 
     /** FR-69: hóa đơn dịch vụ đã thu trong [start, end) (theo paid_at), kèm nhóm dịch vụ. */
-    @Query("select new com.vetclinic.clinical.repository.InvoiceAmountRow(s.category, d.visitId, d.quantity, i.unitPrice, i.vatRate, i.discountAmount) "
+    @Query("select new com.vetclinic.clinical.repository.InvoiceAmountRow(s.category.code, s.category.displayOrder, d.visitId, d.quantity, i.unitPrice, i.vatRate, i.discountAmount) "
             + "from ServiceInvoice i, VisitServiceDetail d join d.service s "
             + "where d.id = i.visitServiceDetailId and i.paymentStatus = com.vetclinic.clinical.constant.PaymentStatus.PAID "
             + "and i.paidAt >= :start and i.paidAt < :end")
     List<InvoiceAmountRow> findPaidBetween(@Param("start") Instant start, @Param("end") Instant end);
 
     /** Công nợ: hóa đơn PENDING của các đợt khám đã COMPLETED (khách bỏ về, EX-11). */
-    @Query("select new com.vetclinic.clinical.repository.InvoiceAmountRow(s.category, d.visitId, d.quantity, i.unitPrice, i.vatRate, i.discountAmount) "
+    @Query("select new com.vetclinic.clinical.repository.InvoiceAmountRow(s.category.code, s.category.displayOrder, d.visitId, d.quantity, i.unitPrice, i.vatRate, i.discountAmount) "
             + "from ServiceInvoice i, VisitServiceDetail d join d.service s, PetVisit v "
             + "where d.id = i.visitServiceDetailId and v.id = d.visitId "
             + "and v.status = com.vetclinic.clinical.constant.VisitStatus.COMPLETED "

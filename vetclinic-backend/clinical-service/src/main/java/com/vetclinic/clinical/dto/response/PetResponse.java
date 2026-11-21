@@ -9,7 +9,7 @@ import java.time.LocalDate;
 public record PetResponse(
         Long id,
         UUID ownerId,
-        Long speciesId,
+        Short speciesId,
         String speciesCode,
         String speciesName,
         String petCode,

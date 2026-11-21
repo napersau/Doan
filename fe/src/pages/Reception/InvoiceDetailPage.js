@@ -7,7 +7,7 @@ import { visitsApi } from '../../api/endpoints';
 import useAsync from '../../hooks/useAsync';
 import useAction from '../../hooks/useAction';
 import { formatDateTime, formatMoney } from '../../lib/format';
-import { PAYMENT_STATUS, QUEUE_TYPE, SERVICE_CATEGORY, TICKET_PRIORITY, VISIT_STATUS } from '../../lib/labels';
+import { PAYMENT_STATUS, QUEUE_TYPE, serviceCategoryLabel, TICKET_PRIORITY, VISIT_STATUS } from '../../lib/labels';
 
 /** Giảm giá trên TỪNG hóa đơn dịch vụ, tối đa bằng giá trị (đã gồm VAT) của chính hóa đơn đó (BILL_1402). */
 function DiscountDialog({ invoice, onClose, onDone }) {
@@ -68,7 +68,7 @@ export default function InvoiceDetailPage() {
           <Panel title="Hóa đơn dịch vụ" subtitle="Mỗi dịch vụ một hóa đơn. Khám, XN, CĐHA thu trước (thu xong phát phiếu); dịch vụ tại phòng thu khi chốt ca." actions={<Badge map={VISIT_STATUS} value={status} />} flush>
             <Table caption="Hóa đơn dịch vụ" rows={st.invoices} columns={[
               { title: '', render: (row) => (row.paymentStatus === 'PENDING' ? <input type="checkbox" aria-label={`Chọn ${row.serviceName}`} disabled={!collectable(row)} checked={collectable(row) && Boolean(selected[row.id])} onChange={() => setSelected({ ...selected, [row.id]: !selected[row.id] })} /> : null) },
-              { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{SERVICE_CATEGORY[row.category]} · {row.invoiceCode} · {row.requiresPrepayment ? 'thu trước' : 'thu khi chốt ca'}</small></> },
+              { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{serviceCategoryLabel(row.category)} · {row.invoiceCode} · {row.requiresPrepayment ? 'thu trước' : 'thu khi chốt ca'}</small></> },
               { title: 'SL', key: 'quantity' },
               { title: 'Đơn giá', align: 'right', render: (row) => <>{formatMoney(row.unitPrice)}<small>VAT {Math.round(Number(row.vatRate) * 100)}%</small></> },
               { title: 'Giảm giá', align: 'right', render: (row) => formatMoney(row.discountAmount) },

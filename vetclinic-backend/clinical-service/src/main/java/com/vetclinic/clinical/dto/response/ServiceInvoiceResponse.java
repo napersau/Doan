@@ -2,7 +2,6 @@ package com.vetclinic.clinical.dto.response;
 
 import java.util.UUID;
 import com.vetclinic.clinical.constant.PaymentStatus;
-import com.vetclinic.clinical.constant.ServiceCategory;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -12,9 +11,9 @@ public record ServiceInvoiceResponse(
         Long id,
         String invoiceCode,
         Long visitServiceDetailId,
-        Long serviceId,
+        UUID serviceId,
         String serviceName,
-        ServiceCategory category,
+        String category,
         int quantity,
         BigDecimal unitPrice,
         BigDecimal vatRate,

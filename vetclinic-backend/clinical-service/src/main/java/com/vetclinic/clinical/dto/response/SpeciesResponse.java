@@ -1,9 +1,10 @@
 package com.vetclinic.clinical.dto.response;
 
 public record SpeciesResponse(
-        Long id,
+        Short id,
         String code,
         String name,
-        String description
+        String description,
+        boolean active
 ) {
 }

@@ -1,11 +1,11 @@
 package com.vetclinic.clinical.dto.response;
 
 import com.vetclinic.clinical.constant.PaymentStatus;
-import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * Một dòng chỉ định dịch vụ. visit_service_details v3.0 KHÔNG chứa giá: unitPrice, vatRate là SNAPSHOT lấy từ hóa đơn dịch vụ
@@ -15,10 +15,11 @@ import java.time.Instant;
 public record ServiceDetailResponse(
         Long id,
         Long visitId,
-        Long serviceId,
+        UUID serviceId,
         String serviceCode,
         String serviceName,
-        ServiceCategory category,
+        String category,
+        String queueType,   // hàng đợi của nhóm: DOCTOR | LABORATORY | IMAGING; null = dịch vụ làm tại phòng
         BigDecimal unitPrice,
         int quantity,
         BigDecimal subtotal,

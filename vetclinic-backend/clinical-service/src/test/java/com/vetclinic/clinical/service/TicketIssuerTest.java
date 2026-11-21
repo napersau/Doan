@@ -1,7 +1,7 @@
 package com.vetclinic.clinical.service;
 
 import com.vetclinic.clinical.constant.QueueType;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -52,7 +52,7 @@ class TicketIssuerTest {
     private static final ClinicService CBC = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
     private static final ClinicService US = service(6L, "IMG_US", ServiceCategory.IMAGING, "250000.00");
     private static final ClinicService XRAY = service(7L, "IMG_XRAY", ServiceCategory.IMAGING, "180000.00");
-    private static final ClinicService VACCINE = service(8L, "VAC_5IN1", ServiceCategory.VACCINATION, "200000.00");
+    private static final ClinicService VACCINE = service(8L, "VAC_5IN1", "VACCINATION", "200000.00");
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 30);
 
     @Mock

@@ -5,7 +5,8 @@ import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.clinical.constant.LabEvaluation;
 import com.vetclinic.clinical.constant.PaymentStatus;
 import com.vetclinic.clinical.constant.QueueType;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.constant.ServiceKind;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -140,7 +141,7 @@ class ParaclinicServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository,
-                detailHistoryRepository, invoiceRepository, ticketIssuer, outboxWriter, CLOCK);
+                detailHistoryRepository, invoiceRepository, ticketIssuer, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
         VisitAssembler assembler = new VisitAssembler(detailRepository, labResultRepository, imagingResultRepository,
                 attachmentRepository, invoiceRepository, new VisitTimeline(historyRepository), ticketRepository);
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
@@ -199,7 +200,7 @@ class ParaclinicServiceImplTest {
                 history(1L, "ORDERED"), history(2L, "ORDERED"), history(3L, "ORDERED"), history(1L, "START_PROCESSING"),
                 history(1L, "SAMPLE_COLLECTED")));
 
-        List<QueueItemResponse> queue = service.queue(ServiceCategory.LABORATORY);
+        List<QueueItemResponse> queue = service.queue(QueueType.LABORATORY);
 
         assertThat(queue).extracting(QueueItemResponse::serviceDetailId).containsExactly(2L, 1L, 3L);
         assertThat(queue).extracting(QueueItemResponse::ticketNo).containsExactly(2, 1, 3);
@@ -214,7 +215,7 @@ class ParaclinicServiceImplTest {
     void queue_isEmptyWhenNoTicketHasBeenIssued_unpaidServicesNeverShowUp() {
         when(ticketRepository.findRoomQueue(QueueType.IMAGING,
                 TicketStatus.ACTIVE)).thenReturn(List.of());
-        assertThat(service.queue(ServiceCategory.IMAGING)).isEmpty();
+        assertThat(service.queue(QueueType.IMAGING)).isEmpty();
         verify(detailRepository, never()).findAllById(anyCollection());
     }
 
@@ -244,7 +245,7 @@ class ParaclinicServiceImplTest {
         when(detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
                 history(4L, "START_PROCESSING"), history(5L, "START_PROCESSING"), history(5L, "SAMPLE_COLLECTED")));
 
-        List<QueueItemResponse> queue = service.queue(ServiceCategory.IMAGING);
+        List<QueueItemResponse> queue = service.queue(QueueType.IMAGING);
 
         assertThat(queue).extracting(QueueItemResponse::labStatus).containsExactly("SAMPLING", "SAMPLE_COLLECTED", null);
         assertThat(queue).extracting(QueueItemResponse::stage).containsOnlyNulls();   // stage chỉ dành cho phòng Lab
@@ -252,12 +253,12 @@ class ParaclinicServiceImplTest {
 
     @Test
     void queue_ofANonParaclinicalCategory_isRejected() {
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.queue(ServiceCategory.VACCINATION));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.queue(QueueType.DOCTOR));
     }
 
     // ================================================================== lấy mẫu (phòng Lab)
 
-    private static final ClinicService DEWORM_SVC = service(4L, "DEWORM", ServiceCategory.DEWORMING, "50000.00");
+    private static final ClinicService DEWORM_SVC = service(4L, "DEWORM", "DEWORMING", "50000.00");
 
     @Test
     void sampleCollected_logsTheActionWithoutChangingTheStatus() {
@@ -299,7 +300,7 @@ class ParaclinicServiceImplTest {
 
     // ================================================================== dịch vụ tại phòng (FR-30)
 
-    private static final ClinicService DEWORM = service(4L, "DEWORM", ServiceCategory.DEWORMING, "50000.00");
+    private static final ClinicService DEWORM = service(4L, "DEWORM", "DEWORMING", "50000.00");
     private static final ClinicService EXAM = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
 
     @Test
@@ -372,14 +373,14 @@ class ParaclinicServiceImplTest {
         VisitServiceDetail d = stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
         LabTestItem wbc = labItem(1L, "WBC");
         LabTestItem plt = labItem(4L, "PLT");
-        when(labTestItemRepository.findAllById(List.of(1L, 4L))).thenReturn(List.of(wbc, plt));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(4L, 1L)).thenReturn(Optional.of(range(plt, "200.00", "500.00")));
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+        when(labTestItemRepository.findAllById(List.of((short) 1, (short) 4))).thenReturn(List.of(wbc, plt));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 1)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 4, (short) 1)).thenReturn(Optional.of(range(plt, "200.00", "500.00")));
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
 
         service.submitLabResults(1L, new LabResultRequest(List.of(
-                new LabResultItemRequest(1L, new BigDecimal("21.00"), null),     // Chó: 21 > 17 -> HIGH
-                new LabResultItemRequest(4L, new BigDecimal("150.00"), "Tiểu cầu thấp"))));
+                new LabResultItemRequest((short) 1, new BigDecimal("21.00"), null),     // Chó: 21 > 17 -> HIGH
+                new LabResultItemRequest((short) 4, new BigDecimal("150.00"), "Tiểu cầu thấp"))));
 
         ArgumentCaptor<List<LabTestResult>> saved = ArgumentCaptor.forClass(List.class);
         verify(labResultRepository).saveAll(saved.capture());
@@ -402,13 +403,13 @@ class ParaclinicServiceImplTest {
         stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
         LabTestItem wbc = labItem(1L, "WBC");
         LabTestItem plt = labItem(4L, "PLT");
-        when(serviceLabItemRepository.findItemIdsByServiceId(5L)).thenReturn(List.of(1L, 4L));   // gói CBC gồm WBC + PLT
-        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
-        when(labTestItemRepository.findAllById(Set.of(4L))).thenReturn(List.of(plt));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(serviceLabItemRepository.findItemIdsByServiceId(com.vetclinic.clinical.testsupport.TestData.sid(5))).thenReturn(List.of((short) 1, (short) 4));   // gói CBC gồm WBC + PLT
+        when(labTestItemRepository.findAllById(List.of((short) 1))).thenReturn(List.of(wbc));
+        when(labTestItemRepository.findAllById(Set.of((short) 4))).thenReturn(List.of(plt));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 1)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
 
         var ex = Assertions.assertThrows(AppException.class,
-                () -> service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null)))));
+                () -> service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest((short) 1, new BigDecimal("10.00"), null)))));
 
         assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT_DATA);   // SYS_1001
         assertThat(ex.getMessage()).contains("PLT");
@@ -421,14 +422,14 @@ class ParaclinicServiceImplTest {
         VisitServiceDetail d = stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
         LabTestItem wbc = labItem(1L, "WBC");
         LabTestItem plt = labItem(4L, "PLT");
-        when(serviceLabItemRepository.findItemIdsByServiceId(5L)).thenReturn(List.of(1L, 4L));
-        when(labTestItemRepository.findAllById(List.of(4L, 1L))).thenReturn(List.of(wbc, plt));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(4L, 1L)).thenReturn(Optional.of(range(plt, "200.00", "500.00")));
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+        when(serviceLabItemRepository.findItemIdsByServiceId(com.vetclinic.clinical.testsupport.TestData.sid(5))).thenReturn(List.of((short) 1, (short) 4));
+        when(labTestItemRepository.findAllById(List.of((short) 4, (short) 1))).thenReturn(List.of(wbc, plt));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 1)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 4, (short) 1)).thenReturn(Optional.of(range(plt, "200.00", "500.00")));
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
 
         service.submitLabResults(1L, new LabResultRequest(List.of(
-                new LabResultItemRequest(4L, new BigDecimal("300.00"), null), new LabResultItemRequest(1L, new BigDecimal("9.00"), null))));
+                new LabResultItemRequest((short) 4, new BigDecimal("300.00"), null), new LabResultItemRequest((short) 1, new BigDecimal("9.00"), null))));
 
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
         verify(labResultRepository).saveAll(anyList());
@@ -462,19 +463,19 @@ class ParaclinicServiceImplTest {
         when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d));
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(catVisit));
         LabTestItem wbc = labItem(1L, "WBC");
-        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
+        when(labTestItemRepository.findAllById(List.of((short) 1))).thenReturn(List.of(wbc));
         // Mèo (species 2): WBC 5.5 - 19.5, nên 18.0 là bình thường (với Chó 6 - 17 thì là cao)
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 2L)).thenReturn(Optional.of(range(wbc, "5.50", "19.50")));
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 2)).thenReturn(Optional.of(range(wbc, "5.50", "19.50")));
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
 
-        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("18.00"), null))));
+        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest((short) 1, new BigDecimal("18.00"), null))));
 
         ArgumentCaptor<List<LabTestResult>> saved = ArgumentCaptor.forClass(List.class);
         verify(labResultRepository).saveAll(saved.capture());
         LabTestResult catResult = saved.getValue().get(0);
         assertThat(LabEvaluation.of(catResult.getResultValue(), catResult.getMinValueSnapshot(), catResult.getMaxValueSnapshot()))
                 .isEqualTo(LabEvaluation.NORMAL);
-        verify(rangeRepository, never()).findByLabTestItemIdAndSpeciesId(1L, 1L);
+        verify(rangeRepository, never()).findByLabTestItemIdAndSpeciesId((short) 1, (short) 1);
     }
 
     @Test
@@ -482,12 +483,12 @@ class ParaclinicServiceImplTest {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
         LabTestItem wbc = labItem(1L, "WBC");
-        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(labTestItemRepository.findAllById(List.of((short) 1))).thenReturn(List.of(wbc));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 1)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
         // Không còn chỉ định Lab / CĐHA nào dở dang
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
 
-        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
+        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest((short) 1, new BigDecimal("10.00"), null))));
 
         ArgumentCaptor<PetVisitStatusHistory> history =
                 ArgumentCaptor.forClass(PetVisitStatusHistory.class);
@@ -514,11 +515,11 @@ class ParaclinicServiceImplTest {
         when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(d));
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
         LabTestItem wbc = labItem(1L, "WBC");
-        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
+        when(labTestItemRepository.findAllById(List.of((short) 1))).thenReturn(List.of(wbc));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 1)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
 
-        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
+        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest((short) 1, new BigDecimal("10.00"), null))));
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.RESULTS_READY);
         verify(ticketIssuer).refreshRoomTicketOf(1L);       // phiếu phòng Lab -> DONE
@@ -530,11 +531,11 @@ class ParaclinicServiceImplTest {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
         LabTestItem wbc = labItem(1L, "WBC");
-        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(wbc));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+        when(labTestItemRepository.findAllById(List.of((short) 1))).thenReturn(List.of(wbc));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 1)).thenReturn(Optional.of(range(wbc, "6.00", "17.00")));
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
 
-        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null))));
+        service.submitLabResults(1L, new LabResultRequest(List.of(new LabResultItemRequest((short) 1, new BigDecimal("10.00"), null))));
 
         verify(historyRepository, never()).save(any());
         verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));
@@ -543,7 +544,7 @@ class ParaclinicServiceImplTest {
     @Test
     void submitLab_rejectsInvalidSubmissions() {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
-        LabResultRequest request = new LabResultRequest(List.of(new LabResultItemRequest(1L, new BigDecimal("10.00"), null)));
+        LabResultRequest request = new LabResultRequest(List.of(new LabResultItemRequest((short) 1, new BigDecimal("10.00"), null)));
 
         // Chưa bấm "Bắt đầu thực hiện"
         stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
@@ -552,17 +553,17 @@ class ParaclinicServiceImplTest {
         // Nhập hai lần cùng một chỉ số
         stubLocks(detail(2L, 101L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
         assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.submitLabResults(2L, new LabResultRequest(List.of(
-                new LabResultItemRequest(1L, new BigDecimal("1.00"), null), new LabResultItemRequest(1L, new BigDecimal("2.00"), null)))));
+                new LabResultItemRequest((short) 1, new BigDecimal("1.00"), null), new LabResultItemRequest((short) 1, new BigDecimal("2.00"), null)))));
 
         // Chỉ số không tồn tại
         stubLocks(detail(3L, 102L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
-        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of());
+        when(labTestItemRepository.findAllById(List.of((short) 1))).thenReturn(List.of());
         assertError(ErrorCode.LAB_ITEM_NOT_FOUND, () -> service.submitLabResults(3L, request));
 
         // Chưa cấu hình khoảng tham chiếu cho loài này
         stubLocks(detail(4L, 103L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
-        when(labTestItemRepository.findAllById(List.of(1L))).thenReturn(List.of(labItem(1L, "WBC")));
-        when(rangeRepository.findByLabTestItemIdAndSpeciesId(1L, 1L)).thenReturn(Optional.empty());
+        when(labTestItemRepository.findAllById(List.of((short) 1))).thenReturn(List.of(labItem(1L, "WBC")));
+        when(rangeRepository.findByLabTestItemIdAndSpeciesId((short) 1, (short) 1)).thenReturn(Optional.empty());
         assertError(ErrorCode.LAB_REFERENCE_NOT_FOUND, () -> service.submitLabResults(4L, request));
 
         // Chỉ định siêu âm không nhập được như xét nghiệm; và KTV CĐHA không được nhập kết quả Lab
@@ -587,7 +588,7 @@ class ParaclinicServiceImplTest {
     void cancel_theLastOpenService_movesTheVisitToResultsReady() {
         loginAs(IMAGING_TECH, RoleCode.IMAGING_TECHNICIAN);
         VisitServiceDetail d = stubLocks(detail(1L, 100L, ULTRASOUND, ServiceDetailStatus.PENDING), VisitStatus.WAITING_RESULTS);
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
 
         ServiceDetailResponse response = service.cancel(1L, "  Thú cưng quá hung dữ  ", null);
 
@@ -601,7 +602,7 @@ class ParaclinicServiceImplTest {
     void cancel_whileOtherServicesAreOpen_keepsTheVisitWaiting() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);   // Bác sĩ đổi hướng xử lý
         stubLocks(detail(1L, 100L, ULTRASOUND, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
 
         service.cancel(1L, "Đổi phác đồ", null);
 
@@ -625,7 +626,7 @@ class ParaclinicServiceImplTest {
         ServiceInvoice invoice = ServiceInvoice.builder().id(50L).visitServiceDetailId(1L)
                 .unitPrice(new BigDecimal("250000.00")).vatRate(BigDecimal.ZERO).build();
         when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.of(invoice));
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(1L);
 
         service.cancel(1L, "Khách xin hủy", null);
 
@@ -705,7 +706,7 @@ class ParaclinicServiceImplTest {
             r.setId(700L);
             return r;
         });
-        when(detailRepository.countByVisitAndCategoriesAndStatuses(100L, ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
+        when(detailRepository.countByVisitAndKindAndStatuses(100L, ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN)).thenReturn(0L);
 
         ServiceDetailResponse response = service.submitImagingResult(1L, "Gan to nhẹ", "Nghi viêm gan",
                 List.of(new MockMultipartFile("files", "sieu-am.jpg", "image/jpeg", new byte[]{1})));
@@ -753,12 +754,12 @@ class ParaclinicServiceImplTest {
     void submitLab_rejectsAnItemThatDoesNotBelongToTheOrderedService() {
         loginAs(LAB_TECH, RoleCode.LAB_TECHNICIAN);
         stubLocks(detail(1L, 100L, CBC, ServiceDetailStatus.IN_PROGRESS), VisitStatus.WAITING_RESULTS);
-        when(serviceLabItemRepository.findItemIdsByServiceId(5L)).thenReturn(List.of(1L, 4L));   // CBC chỉ gồm WBC, PLT
+        when(serviceLabItemRepository.findItemIdsByServiceId(com.vetclinic.clinical.testsupport.TestData.sid(5))).thenReturn(List.of((short) 1, (short) 4));   // CBC chỉ gồm WBC, PLT
         LabTestItem glucose = labItem(9L, "GLU");
-        when(labTestItemRepository.findAllById(List.of(9L))).thenReturn(List.of(glucose));
+        when(labTestItemRepository.findAllById(List.of((short) 9))).thenReturn(List.of(glucose));
 
         assertError(ErrorCode.LAB_ITEM_NOT_IN_SERVICE, () -> service.submitLabResults(1L,
-                new LabResultRequest(List.of(new LabResultItemRequest(9L, new BigDecimal("5.00"), null)))));
+                new LabResultRequest(List.of(new LabResultItemRequest((short) 9, new BigDecimal("5.00"), null)))));
         verify(labResultRepository, never()).saveAll(anyList());
     }
 
@@ -770,12 +771,12 @@ class ParaclinicServiceImplTest {
         when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR)));
         LabTestItem wbc = labItem(1L, "WBC");
         LabTestItem glucose = labItem(9L, "GLU");
-        when(serviceLabItemRepository.findItemIdsByServiceId(5L)).thenReturn(List.of(1L));
+        when(serviceLabItemRepository.findItemIdsByServiceId(com.vetclinic.clinical.testsupport.TestData.sid(5))).thenReturn(List.of((short) 1));
         when(labTestItemRepository.findAllByOrderByCodeAsc()).thenReturn(List.of(glucose, wbc));
         LabTestReferenceRange dogRange = range(wbc, "6.00", "17.00");
         LabTestReferenceRange catRange = LabTestReferenceRange.builder().labTestItem(wbc).species(cat())
                 .minValue(new BigDecimal("5.50")).maxValue(new BigDecimal("19.50")).build();
-        when(rangeRepository.findByLabTestItemIdIn(List.of(1L))).thenReturn(List.of(dogRange, catRange));
+        when(rangeRepository.findByLabTestItemIdIn(List.of((short) 1))).thenReturn(List.of(dogRange, catRange));
 
         var form = service.labForm(1L);
 
@@ -806,7 +807,7 @@ class ParaclinicServiceImplTest {
     }
 
     private static LabTestItem labItem(long id, String code) {
-        return LabTestItem.builder().id(id).code(code).name(code).unit("10^9/L").build();
+        return LabTestItem.builder().id((short) id).code(code).name(code).unit("10^9/L").build();
     }
 
     private static LabTestReferenceRange range(LabTestItem item, String min, String max) {

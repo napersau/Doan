@@ -4,7 +4,7 @@ import { AsyncView, Button, Field, Input, PageHead, Panel, Select, Stats, Table,
 import { appointmentsApi, billingApi, reportsApi } from '../../api/endpoints';
 import useAsync from '../../hooks/useAsync';
 import { formatDate, formatMoney, formatNumber, todayIso } from '../../lib/format';
-import { APPOINTMENT_STATUS, BOOKING_CHANNEL, PAYMENT_STATUS, SERVICE_CATEGORY, VISIT_STATUS } from '../../lib/labels';
+import { APPOINTMENT_STATUS, BOOKING_CHANNEL, PAYMENT_STATUS, serviceCategoryLabel, VISIT_STATUS } from '../../lib/labels';
 
 const percent = (value) => `${formatNumber((value || 0) * 100, 1)}%`;
 const MAX_DAYS = 366;
@@ -36,7 +36,7 @@ function Revenue({ range, groupBy }) {
       <div className="ui-cols">
         <Panel title="Doanh thu dịch vụ theo nhóm" subtitle="Hóa đơn dịch vụ đã thu trong kỳ (giờ Việt Nam)." flush>
           <Table caption="Doanh thu dịch vụ theo nhóm" rowKey="category" empty="Chưa có doanh thu dịch vụ trong kỳ." rows={service.byCategory} columns={[
-            { title: 'Nhóm dịch vụ', render: (row) => SERVICE_CATEGORY[row.category] || row.category }, { title: 'HĐ', key: 'invoiceCount' },
+            { title: 'Nhóm dịch vụ', render: (row) => serviceCategoryLabel(row.category) }, { title: 'HĐ', key: 'invoiceCount' },
             { title: 'Trước VAT', align: 'right', render: (row) => formatMoney(row.amountBeforeVat) }, { title: 'VAT', align: 'right', render: (row) => formatMoney(row.vatAmount) },
             { title: 'Giảm giá', align: 'right', render: (row) => formatMoney(row.discountAmount) }, { title: 'Thực thu', align: 'right', render: (row) => <strong>{formatMoney(row.payableAmount)}</strong> }]} />
         </Panel>

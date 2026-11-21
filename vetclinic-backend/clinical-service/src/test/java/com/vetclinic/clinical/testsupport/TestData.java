@@ -2,7 +2,6 @@ package com.vetclinic.clinical.testsupport;
 
 import com.vetclinic.clinical.constant.PetGender;
 import com.vetclinic.clinical.constant.QueueType;
-import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -10,8 +9,11 @@ import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.entity.Pet;
 import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.entity.QueueTicket;
+import com.vetclinic.clinical.entity.ServiceCategory;
+import com.vetclinic.clinical.entity.ServicePrice;
 import com.vetclinic.clinical.entity.Species;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
+import com.vetclinic.clinical.service.ServicePriceBook;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
@@ -41,6 +43,7 @@ public final class TestData {
     public static final UUID OTHER_DOCTOR = uid(22);
     public static final UUID LAB_TECH = uid(31);
     public static final UUID IMAGING_TECH = uid(41);
+    public static final UUID ADMIN_ID_FOR_PRICES = uid(1);
 
     private TestData() {
     }
@@ -51,11 +54,11 @@ public final class TestData {
     }
 
     public static Species dog() {
-        return Species.builder().id(1L).code("DOG").name("Chó").build();
+        return Species.builder().id((short) 1).code("DOG").name("Chó").build();
     }
 
     public static Species cat() {
-        return Species.builder().id(2L).code("CAT").name("Mèo").build();
+        return Species.builder().id((short) 2).code("CAT").name("Mèo").build();
     }
 
     public static Pet pet(long id, Species species) {
@@ -70,11 +73,39 @@ public final class TestData {
                 .build();
     }
 
-    public static ClinicService service(long id, String code, ServiceCategory category, String price) {
-        return ClinicService.builder().id(id).code(code).name("Dịch vụ " + code).category(category)
-                .price(new BigDecimal(price)).active(true)
-                // seed: khám, XN, CĐHA thu tiền xong mới phát phiếu; dịch vụ tại phòng thu khi chốt ca
-                .requiresPrepayment(category == ServiceCategory.EXAMINATION || category.isParaclinical()).build();
+    /** UUID cố định của dịch vụ thử (dạng seed 019a9442-d801-7000-8000-0000000000NN). */
+    public static UUID sid(long n) {
+        return UUID.fromString(String.format("019a9442-d801-7000-8000-%012d", n));
+    }
+
+    /** Đơn giá của từng dịch vụ thử, để {@link #priceBook()} trả đúng giá như {@code service_prices}. */
+    private static final java.util.Map<UUID, BigDecimal> PRICES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Nhóm dịch vụ giống seed của docs: queue_type và chính sách thu trước do nhóm quyết định. */
+    public static ServiceCategory category(String code) {
+        return switch (code) {
+            case "EXAMINATION" -> ServiceCategory.builder().id((short) 1).code(code).name("Khám bệnh").queueType("DOCTOR").requiresPrepayment(true).build();
+            case "LABORATORY" -> ServiceCategory.builder().id((short) 6).code(code).name("Xét nghiệm").queueType("LABORATORY").requiresPrepayment(true).build();
+            case "IMAGING" -> ServiceCategory.builder().id((short) 7).code(code).name("Chẩn đoán hình ảnh").queueType("IMAGING").requiresPrepayment(true).build();
+            default -> ServiceCategory.builder().id((short) 2).code(code).name(code).requiresPrepayment(false).build();   // tại phòng: queue_type NULL
+        };
+    }
+
+    public static ClinicService service(long id, String code, String categoryCode, String price) {
+        ClinicService service = ClinicService.builder().id(sid(id)).code(code).name("Dịch vụ " + code)
+                .category(category(categoryCode)).active(true).build();
+        PRICES.put(service.getId(), new BigDecimal(price));
+        return service;
+    }
+
+    /** ServicePriceBook giả: giá hiện hành = giá đã khai báo khi tạo dịch vụ thử, VAT 0. */
+    public static ServicePriceBook priceBook() {
+        ServicePriceBook book = org.mockito.Mockito.mock(ServicePriceBook.class);
+        org.mockito.Mockito.lenient().when(book.current(org.mockito.ArgumentMatchers.any(UUID.class))).thenAnswer(inv -> {
+            UUID serviceId = inv.getArgument(0);
+            return ServicePrice.builder().price(PRICES.get(serviceId)).vatRate(new BigDecimal("0.00")).build();
+        });
+        return book;
     }
 
     public static VisitServiceDetail detail(long id, long visitId, ClinicService service, ServiceDetailStatus status) {

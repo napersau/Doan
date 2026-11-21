@@ -2,7 +2,7 @@ package com.vetclinic.clinical.service;
 
 import com.vetclinic.clinical.constant.LabEvaluation;
 import com.vetclinic.clinical.constant.PaymentStatus;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.entity.ClinicService;
@@ -103,7 +103,7 @@ class VisitAssemblerTest {
 
     @Test
     void detail_serviceLinesGetPriceAndVatFromTheirInvoice_notFromTheLine() {
-        ClinicService vaccine = service(2L, "VAC_7B", ServiceCategory.VACCINATION, "999999.00");   // giá hiện hành đã khác
+        ClinicService vaccine = service(2L, "VAC_7B", "VACCINATION", "999999.00");   // giá hiện hành đã khác
         VisitServiceDetail line = detail(1L, 100L, vaccine, ServiceDetailStatus.COMPLETED);
         line.setQuantity(2);
         PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
@@ -141,7 +141,7 @@ class VisitAssemblerTest {
     void detail_labEvaluationIsComputedFromTheValueAndTheSnapshotRange() {
         ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
         VisitServiceDetail line = detail(1L, 100L, cbc, ServiceDetailStatus.COMPLETED);
-        LabTestItem wbc = LabTestItem.builder().id(1L).code("WBC").name("WBC").unit("10^9/L").build();
+        LabTestItem wbc = LabTestItem.builder().id((short) 1).code("WBC").name("WBC").unit("10^9/L").build();
         when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(line));
         when(invoiceRepository.findByVisitServiceDetailIdIn(anyCollection())).thenReturn(List.of());
         when(labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(

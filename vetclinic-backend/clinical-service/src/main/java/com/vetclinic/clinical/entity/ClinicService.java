@@ -1,6 +1,12 @@
 package com.vetclinic.clinical.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -8,9 +14,15 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-import com.vetclinic.clinical.constant.ServiceCategory;
-import java.math.BigDecimal;
+import org.hibernate.annotations.UuidGenerator;
 
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Thông tin dịch vụ, KHÔNG chứa giá (giá ở {@link ServicePrice}, lấy qua {@code ServicePriceBook}). Không xóa cứng: ngừng cung cấp = {@code active = false}.
+ * Chính sách thu trước và loại hàng đợi đọc từ {@link ServiceCategory}.
+ */
 @Entity
 @Table(name = "services")
 @Getter
@@ -20,8 +32,13 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 public class ClinicService {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @UuidGenerator(style = UuidGenerator.Style.VERSION_7)
+    private UUID id;
+
+    // EAGER: bảng nhóm chỉ vài dòng và gần như mọi chỗ dùng dịch vụ đều cần nhóm (open-in-view tắt nên không lazy-load được)
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @JoinColumn(name = "category_id", nullable = false)
+    private ServiceCategory category;
 
     @Column(name = "code", nullable = false, unique = true, length = 50)
     private String code;
@@ -29,28 +46,34 @@ public class ClinicService {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "category", nullable = false)
-    private ServiceCategory category;
-
-    @Column(name = "price", nullable = false, precision = 12, scale = 2)
-    private BigDecimal price;
-
-    /** Thuế suất VAT hiện hành (0.05 = 5%, mặc định 0). Snapshot sang service_invoices khi chỉ định (BR-25). */
-    @Column(name = "vat_rate", nullable = false, precision = 4, scale = 2)
-    @Builder.Default
-    private BigDecimal vatRate = BigDecimal.ZERO.setScale(2);
-
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
+
+    /** Đơn vị tính: lần, mũi, tư thế... */
+    @Column(name = "unit", nullable = false, length = 30)
+    @Builder.Default
+    private String unit = "Lần";
+
+    @Column(name = "estimated_minutes")
+    private Short estimatedMinutes;
+
+    /** Dặn dò chuẩn bị, ví dụ nhịn ăn 8 giờ trước khi siêu âm. */
+    @Column(name = "preparation_notes")
+    private String preparationNotes;
 
     @Column(name = "is_active", nullable = false)
     private boolean active;
 
-    /**
-     * Chính sách thu trước (BR-35, 17/11/2026): TRUE = thu tiền xong mới phát phiếu xếp hàng (khám, Xét nghiệm, CĐHA);
-     * FALSE = dịch vụ làm tại phòng, thu khi chốt ca.
-     */
-    @Column(name = "requires_prepayment", nullable = false)
-    private boolean requiresPrepayment;
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /** Chính sách thu trước của dịch vụ = của nhóm (BR-35). */
+    public boolean isRequiresPrepayment() {
+        return category.isRequiresPrepayment();
+    }
 }

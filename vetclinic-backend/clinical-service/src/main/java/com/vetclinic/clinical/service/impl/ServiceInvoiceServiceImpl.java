@@ -2,7 +2,7 @@ package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.constant.PaymentStatus;
 import com.vetclinic.clinical.constant.QueueType;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -112,7 +112,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
 
     private static ServiceInvoiceResponse toResponse(ServiceInvoice i, VisitServiceDetail d) {
         return new ServiceInvoiceResponse(i.getId(), i.getInvoiceCode(), d.getId(), d.getService().getId(), d.getService().getName(),
-                d.getService().getCategory(), d.getQuantity(), i.getUnitPrice(), i.getVatRate(), i.getDiscountAmount(),
+                d.getService().getCategory().getCode(), d.getQuantity(), i.getUnitPrice(), i.getVatRate(), i.getDiscountAmount(),
                 InvoiceAmounts.beforeVat(d.getQuantity(), i.getUnitPrice()),
                 InvoiceAmounts.vat(d.getQuantity(), i.getUnitPrice(), i.getVatRate()),
                 InvoiceAmounts.payable(d.getQuantity(), i.getUnitPrice(), i.getVatRate(), i.getDiscountAmount()),
@@ -272,7 +272,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
                 .filter(d -> d.getStatus() == ServiceDetailStatus.PENDING && invoices.containsKey(d.getId())
                         && invoices.get(d.getId()).getPaymentStatus() == PaymentStatus.PENDING)
                 .filter(d -> section == CashierSection.EXAM_FEE
-                        ? d.getService().getCategory() == ServiceCategory.EXAMINATION && !withDoctorTicket.contains(d.getVisitId())
+                        ? d.getService().getCategory().is(ServiceCategory.EXAMINATION) && !withDoctorTicket.contains(d.getVisitId())
                         : d.getService().getCategory().isParaclinical())
                 .map(VisitServiceDetail::getVisitId)
                 .collect(Collectors.toSet());

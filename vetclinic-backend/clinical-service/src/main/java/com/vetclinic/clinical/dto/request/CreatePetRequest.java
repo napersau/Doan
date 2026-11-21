@@ -9,7 +9,7 @@ import java.time.LocalDate;
 /** Chủ nuôi tự thêm: ownerId bị bỏ qua. Lễ tân thêm hộ: bắt buộc ownerId. */
 public record CreatePetRequest(
         UUID ownerId,
-        @NotNull(message = "Loài không được để trống") Long speciesId,
+        @NotNull(message = "Loài không được để trống") Short speciesId,
         @NotBlank(message = "Tên thú cưng không được để trống") @Size(max = 100, message = "Tên tối đa 100 ký tự") String name,
         @Size(max = 100, message = "Giống tối đa 100 ký tự") String breed,
         PetGender gender,

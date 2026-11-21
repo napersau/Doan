@@ -168,19 +168,31 @@ async function main() {
   check('trùng mã loài → 409', (await call('POST', '/api/v1/species', { token: T.admin, body: { code: `SP${RUN}`, name: 'Trùng' } })).status === 409);
   check('sửa loài', (await call('PUT', `/api/v1/species/${sp.data.id}`, { token: T.admin, body: { code: `SP${RUN}`, name: `Loài sửa ${RUN}` } })).data?.name === `Loài sửa ${RUN}`);
   check('lễ tân không thêm loài (403)', (await call('POST', '/api/v1/species', { token: T.rec, body: { code: `X${RUN}`, name: 'x' } })).status === 403);
-  const svc = await call('POST', `${CLIN}/services`, { token: T.admin, body: { code: `SV${RUN}`, name: `Thủ thuật ${RUN}`, category: 'PROCEDURE', price: 123000, vatRate: 0.08, description: 'e2e' } });
-  check('Admin thêm dịch vụ có VAT 8%', [200, 201].includes(svc.status) && Number(svc.data.vatRate) === 0.08, brief(svc));
-  check('đổi giá dịch vụ', Number((await call('PUT', `${CLIN}/services/${svc.data.id}`, { token: T.admin, body: { price: 150000 } })).data?.price) === 150000);
-  check('lễ tân không sửa dịch vụ (403)', (await call('PUT', `${CLIN}/services/${svc.data.id}`, { token: T.rec, body: { price: 1 } })).status === 403);
+  const CAT = '/api/v1/catalog';
+  const svc = await call('POST', `${CAT}/services`, { token: T.admin, body: { code: `SV${RUN}`, name: `Thủ thuật ${RUN}`, categoryCode: 'PROCEDURE', price: 123000, vatRate: 0.08, description: 'e2e' } });
+  check('Admin thêm dịch vụ có giá + VAT 8% (service_prices)', svc.status === 201 && Number(svc.data.vatRate) === 0.08 && Number(svc.data.price) === 123000 && svc.data.category === 'PROCEDURE' && svc.data.queueType === null, brief(svc));
+  await sleep(1100);   // mốc hiệu lực tính theo giây: giá mới phải sau giây bắt đầu của giá đang mở
+  check('đổi giá dịch vụ (đóng dòng cũ + thêm dòng mới)', (await call('POST', `${CAT}/services/${svc.data.id}/prices`, { token: T.admin, body: { price: 150000, vatRate: 0.08, reason: 'e2e' } })).status === 201 && Number((await call('GET', `${CAT}/services/${svc.data.id}`, { token: T.admin })).data?.price) === 150000 && (await call('GET', `${CAT}/services/${svc.data.id}/prices`, { token: T.admin })).data?.length === 2);
+  check('giá hiệu lực trước dòng đang mở → 400 BILL_1410', (await call('POST', `${CAT}/services/${svc.data.id}/prices`, { token: T.admin, body: { price: 1, vatRate: 0, effectiveFrom: '2020-01-01T00:00:00Z' } })).code === 'BILL_1410');
+  check('lễ tân không sửa dịch vụ / đổi giá (403)', (await call('PUT', `${CAT}/services/${svc.data.id}`, { token: T.rec, body: { name: 'x' } })).status === 403 && (await call('POST', `${CAT}/services/${svc.data.id}/prices`, { token: T.rec, body: { price: 1, vatRate: 0 } })).status === 403);
+  const catCode = `NH${RUN}`;
+  const newCat = await call('POST', `${CAT}/service-categories`, { token: T.admin, body: { code: catCode, name: `Nhóm e2e ${RUN}`, queueType: '', requiresPrepayment: false } });
+  check('Admin thêm nhóm dịch vụ làm tại phòng; sửa chính sách thu trước', newCat.status === 201 && newCat.data.queueType === null && (await call('PUT', `${CAT}/service-categories/${newCat.data.id}`, { token: T.admin, body: { code: catCode, name: `Nhóm e2e ${RUN}`, requiresPrepayment: true } })).data?.requiresPrepayment === true);
   // chỉ số xét nghiệm + gói riêng
   const mkItem = (code, name) => call('POST', `${CLIN}/lab-test-items`, { token: T.admin, body: { code: `${code}${RUN}`, name, unit: 'u', ranges: [{ speciesId: ID.species.DOG, minValue: 10, maxValue: 20 }] } });
   const itemLow = await mkItem('LOW', 'Chỉ số thấp'); const itemNorm = await mkItem('NRM', 'Chỉ số bình thường'); const itemHigh = await mkItem('HGH', 'Chỉ số cao');
   check('thêm 3 chỉ số xét nghiệm kèm khoảng tham chiếu loài Chó', [itemLow, itemNorm, itemHigh].every((r) => [200, 201].includes(r.status)), brief(itemLow));
   check('sửa chỉ số + lưu lại khoảng tham chiếu', (await call('PUT', `${CLIN}/lab-test-items/${itemLow.data.id}`, { token: T.admin, body: { name: 'Chỉ số thấp (sửa)', unit: 'u' } })).status === 200 && (await call('PUT', `${CLIN}/lab-test-items/${itemLow.data.id}/ranges/${ID.species.DOG}`, { token: T.admin, body: { minValue: 10, maxValue: 20 } })).status === 200);
-  const labSvc = await call('POST', `${CLIN}/services`, { token: T.admin, body: { code: `LB${RUN}`, name: `Gói XN e2e ${RUN}`, category: 'LABORATORY', price: 90000, vatRate: 0 } });
+  const labSvc = await call('POST', `${CAT}/services`, { token: T.admin, body: { code: `LB${RUN}`, name: `Gói XN e2e ${RUN}`, categoryCode: 'LABORATORY', price: 90000, vatRate: 0 } });
   check('gói xét nghiệm gồm 3 chỉ số', (await call('PUT', `${CLIN}/services/${labSvc.data.id}/lab-test-items`, { token: T.admin, body: { labTestItemIds: [itemLow.data.id, itemNorm.data.id, itemHigh.data.id] } })).status === 200 && (await call('GET', `${CLIN}/services/${labSvc.data.id}/lab-test-items`, { token: T.admin })).data?.length === 3);
   const lv = await inProgress('XN', DOC4);
   check('chỉ định gói xét nghiệm mới (CLS) thành công', (await call('POST', `${CLIN}/pet-visits/${lv.v}/paraclinical-orders`, { token: lv.token, body: { serviceIds: [labSvc.data.id] } })).data?.status === 'WAITING_RESULTS');
+  // EX-20 (phần dịch vụ): đổi giá SAU khi chỉ định → hóa đơn đã lập giữ giá cũ, chỉ định mới lấy giá mới
+  const labInvoice = async () => ((await call('GET', `${CLIN}/pet-visits/${lv.v}/service-invoices`, { token: T.rec })).data.invoices || []).find((i) => i.category === 'LABORATORY');
+  check('hóa đơn gói XN chụp giá lúc chỉ định (90.000)', Number((await labInvoice())?.unitPrice) === 90000);
+  await sleep(1100);
+  await call('POST', `${CAT}/services/${labSvc.data.id}/prices`, { token: T.admin, body: { price: 95000, vatRate: 0, reason: 'e2e EX-20' } });
+  check('EX-20: đổi giá sau khi chỉ định → hóa đơn đã lập vẫn 90.000, danh mục báo 95.000', Number((await labInvoice())?.unitPrice) === 90000 && Number((await call('GET', `${CAT}/services/${labSvc.data.id}`, { token: T.admin })).data?.price) === 95000);
   await payCls(lv.v);
   const labDetail = ((await startRoom('lab', lv.v))[0] || {}).serviceDetailId;
   const form = (await call('GET', `${CLIN}/service-details/${labDetail}/lab-form`, { token: T.lab })).data;
@@ -194,8 +206,8 @@ async function main() {
   check('đánh giá tính khi hiển thị: 5 → LOW, 15 → NORMAL, 25 → HIGH', evalOf(itemLow.data.id) === 'LOW' && evalOf(itemNorm.data.id) === 'NORMAL' && evalOf(itemHigh.data.id) === 'HIGH', JSON.stringify(results).slice(0, 300));
   check('khoảng tham chiếu được chụp (snapshot) vào kết quả', results.every((r) => Number(r.minValue) === 10 && Number(r.maxValue) === 20));
   await call('POST', `${CLIN}/pet-visits/${lv.v}/abandon`, { token: T.rec });
-  check('dịch vụ tắt hoạt động không còn trong danh mục thường', (await call('PUT', `${CLIN}/services/${svc.data.id}`, { token: T.admin, body: { active: false } })).status === 200 && !(await call('GET', `${CLIN}/services`, { token: T.doc4 })).data.some((s) => s.id === svc.data.id));
-  check('dịch vụ tắt vẫn xem được với includeInactive', (await call('GET', `${CLIN}/services?includeInactive=true`, { token: T.admin })).data.some((s) => s.id === svc.data.id));
+  check('dịch vụ tắt hoạt động không còn trong danh mục thường', (await call('PUT', `${CAT}/services/${svc.data.id}`, { token: T.admin, body: { active: false } })).status === 200 && !(await call('GET', `${CAT}/services`, { token: T.doc4 })).data.some((s) => s.id === svc.data.id));
+  check('dịch vụ tắt vẫn xem được với includeInactive', (await call('GET', `${CAT}/services?includeInactive=true`, { token: T.admin })).data.some((s) => s.id === svc.data.id));
 
   // =====================================================================================================================
   step('C. Thú cưng và quyền xem hồ sơ');

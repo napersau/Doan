@@ -1,7 +1,7 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AuthClient;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.OperationsReportResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
@@ -59,8 +59,11 @@ class ReportServiceImplTest {
         service = new ReportServiceImpl(visitRepository, detailRepository, invoiceRepository, authClient, CLOCK, tm);
     }
 
-    private static InvoiceAmountRow row(ServiceCategory c, long visitId, int qty, String unit, String vat, String discount) {
-        return new InvoiceAmountRow(c, visitId, qty, new BigDecimal(unit), new BigDecimal(vat), new BigDecimal(discount));
+    private static final java.util.Map<String, Short> ORDER = java.util.Map.of("EXAMINATION", (short) 1, "VACCINATION", (short) 2,
+            "LABORATORY", (short) 6, "IMAGING", (short) 7);
+
+    private static InvoiceAmountRow row(String c, long visitId, int qty, String unit, String vat, String discount) {
+        return new InvoiceAmountRow(c, ORDER.get(c), visitId, qty, new BigDecimal(unit), new BigDecimal(vat), new BigDecimal(discount));
     }
 
     @Test
@@ -70,7 +73,7 @@ class ReportServiceImplTest {
                 row(ServiceCategory.LABORATORY, 1L, 1, "250000.00", "0.00", "0.00"),
                 // 200.000 x 1,05 - giảm 10.000 = 200.000 (VAT 10.000)
                 row(ServiceCategory.LABORATORY, 2L, 1, "200000.00", "0.05", "10000.00"),
-                row(ServiceCategory.VACCINATION, 3L, 2, "150000.00", "0.00", "0.00")));
+                row("VACCINATION", 3L, 2, "150000.00", "0.00", "0.00")));
         when(invoiceRepository.findDebt()).thenReturn(List.of(
                 row(ServiceCategory.LABORATORY, 7L, 1, "250000.00", "0.00", "0.00"),
                 row(ServiceCategory.IMAGING, 7L, 1, "180000.00", "0.00", "30000.00"),
@@ -81,14 +84,14 @@ class ReportServiceImplTest {
         assertThat(report.paidInvoiceCount()).isEqualTo(4);
         assertThat(report.totalPaid()).isEqualByComparingTo("850000.00");   // 100.000 + 250.000 + 200.000 + 300.000
         RevenueReportResponse.CategoryRevenue lab = report.byCategory().stream()
-                .filter(c -> c.category() == ServiceCategory.LABORATORY).findFirst().orElseThrow();
+                .filter(c -> ServiceCategory.LABORATORY.equals(c.category())).findFirst().orElseThrow();
         assertThat(lab.invoiceCount()).isEqualTo(2);
         assertThat(lab.amountBeforeVat()).isEqualByComparingTo("450000.00");
         assertThat(lab.vatAmount()).isEqualByComparingTo("10000.00");
         assertThat(lab.discountAmount()).isEqualByComparingTo("10000.00");
         assertThat(lab.payableAmount()).isEqualByComparingTo("450000.00");
         assertThat(report.byCategory()).extracting(RevenueReportResponse.CategoryRevenue::category)
-                .containsExactly(ServiceCategory.EXAMINATION, ServiceCategory.VACCINATION, ServiceCategory.LABORATORY);   // chỉ nhóm có doanh thu, theo thứ tự khai báo enum
+                .containsExactly(ServiceCategory.EXAMINATION, "VACCINATION", ServiceCategory.LABORATORY);   // chỉ nhóm có doanh thu, theo thứ tự khai báo enum
         // Công nợ: 250.000 + (180.000 - 30.000) + 100.000 của 2 ca
         assertThat(report.debt().visitCount()).isEqualTo(2);
         assertThat(report.debt().invoiceCount()).isEqualTo(3);
@@ -118,7 +121,7 @@ class ReportServiceImplTest {
         when(visitRepository.countByStatusBetween(any(), any())).thenReturn(List.of(
                 new Object[]{VisitStatus.COMPLETED, 6L}, new Object[]{VisitStatus.CANCELLED, 1L}, new Object[]{VisitStatus.WAITING, 3L}));
         when(visitRepository.countEmergencyBetween(any(), any())).thenReturn(2L);
-        when(detailRepository.countVisitsWithCategoriesBetween(any(), any(), any())).thenReturn(4L);
+        when(detailRepository.countVisitsWithParaclinicalBetween(any(), any())).thenReturn(4L);
         when(visitRepository.countByDoctorAndStatusBetween(any(), any())).thenReturn(List.of(
                 new Object[]{uid(21), VisitStatus.COMPLETED, 4L}, new Object[]{uid(21), VisitStatus.CANCELLED, 1L},
                 new Object[]{uid(22), VisitStatus.COMPLETED, 2L}));
@@ -153,7 +156,7 @@ class ReportServiceImplTest {
         verify(visitRepository).countByStatusBetween(start.capture(), end.capture());
         assertThat(start.getValue()).isEqualTo(Instant.parse("2026-10-27T17:00:00Z"));   // 00:00 ngày 28 giờ VN
         assertThat(end.getValue()).isEqualTo(Instant.parse("2026-10-28T17:00:00Z"));
-        verify(detailRepository).countVisitsWithCategoriesBetween(ServiceCategory.PARACLINICAL, start.getValue(), end.getValue());
+        verify(detailRepository).countVisitsWithParaclinicalBetween(start.getValue(), end.getValue());
         verify(authClient, never()).getUsers(any());   // không có bác sĩ thì không gọi auth
     }
 

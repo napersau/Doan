@@ -2,7 +2,7 @@ package com.vetclinic.clinical.service;
 
 import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.dto.request.LabResultRequest;
 import com.vetclinic.clinical.dto.response.QueueItemResponse;
 import com.vetclinic.clinical.dto.response.ServiceDetailResponse;
@@ -22,7 +22,7 @@ public interface ParaclinicService {
      * mỗi phiếu bung ra các dịch vụ của nó. Dịch vụ chưa nộp tiền không có phiếu nên không xuất hiện. Gọi số và "Bắt đầu" thao tác
      * trên phiếu ({@link QueueTicketService}).
      */
-    List<QueueItemResponse> queue(ServiceCategory category);
+    List<QueueItemResponse> queue(QueueType queueType);
 
     /** Phòng Lab: ghi nhận đã lấy mẫu (action SAMPLE_COLLECTED, trạng thái vẫn IN_PROGRESS) để bên CĐHA thấy huy hiệu liên phòng. */
     ServiceDetailResponse sampleCollected(Long detailId);

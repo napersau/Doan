@@ -105,7 +105,7 @@ public class VisitAssembler {
         // Thành tiền trước VAT = số lượng × đơn giá snapshot: tính khi hiển thị, KHÔNG lưu (quy chuẩn: không lưu giá trị dẫn xuất)
         BigDecimal subtotal = unitPrice == null ? null : unitPrice.multiply(BigDecimal.valueOf(d.getQuantity()));
         return new ServiceDetailResponse(d.getId(), d.getVisitId(), d.getService().getId(), d.getService().getCode(),
-                d.getService().getName(), d.getService().getCategory(), unitPrice, d.getQuantity(), subtotal, d.getStatus(),
+                d.getService().getName(), d.getService().getCategory().getCode(), d.getService().getCategory().getQueueType(), unitPrice, d.getQuantity(), subtotal, d.getStatus(),
                 d.getNotes(), d.getCreatedAt(),
                 invoice == null ? null : invoice.getVatRate(),
                 invoice == null ? null : invoice.getId(),

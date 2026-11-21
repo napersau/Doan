@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { paraclinicApi } from '../../api/endpoints';
 import { Badge, Facts, Table } from '../ui';
-import { LAB_EVALUATION, SERVICE_CATEGORY, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
+import { LAB_EVALUATION, serviceCategoryLabel, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
 import { formatDateTime, formatMoney, formatNumber } from '../../lib/format';
 
 /** Ảnh CĐHA: tải qua API có xác thực (không dùng thẻ img trực tiếp vì cần Authorization). DICOM chỉ tải về. */
@@ -62,7 +62,7 @@ export default function MedicalEntry({ entry }) {
       <Facts items={[['Triệu chứng ban đầu', visit.initialSymptoms], ['Cân nặng', visit.weightAtVisit ? `${formatNumber(visit.weightAtVisit, 2)} kg` : null], ['Thân nhiệt', visit.temperature ? `${formatNumber(visit.temperature, 1)} °C` : null],
         ['Ghi chú lâm sàng', visit.clinicalNotes], ['Chẩn đoán', visit.diagnosis], ['Phác đồ điều trị', visit.treatmentPlan], ['Lời dặn của bác sĩ', visit.doctorAdvice]]} />
       {services.length > 0 && <div><h3>Dịch vụ đã thực hiện</h3><Table caption="Dịch vụ" columns={[
-        { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{SERVICE_CATEGORY[row.category]}</small></> },
+        { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{serviceCategoryLabel(row.category)}</small></> },
         { title: 'SL', key: 'quantity' }, { title: 'Thành tiền', align: 'right', render: (row) => formatMoney(row.subtotal) },
         { title: 'Trạng thái', render: (row) => <Badge map={SERVICE_DETAIL_STATUS} value={row.status} /> }]} rows={services} /></div>}
       {visit.labResults?.length > 0 && <div><h3>Kết quả xét nghiệm</h3><LabResultsTable results={visit.labResults} /></div>}

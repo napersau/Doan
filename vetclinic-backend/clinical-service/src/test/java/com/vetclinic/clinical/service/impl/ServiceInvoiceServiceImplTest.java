@@ -3,7 +3,7 @@ package com.vetclinic.clinical.service.impl;
 import com.vetclinic.common.event.DomainEvent;
 import com.vetclinic.common.event.outbox.OutboxWriter;
 import com.vetclinic.clinical.constant.PaymentStatus;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.InvoiceStatementResponse;
@@ -91,7 +91,7 @@ class ServiceInvoiceServiceImplTest {
     @BeforeEach
     void setUp() {
         VisitSupport support = new VisitSupport(visitRepository, historyRepository, detailRepository, detailHistoryRepository,
-                invoiceRepository, ticketIssuer, outboxWriter, CLOCK);
+                invoiceRepository, ticketIssuer, com.vetclinic.clinical.testsupport.TestData.priceBook(), outboxWriter, CLOCK);
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new ServiceInvoiceServiceImpl(visitRepository, detailRepository, invoiceRepository, ticketRepository, support,
@@ -240,7 +240,7 @@ class ServiceInvoiceServiceImplTest {
 
         // Dịch vụ làm tại phòng: chỉ giảm (và thu) khi Bác sĩ đã chốt ca
         ServiceInvoice early = invoice(15L, 5L, "200000.00", "0.00");
-        stubInvoiceOf(early, 5L, 101L, 1, VisitStatus.IN_PROGRESS, service(8L, "VAC_5IN1", ServiceCategory.VACCINATION, "200000.00"));
+        stubInvoiceOf(early, 5L, 101L, 1, VisitStatus.IN_PROGRESS, service(8L, "VAC_5IN1", "VACCINATION", "200000.00"));
         assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.discount(15L, new BigDecimal("1000")));
         verify(invoiceRepository, never()).saveAndFlush(any());
     }
@@ -332,7 +332,7 @@ class ServiceInvoiceServiceImplTest {
     void confirmPayment_ofAnInRoomService_isRefusedUntilTheDoctorClosesTheVisit_BILL_1409_andOnACancelledVisit() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
-        VisitServiceDetail vaccine = detail(4L, 100L, service(8L, "VAC_5IN1", ServiceCategory.VACCINATION, "200000.00"), ServiceDetailStatus.COMPLETED);
+        VisitServiceDetail vaccine = detail(4L, 100L, service(8L, "VAC_5IN1", "VACCINATION", "200000.00"), ServiceDetailStatus.COMPLETED);
         ServiceInvoice vaccineInvoice = invoice(14L, 4L, "200000.00", "0.00");
         when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
         when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(vaccine));

@@ -1,7 +1,6 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AuthClient;
-import com.vetclinic.clinical.constant.ServiceCategory;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.OperationsReportResponse;
 import com.vetclinic.clinical.dto.response.RevenueReportResponse;
@@ -89,12 +88,14 @@ public class ReportServiceImpl implements ReportService {
         Range range = range(fromDate, toDate);
         return readTx.execute(status -> {
             // Cộng từng hóa đơn đã làm tròn (đúng như VIEW) rồi mới gom nhóm, để tổng khớp bảng kê
-            Map<ServiceCategory, long[]> counts = new EnumMap<>(ServiceCategory.class);
-            Map<ServiceCategory, BigDecimal[]> sums = new EnumMap<>(ServiceCategory.class);
+            Map<String, long[]> counts = new HashMap<>();
+            Map<String, BigDecimal[]> sums = new HashMap<>();
+            Map<String, Short> order = new HashMap<>();   // thứ tự hiển thị của nhóm (service_categories.display_order)
             long paidCount = 0;
             BigDecimal totalPaid = BigDecimal.ZERO.setScale(2);
             for (InvoiceAmountRow row : invoiceRepository.findPaidBetween(range.start(), range.end())) {
                 BigDecimal payable = InvoiceAmounts.payable(row.quantity(), row.unitPrice(), row.vatRate(), row.discountAmount());
+                order.putIfAbsent(row.category(), row.categoryOrder());
                 BigDecimal[] acc = sums.computeIfAbsent(row.category(), k -> new BigDecimal[]{zero(), zero(), zero(), zero()});
                 acc[0] = acc[0].add(InvoiceAmounts.beforeVat(row.quantity(), row.unitPrice()));
                 acc[1] = acc[1].add(InvoiceAmounts.vat(row.quantity(), row.unitPrice(), row.vatRate()));
@@ -105,6 +106,7 @@ public class ReportServiceImpl implements ReportService {
                 totalPaid = totalPaid.add(payable);
             }
             List<RevenueReportResponse.CategoryRevenue> byCategory = sums.entrySet().stream()
+                    .sorted(java.util.Comparator.<Map.Entry<String, BigDecimal[]>, Short>comparing(e -> order.get(e.getKey())).thenComparing(Map.Entry::getKey))
                     .map(e -> new RevenueReportResponse.CategoryRevenue(e.getKey(), counts.get(e.getKey())[0],
                             e.getValue()[0], e.getValue()[1], e.getValue()[2], e.getValue()[3]))
                     .toList();
@@ -144,7 +146,7 @@ public class ReportServiceImpl implements ReportService {
                 byDoctor.computeIfAbsent((UUID) row[0], k -> new EnumMap<>(VisitStatus.class)).put((VisitStatus) row[1], (Long) row[2]);
             }
             return new Raw(byStatus, visitRepository.countEmergencyBetween(start, end),
-                    detailRepository.countVisitsWithCategoriesBetween(ServiceCategory.PARACLINICAL, start, end), byDoctor);
+                    detailRepository.countVisitsWithParaclinicalBetween(start, end), byDoctor);
         });
 
         long total = raw.byStatus().values().stream().mapToLong(Long::longValue).sum();

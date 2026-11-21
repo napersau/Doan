@@ -12,7 +12,7 @@ import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.dto.response.ReferenceRangeResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.LabEvaluation;
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.LabResultItemRequest;
@@ -139,9 +139,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
      */
     @Override
     @Transactional(readOnly = true)
-    public List<QueueItemResponse> queue(ServiceCategory category) {
-        requireParaclinical(category);
-        List<QueueTicket> tickets = ticketRepository.findRoomQueue(QueueType.ofRoom(category), TicketStatus.ACTIVE);
+    public List<QueueItemResponse> queue(QueueType queueType) {
+        requireParaclinical(queueType);
+        List<QueueTicket> tickets = ticketRepository.findRoomQueue(queueType, TicketStatus.ACTIVE);
         if (tickets.isEmpty()) {
             return List.of();
         }
@@ -159,20 +159,20 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     .filter(d -> d != null && ServiceDetailStatus.OPEN.contains(d.getStatus()))
                     .forEach(d -> rows.add(new Row(d, t)));
         }
-        return toItems(category, rows);
+        return toItems(queueType, rows);
     }
 
     private record Row(VisitServiceDetail detail, QueueTicket ticket) {
     }
 
-    private static void requireParaclinical(ServiceCategory category) {
-        if (!category.isParaclinical()) {
+    private static void requireParaclinical(QueueType queueType) {
+        if (queueType == QueueType.DOCTOR) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Chỉ có hàng đợi cho xét nghiệm và chẩn đoán hình ảnh");
         }
     }
 
     /** Giữ nguyên thứ tự của {@code rows} (đã xếp theo phiếu). */
-    private List<QueueItemResponse> toItems(ServiceCategory category, List<Row> rows) {
+    private List<QueueItemResponse> toItems(QueueType queueType, List<Row> rows) {
         if (rows.isEmpty()) {
             return List.of();
         }
@@ -192,9 +192,9 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     PetVisit v = visits.get(d.getVisitId());
                     return new QueueItemResponse(d.getId(), v.getId(), v.getVisitCode(), v.getPet().getId(),
                             v.getPet().getName(), v.getPet().getSpecies().getName(), d.getService().getId(),
-                            d.getService().getName(), category, v.isEmergency(), d.getStatus(),
-                            category == ServiceCategory.LABORATORY ? labStage(d, latestAction.get(d.getId())) : null,
-                            category == ServiceCategory.IMAGING
+                            d.getService().getName(), d.getService().getCategory().getCode(), v.isEmergency(), d.getStatus(),
+                            queueType == QueueType.LABORATORY ? labStage(d, latestAction.get(d.getId())) : null,
+                            queueType == QueueType.IMAGING
                                     ? labBadge(siblings.getOrDefault(d.getVisitId(), List.of()), latestAction) : null,
                             d.getNotes(), d.getCreatedAt(), t.getId(), t.getTicketNo(), t.getPriority(), t.getStatus(),
                             t.getIssuedAt(), t.getLastCalledAt());
@@ -229,7 +229,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     static String labBadge(List<VisitServiceDetail> siblings, Map<Long, String> latestAction) {
         boolean anyLab = false;
         for (VisitServiceDetail s : siblings) {
-            if (s.getService().getCategory() == ServiceCategory.LABORATORY && s.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
+            if (s.getService().getCategory().is(ServiceCategory.LABORATORY) && s.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
                 anyLab = true;
                 if (!ACTION_SAMPLE_COLLECTED.equals(latestAction.getOrDefault(s.getId(), ACTION_START))) {
                     return "SAMPLING";
@@ -247,7 +247,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
-        if (c.detail().getService().getCategory() != ServiceCategory.LABORATORY) {
+        if (!c.detail().getService().getCategory().is(ServiceCategory.LABORATORY)) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ xét nghiệm mới có bước lấy mẫu");
         }
         requireDetailStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "Phải bắt đầu thực hiện (lấy mẫu) trước khi ghi nhận đã lấy mẫu");
@@ -285,7 +285,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), true);
         ServiceCategory category = c.detail().getService().getCategory();
-        if (category == ServiceCategory.EXAMINATION) {
+        if (category.is(ServiceCategory.EXAMINATION)) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS,
                     "Không hủy riêng phí khám: dùng \"Hủy ca / Chuyển viện\" khi khách không tiếp tục khám");
         }
@@ -327,23 +327,23 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         VisitServiceDetail detail = detailRepository.findById(detailId)
                 .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
         assertOperator(detail, true);
-        if (detail.getService().getCategory() != ServiceCategory.LABORATORY) {
+        if (!detail.getService().getCategory().is(ServiceCategory.LABORATORY)) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ định này không phải xét nghiệm");
         }
         PetVisit visit = visitRepository.findWithPetById(detail.getVisitId())
                 .orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
-        Long speciesId = visit.getPet().getSpecies().getId();
-        Set<Long> configured = new HashSet<>(serviceLabItemRepository.findItemIdsByServiceId(detail.getService().getId()));
+        Short speciesId = visit.getPet().getSpecies().getId();
+        Set<Short> configured = new HashSet<>(serviceLabItemRepository.findItemIdsByServiceId(detail.getService().getId()));
         List<LabTestItem> items = labTestItemRepository.findAllByOrderByCodeAsc().stream()
                 .filter(i -> configured.isEmpty() || configured.contains(i.getId())).toList();
-        Map<Long, List<ReferenceRangeResponse>> ranges = items.isEmpty() ? Map.of()
+        Map<Short, List<ReferenceRangeResponse>> ranges = items.isEmpty() ? Map.of()
                 : rangeRepository.findByLabTestItemIdIn(items.stream().map(LabTestItem::getId).toList()).stream()
                 .filter(r -> r.getSpecies().getId().equals(speciesId))   // BR-23: chỉ khoảng của loài thú cưng này
                 .collect(Collectors.groupingBy(r -> r.getLabTestItem().getId(), Collectors.mapping(
                         r -> new ReferenceRangeResponse(r.getSpecies().getId(), r.getSpecies().getCode(), r.getMinValue(),
                                 r.getMaxValue()), Collectors.toList())));
         return items.stream().map(i -> new LabTestItemResponse(i.getId(), i.getCode(), i.getName(), i.getUnit(),
-                i.getDescription(), ranges.getOrDefault(i.getId(), List.of()))).toList();
+                i.getDescription(), i.isActive(), ranges.getOrDefault(i.getId(), List.of()))).toList();
     }
 
     @Override
@@ -351,7 +351,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     public List<LabResultResponse> labResults(Long detailId) {
         VisitServiceDetail detail = detailRepository.findById(detailId)
                 .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
-        if (detail.getService().getCategory() != ServiceCategory.LABORATORY) {
+        if (!detail.getService().getCategory().is(ServiceCategory.LABORATORY)) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ định này không phải xét nghiệm");
         }
         return assembler.labResultsOf(detailId);
@@ -363,23 +363,23 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
-        if (c.detail().getService().getCategory() != ServiceCategory.LABORATORY) {
+        if (!c.detail().getService().getCategory().is(ServiceCategory.LABORATORY)) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ định này không phải xét nghiệm");
         }
         requireDetailStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS,
                 "Phải bắt đầu thực hiện (IN_PROGRESS) trước khi nhập kết quả");
         requireVisitWaitingResults(c.visit());
 
-        List<Long> itemIds = request.results().stream().map(LabResultItemRequest::labTestItemId).toList();
+        List<Short> itemIds = request.results().stream().map(LabResultItemRequest::labTestItemId).toList();
         if (new HashSet<>(itemIds).size() != itemIds.size()) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Mỗi chỉ số chỉ được nhập một lần");
         }
-        Map<Long, LabTestItem> items = labTestItemRepository.findAllById(itemIds).stream()
+        Map<Short, LabTestItem> items = labTestItemRepository.findAllById(itemIds).stream()
                 .collect(Collectors.toMap(LabTestItem::getId, i -> i));
         // Chỉ nhập các chỉ số thuộc dịch vụ này (chưa cấu hình dòng nào = mọi chỉ số đều được)
-        Set<Long> allowed = new HashSet<>(serviceLabItemRepository.findItemIdsByServiceId(c.detail().getService().getId()));
+        Set<Short> allowed = new HashSet<>(serviceLabItemRepository.findItemIdsByServiceId(c.detail().getService().getId()));
         // BR-23: khoảng tham chiếu phụ thuộc loài của thú cưng
-        Long speciesId = c.visit().getPet().getSpecies().getId();
+        Short speciesId = c.visit().getPet().getSpecies().getId();
 
         List<LabTestResult> results = new ArrayList<>();
         for (LabResultItemRequest item : request.results()) {
@@ -406,7 +406,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     .build());
         }
         // Gói xét nghiệm có chỉ số nào thì phải nhập đủ chỉ số đó (dịch vụ chưa cấu hình gói thì không áp dụng)
-        Set<Long> missing = new HashSet<>(allowed);
+        Set<Short> missing = new HashSet<>(allowed);
         missing.removeAll(items.keySet());
         if (!missing.isEmpty()) {
             String codes = labTestItemRepository.findAllById(missing).stream().map(LabTestItem::getCode).sorted()
@@ -463,7 +463,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                                               List<ImagingStorage.StoredFile> stored) {
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
-        if (c.detail().getService().getCategory() != ServiceCategory.IMAGING) {
+        if (!c.detail().getService().getCategory().is(ServiceCategory.IMAGING)) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Chỉ định này không phải chẩn đoán hình ảnh");
         }
         requireDetailStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS,
@@ -517,8 +517,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     private void assertOperator(VisitServiceDetail detail, boolean allowDoctor) {
         RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
         ServiceCategory category = detail.getService().getCategory();
-        boolean allowed = (category == ServiceCategory.LABORATORY && role == RoleCode.LAB_TECHNICIAN)
-                || (category == ServiceCategory.IMAGING && role == RoleCode.IMAGING_TECHNICIAN)
+        boolean allowed = (category.is(ServiceCategory.LABORATORY) && role == RoleCode.LAB_TECHNICIAN)
+                || (category.is(ServiceCategory.IMAGING) && role == RoleCode.IMAGING_TECHNICIAN)
                 || (allowDoctor && role == RoleCode.VETERINARIAN);
         if (!allowed) {
             throw new AppException(ErrorCode.ACCESS_DENIED);

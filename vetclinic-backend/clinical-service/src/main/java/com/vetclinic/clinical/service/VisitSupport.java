@@ -1,7 +1,9 @@
 package com.vetclinic.clinical.service;
 
-import com.vetclinic.clinical.constant.ServiceCategory;
+import com.vetclinic.clinical.entity.ServiceCategory;
+import com.vetclinic.clinical.entity.ServicePrice;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
+import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.entity.PetVisitStatusHistory;
@@ -51,6 +53,7 @@ public class VisitSupport {
     private final VisitServiceDetailHistoryRepository detailHistoryRepository;
     private final ServiceInvoiceRepository invoiceRepository;
     private final TicketIssuer ticketIssuer;
+    private final ServicePriceBook priceBook;
     private final OutboxWriter outboxWriter;
     private final Clock clock;
 
@@ -112,12 +115,14 @@ public class VisitSupport {
      * của dịch vụ. PHẢI gọi trong CÙNG giao dịch với việc tạo dòng chỉ định. Mã SINV-YYYY-XXXX sinh từ id (không count + 1).
      */
     public ServiceInvoice createInvoice(VisitServiceDetail detail, ClinicService service) {
+        // Giá và thuế suất lấy từ dòng service_prices đang hiệu lực (CLIN_1315 nếu chưa có) rồi chụp vào hóa đơn: bảng giá đổi sau đó không ảnh hưởng (EX-20)
+        ServicePrice price = priceBook.current(service.getId());
         ServiceInvoice invoice = invoiceRepository.saveAndFlush(ServiceInvoice.builder()
                 // Mã tạm duy nhất; đổi thành mã theo id ngay bên dưới (id chỉ có sau khi INSERT)
                 .invoiceCode("TMP-" + UUID.randomUUID())
                 .visitServiceDetailId(detail.getId())
-                .unitPrice(service.getPrice())
-                .vatRate(service.getVatRate())
+                .unitPrice(price.getPrice())
+                .vatRate(price.getVatRate())
                 .build());
         invoice.setInvoiceCode(String.format("SINV-%d-%04d", LocalDate.now(clock).getYear(), invoice.getId()));
         return invoice;
@@ -163,7 +168,7 @@ public class VisitSupport {
      */
     public void completeExamDetails(Long visitId, UUID actorId) {
         for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
-            if (detail.getService().getCategory() == ServiceCategory.EXAMINATION
+            if (detail.getService().getCategory().is(ServiceCategory.EXAMINATION)
                     && detail.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
                 detail.setStatus(ServiceDetailStatus.COMPLETED);
                 detailRepository.save(detail);
@@ -193,8 +198,8 @@ public class VisitSupport {
         if (visit.getStatus() != VisitStatus.WAITING_RESULTS) {
             return;
         }
-        long open = detailRepository.countByVisitAndCategoriesAndStatuses(
-                visit.getId(), ServiceCategory.PARACLINICAL, ServiceDetailStatus.OPEN);
+        long open = detailRepository.countByVisitAndKindAndStatuses(
+                visit.getId(), ServiceKind.PARACLINICAL, ServiceDetailStatus.OPEN);
         if (open > 0) {
             return;
         }

@@ -1,9 +1,7 @@
 package com.vetclinic.clinical.mapper;
 
 import com.vetclinic.clinical.dto.response.PetResponse;
-import com.vetclinic.clinical.dto.response.ServiceResponse;
 import com.vetclinic.clinical.dto.response.SpeciesResponse;
-import com.vetclinic.clinical.entity.ClinicService;
 import com.vetclinic.clinical.entity.Pet;
 import com.vetclinic.clinical.entity.Species;
 import org.mapstruct.Mapper;
@@ -22,6 +20,4 @@ public interface ClinicalMapper {
     @Mapping(target = "weight", ignore = true)
     @Mapping(target = "withWeight", ignore = true)   // hàm gắn cân nặng của record, không phải thuộc tính
     PetResponse toResponse(Pet pet);
-
-    ServiceResponse toResponse(ClinicService service);
 }
