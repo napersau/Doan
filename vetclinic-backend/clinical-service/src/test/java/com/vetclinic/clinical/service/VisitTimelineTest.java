@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -21,7 +22,7 @@ class VisitTimelineTest {
     private static final Instant T5 = Instant.parse("2026-10-30T01:40:00Z");
 
     private static PetVisitStatusHistory h(VisitStatus from, VisitStatus to, Instant at, String notes) {
-        return PetVisitStatusHistory.builder().visitId(1L).fromStatus(from).toStatus(to).notes(notes).createdAt(at).build();
+        return PetVisitStatusHistory.builder().visitId(lid(1L)).fromStatus(from).toStatus(to).notes(notes).createdAt(at).build();
     }
 
     @Test

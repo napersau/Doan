@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;
 import jakarta.persistence.EmbeddedId;
@@ -26,7 +27,7 @@ public class QueueTicketItem {
     @EmbeddedId
     private Key id;
 
-    public static QueueTicketItem of(Long ticketId, Long visitServiceDetailId) {
+    public static QueueTicketItem of(Long ticketId, UUID visitServiceDetailId) {
         return new QueueTicketItem(new Key(ticketId, visitServiceDetailId));
     }
 
@@ -34,7 +35,7 @@ public class QueueTicketItem {
         return id.getTicketId();
     }
 
-    public Long getVisitServiceDetailId() {
+    public UUID getVisitServiceDetailId() {
         return id.getVisitServiceDetailId();
     }
 
@@ -48,6 +49,6 @@ public class QueueTicketItem {
         private Long ticketId;
 
         @Column(name = "visit_service_detail_id", nullable = false)
-        private Long visitServiceDetailId;
+        private UUID visitServiceDetailId;
     }
 }

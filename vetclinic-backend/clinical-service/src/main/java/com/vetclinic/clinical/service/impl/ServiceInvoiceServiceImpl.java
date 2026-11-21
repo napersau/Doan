@@ -87,14 +87,14 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
 
     @Override
     @Transactional(readOnly = true)
-    public InvoiceStatementResponse statement(Long visitId) {
+    public InvoiceStatementResponse statement(UUID visitId) {
         PetVisit visit = visitRepository.findById(visitId).orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
         return buildStatement(visit);
     }
 
     private InvoiceStatementResponse buildStatement(PetVisit visit) {
         List<VisitServiceDetail> details = detailRepository.findByVisitIdOrderByIdAsc(visit.getId());
-        Map<Long, ServiceInvoice> invoices = support.invoicesOf(details.stream().map(VisitServiceDetail::getId).toList());
+        Map<UUID, ServiceInvoice> invoices = support.invoicesOf(details.stream().map(VisitServiceDetail::getId).toList());
         List<ServiceInvoiceResponse> items = details.stream()
                 .filter(d -> invoices.containsKey(d.getId()))
                 .map(d -> toResponse(invoices.get(d.getId()), d))
@@ -123,7 +123,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
 
     @Override
     @Transactional
-    public ServiceInvoiceResponse discount(Long invoiceId, BigDecimal discountAmount) {
+    public ServiceInvoiceResponse discount(UUID invoiceId, BigDecimal discountAmount) {
         ServiceInvoice invoice = invoiceRepository.findById(invoiceId).orElseThrow(() -> new AppException(ErrorCode.INVOICE_NOT_FOUND));
         VisitServiceDetail detail = detailRepository.findById(invoice.getVisitServiceDetailId())
                 .orElseThrow(() -> new AppException(ErrorCode.INVOICE_NOT_FOUND));
@@ -163,7 +163,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
      * (UNIQUE queue_type, service_date, ticket_no). Mỗi lần thử là một giao dịch mới, lần trước đã rollback toàn bộ.
      */
     @Override
-    public InvoiceStatementResponse confirmPayment(Long visitId, List<Long> invoiceIds) {
+    public InvoiceStatementResponse confirmPayment(UUID visitId, List<UUID> invoiceIds) {
         UUID cashierId = SecurityUtils.getCurrentUserId();
         for (int attempt = 1; ; attempt++) {
             try {
@@ -191,30 +191,30 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
         return message != null && message.contains("uq_qt_number");
     }
 
-    private InvoiceStatementResponse doConfirmPayment(Long visitId, List<Long> invoiceIds, UUID cashierId) {
+    private InvoiceStatementResponse doConfirmPayment(UUID visitId, List<UUID> invoiceIds, UUID cashierId) {
         PetVisit visit = support.lock(visitId);   // khóa dòng ca: hai thu ngân cùng bấm thì người đến sau thấy hóa đơn đã PAID (BILL_1403)
         if (visit.getStatus() == VisitStatus.CANCELLED) {
             throw new AppException(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, "Đợt khám đã hủy, không còn khoản nào để thu");
         }
         List<VisitServiceDetail> details = detailRepository.findByVisitIdOrderByIdAsc(visit.getId());
-        Map<Long, VisitServiceDetail> detailById = details.stream().collect(Collectors.toMap(VisitServiceDetail::getId, d -> d));
-        Map<Long, ServiceInvoice> byDetail = support.invoicesOf(detailById.keySet());
-        Map<Long, ServiceInvoice> byInvoiceId = new HashMap<>();
+        Map<UUID, VisitServiceDetail> detailById = details.stream().collect(Collectors.toMap(VisitServiceDetail::getId, d -> d));
+        Map<UUID, ServiceInvoice> byDetail = support.invoicesOf(detailById.keySet());
+        Map<UUID, ServiceInvoice> byInvoiceId = new HashMap<>();
         byDetail.values().forEach(i -> byInvoiceId.put(i.getId(), i));
 
-        Set<Long> wanted = new LinkedHashSet<>(invoiceIds);
+        Set<UUID> wanted = new LinkedHashSet<>(invoiceIds);
         if (wanted.isEmpty() && (visit.getStatus() != VisitStatus.WAITING_PAYMENT
                 || byInvoiceId.values().stream().anyMatch(i -> i.getPaymentStatus() == PaymentStatus.PENDING))) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Phải chọn ít nhất một hóa đơn để thu");
         }
-        for (Long id : wanted) {
+        for (UUID id : wanted) {
             if (!byInvoiceId.containsKey(id)) {
                 throw new AppException(ErrorCode.INVOICE_NOT_FOUND, "Hóa đơn " + id + " không thuộc đợt khám này");   // BILL_1401
             }
         }
         // Kiểm tra TẤT CẢ trước khi ghi: một hóa đơn không hợp lệ thì không thu hóa đơn nào
         boolean closed = isClosed(visit);
-        for (Long id : wanted) {
+        for (UUID id : wanted) {
             ServiceInvoice invoice = byInvoiceId.get(id);
             requirePending(invoice);
             VisitServiceDetail detail = detailById.get(invoice.getVisitServiceDetailId());
@@ -225,7 +225,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
         }
         var now = clock.instant();
         List<VisitServiceDetail> prepaidJustPaid = new ArrayList<>();
-        for (Long id : wanted) {
+        for (UUID id : wanted) {
             ServiceInvoice invoice = byInvoiceId.get(id);
             invoice.setPaymentStatus(PaymentStatus.PAID);
             invoice.setCashierId(cashierId);
@@ -262,13 +262,13 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
         if (section == CashierSection.FINAL || visits.isEmpty()) {
             return assembler.summaries(visits);
         }
-        List<Long> ids = visits.stream().map(PetVisit::getId).toList();
+        List<UUID> ids = visits.stream().map(PetVisit::getId).toList();
         List<VisitServiceDetail> details = detailRepository.findByVisitIdInOrderByIdAsc(ids);
-        Map<Long, ServiceInvoice> invoices = support.invoicesOf(details.stream().map(VisitServiceDetail::getId).toList());
-        Set<Long> withDoctorTicket = ticketRepository.findByVisitIdInAndQueueTypeAndStatusIn(ids, QueueType.DOCTOR, TicketStatus.ACTIVE)
+        Map<UUID, ServiceInvoice> invoices = support.invoicesOf(details.stream().map(VisitServiceDetail::getId).toList());
+        Set<UUID> withDoctorTicket = ticketRepository.findByVisitIdInAndQueueTypeAndStatusIn(ids, QueueType.DOCTOR, TicketStatus.ACTIVE)
                 .stream().map(QueueTicket::getVisitId).collect(Collectors.toSet());
 
-        Set<Long> chosen = details.stream()
+        Set<UUID> chosen = details.stream()
                 .filter(d -> d.getStatus() == ServiceDetailStatus.PENDING && invoices.containsKey(d.getId())
                         && invoices.get(d.getId()).getPaymentStatus() == PaymentStatus.PENDING)
                 .filter(d -> section == CashierSection.EXAM_FEE

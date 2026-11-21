@@ -58,7 +58,7 @@ public class ImagingStorage {
         return detected;
     }
 
-    public StoredFile store(Long visitId, MultipartFile file) {
+    public StoredFile store(UUID visitId, MultipartFile file) {
         String contentType = validate(file);
         String extension = switch (contentType) {
             case "image/jpeg" -> ".jpg";

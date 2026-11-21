@@ -15,7 +15,7 @@ public record QueueTicketIssuedEvent(
         Long ticketId,
         String queueType,        // DOCTOR | LABORATORY | IMAGING
         int ticketNo,
-        Long visitId,
+        UUID visitId,
         String visitCode,
         UUID petId,
         UUID doctorId,           // chỉ phiếu DOCTOR; null = danh sách chờ phân công

@@ -4,7 +4,7 @@ import java.util.UUID;
 
 /** Phần của clinical-service VisitSummaryResponse mà notification cần để nhắm đúng người nhận và ghi tên thú cưng. */
 public record VisitSummary(
-        Long id,
+        UUID id,
         String visitCode,
         UUID petId,
         String petName,

@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service;
 
+import com.vetclinic.common.util.Codes;
 import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.entity.ServicePrice;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
@@ -58,7 +59,7 @@ public class VisitSupport {
     private final Clock clock;
 
     /** Khóa dòng đợt khám (SELECT ... FOR UPDATE). Bắt buộc dùng trước mọi thao tác ghi. */
-    public PetVisit lock(Long visitId) {
+    public PetVisit lock(UUID visitId) {
         return visitRepository.findByIdForUpdate(visitId)
                 .orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
     }
@@ -87,7 +88,7 @@ public class VisitSupport {
         record(visit.getId(), from, to, actorId, note);
     }
 
-    public void record(Long visitId, VisitStatus from, VisitStatus to, UUID actorId, String note) {
+    public void record(UUID visitId, VisitStatus from, VisitStatus to, UUID actorId, String note) {
         historyRepository.save(PetVisitStatusHistory.builder()
                 .visitId(visitId)
                 .fromStatus(from)
@@ -98,7 +99,7 @@ public class VisitSupport {
     }
 
     /** Audit trail tiến độ một chỉ định. action: ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED. */
-    public void recordDetail(Long detailId, ServiceDetailStatus from, ServiceDetailStatus to, String action,
+    public void recordDetail(UUID detailId, ServiceDetailStatus from, ServiceDetailStatus to, String action,
                              UUID actorId, String reason) {
         detailHistoryRepository.save(VisitServiceDetailHistory.builder()
                 .visitServiceDetailId(detailId)
@@ -112,20 +113,18 @@ public class VisitSupport {
 
     /**
      * Lập hóa đơn RIÊNG cho một dòng chỉ định (BR-19, FR-32): đúng một hóa đơn PENDING, snapshot đơn giá và thuế suất hiện hành
-     * của dịch vụ. PHẢI gọi trong CÙNG giao dịch với việc tạo dòng chỉ định. Mã SINV-YYYY-XXXX sinh từ id (không count + 1).
+     * của dịch vụ. PHẢI gọi trong CÙNG giao dịch với việc tạo dòng chỉ định. Mã SINV-YYYY-XXXXXX có đuôi ngẫu nhiên (không count + 1).
      */
     public ServiceInvoice createInvoice(VisitServiceDetail detail, ClinicService service) {
         // Giá và thuế suất lấy từ dòng service_prices đang hiệu lực (CLIN_1315 nếu chưa có) rồi chụp vào hóa đơn: bảng giá đổi sau đó không ảnh hưởng (EX-20)
         ServicePrice price = priceBook.current(service.getId());
-        ServiceInvoice invoice = invoiceRepository.saveAndFlush(ServiceInvoice.builder()
-                // Mã tạm duy nhất; đổi thành mã theo id ngay bên dưới (id chỉ có sau khi INSERT)
-                .invoiceCode("TMP-" + UUID.randomUUID())
+        // Khóa là UUID nên mã hiển thị không dựa vào id: SINV-YYYY-XXXXXX (đuôi ngẫu nhiên), tính duy nhất do UNIQUE(invoice_code) bảo đảm
+        return invoiceRepository.saveAndFlush(ServiceInvoice.builder()
+                .invoiceCode(String.format("SINV-%d-%s", LocalDate.now(clock).getYear(), Codes.randomSuffix(6)))
                 .visitServiceDetailId(detail.getId())
                 .unitPrice(price.getPrice())
                 .vatRate(price.getVatRate())
                 .build());
-        invoice.setInvoiceCode(String.format("SINV-%d-%04d", LocalDate.now(clock).getYear(), invoice.getId()));
-        return invoice;
     }
 
     /**
@@ -158,7 +157,7 @@ public class VisitSupport {
     /**
      * Giai đoạn 2 = ca đã từng qua WAITING_RESULTS (T04). Chỉ định cận lâm sàng chỉ được làm ở Giai đoạn 1 (T04).
      */
-    public boolean isPhaseTwo(Long visitId) {
+    public boolean isPhaseTwo(UUID visitId) {
         return historyRepository.existsByVisitIdAndToStatus(visitId, VisitStatus.WAITING_RESULTS);
     }
 
@@ -166,7 +165,7 @@ public class VisitSupport {
      * Dịch vụ khám (EXAMINATION) tạo ở T01 (check-in, PENDING), IN_PROGRESS ở T02; hoàn tất (COMPLETED) khi Bác sĩ rời giai đoạn
      * khám: chỉ định cận lâm sàng (T04) hoặc chốt ca (T05 / T09). Hóa đơn của nó không đổi (đã thu lúc tiếp đón, ca cấp cứu thu sau).
      */
-    public void completeExamDetails(Long visitId, UUID actorId) {
+    public void completeExamDetails(UUID visitId, UUID actorId) {
         for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
             if (detail.getService().getCategory().is(ServiceCategory.EXAMINATION)
                     && detail.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
@@ -178,7 +177,7 @@ public class VisitSupport {
     }
 
     /** Hóa đơn của nhiều dòng chỉ định theo lô (key = id dòng chỉ định). */
-    public Map<Long, ServiceInvoice> invoicesOf(Collection<Long> detailIds) {
+    public Map<UUID, ServiceInvoice> invoicesOf(Collection<UUID> detailIds) {
         if (detailIds.isEmpty()) {
             return Map.of();
         }

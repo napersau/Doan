@@ -12,7 +12,7 @@ public record VisitCompletedEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,        // thu ngân (T10) hoặc người thao tác "Khách bỏ về"
-        Long visitId,
+        UUID visitId,
         String visitCode,
         UUID petId,
         boolean abandoned        // true: khách bỏ về, hóa đơn dịch vụ còn lại giữ PENDING làm công nợ

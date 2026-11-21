@@ -15,7 +15,7 @@ public record QueueTicketResponse(
         TicketStatus status,
         Instant issuedAt,
         Instant lastCalledAt,
-        Long visitId,
+        UUID visitId,
         String visitCode,
         String petName,
         UUID doctorId,

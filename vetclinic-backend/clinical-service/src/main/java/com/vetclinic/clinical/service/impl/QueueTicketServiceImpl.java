@@ -138,7 +138,7 @@ public class QueueTicketServiceImpl implements QueueTicketService {
         assertCanServe(type);
         return tx.execute(s -> {
             // Khóa theo cùng thứ tự với các thao tác cận lâm sàng khác: các chỉ định -> đợt khám -> phiếu
-            List<Long> detailIds = ticketIssuer.detailIdsOf(ticketId).stream().sorted().toList();
+            List<UUID> detailIds = ticketIssuer.detailIdsOf(ticketId).stream().sorted().toList();
             List<VisitServiceDetail> details = detailIds.stream()
                     .map(id -> detailRepository.findByIdForUpdate(id)
                             .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND)))

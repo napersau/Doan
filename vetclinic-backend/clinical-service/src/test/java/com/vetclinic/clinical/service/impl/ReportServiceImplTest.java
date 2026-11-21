@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
@@ -63,7 +64,7 @@ class ReportServiceImplTest {
             "LABORATORY", (short) 6, "IMAGING", (short) 7);
 
     private static InvoiceAmountRow row(String c, long visitId, int qty, String unit, String vat, String discount) {
-        return new InvoiceAmountRow(c, ORDER.get(c), visitId, qty, new BigDecimal(unit), new BigDecimal(vat), new BigDecimal(discount));
+        return new InvoiceAmountRow(c, ORDER.get(c), lid(visitId), qty, new BigDecimal(unit), new BigDecimal(vat), new BigDecimal(discount));
     }
 
     @Test

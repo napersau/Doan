@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.controller;
 
+import java.util.UUID;
 import com.vetclinic.clinical.dto.request.CancelServiceRequest;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
@@ -48,14 +49,14 @@ public class ParaclinicController {
     /** Phòng Lab: đã lấy mẫu xong (huy hiệu liên phòng cho CĐHA). */
     @PostMapping("/service-details/{id}/sample-collected")
     @PreAuthorize("hasRole('LAB_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<ServiceDetailResponse>> sampleCollected(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<ServiceDetailResponse>> sampleCollected(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success("Đã ghi nhận lấy mẫu", paraclinicService.sampleCollected(id)));
     }
 
     /** FR-30: Bác sĩ ghi nhận dịch vụ tại phòng "Đã thực hiện" (tiêm phòng, tẩy giun, thủ thuật...). */
     @PostMapping("/service-details/{id}/perform")
     @PreAuthorize("hasRole('VETERINARIAN')")
-    public ResponseEntity<ApiResponse<ServiceDetailResponse>> perform(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<ServiceDetailResponse>> perform(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success("Đã ghi nhận thực hiện dịch vụ", paraclinicService.perform(id)));
     }
 
@@ -65,7 +66,7 @@ public class ParaclinicController {
      */
     @PostMapping("/service-details/{id}/cancel")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','IMAGING_TECHNICIAN','VETERINARIAN')")
-    public ResponseEntity<ApiResponse<ServiceDetailResponse>> cancel(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<ServiceDetailResponse>> cancel(@PathVariable UUID id,
                                                                      @Valid @RequestBody CancelServiceRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã hủy chỉ định",
                 paraclinicService.cancel(id, request.reason(), request.reasonType())));
@@ -74,14 +75,14 @@ public class ParaclinicController {
     /** Form nhập kết quả: chỉ các chỉ số của dịch vụ, kèm khoảng tham chiếu của loài thú cưng. */
     @GetMapping("/service-details/{id}/lab-form")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','VETERINARIAN')")
-    public ResponseEntity<ApiResponse<List<LabTestItemResponse>>> labForm(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<LabTestItemResponse>>> labForm(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(paraclinicService.labForm(id)));
     }
 
     /** Kết quả xét nghiệm đã nhập của một chỉ định (có nhãn LOW / NORMAL / HIGH). */
     @GetMapping("/lab-results/{id}")
     @PreAuthorize("hasAnyRole('LAB_TECHNICIAN','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<List<LabResultResponse>>> getLabResults(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<List<LabResultResponse>>> getLabResults(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(paraclinicService.labResults(id)));
     }
 
@@ -91,7 +92,7 @@ public class ParaclinicController {
      */
     @PostMapping({"/lab-results/{id}", "/service-details/{id}/lab-results"})
     @PreAuthorize("hasRole('LAB_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<ServiceDetailResponse>> labResults(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<ServiceDetailResponse>> labResults(@PathVariable UUID id,
                                                                          @Valid @RequestBody LabResultRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã lưu kết quả xét nghiệm", paraclinicService.submitLabResults(id, request)));
     }
@@ -100,7 +101,7 @@ public class ParaclinicController {
     @PostMapping(path = {"/imaging-results/{id}", "/service-details/{id}/imaging-result"}, consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('IMAGING_TECHNICIAN')")
     public ResponseEntity<ApiResponse<ServiceDetailResponse>> imagingResult(
-            @PathVariable Long id,
+            @PathVariable UUID id,
             @RequestParam(required = false) String description,
             @RequestParam(required = false) String conclusion,
             @RequestParam(value = "files", required = false) List<MultipartFile> files) {

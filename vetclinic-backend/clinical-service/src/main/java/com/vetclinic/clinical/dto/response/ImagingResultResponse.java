@@ -5,8 +5,8 @@ import java.util.UUID;
 import java.util.List;
 
 public record ImagingResultResponse(
-        Long id,
-        Long serviceDetailId,
+        UUID id,
+        UUID serviceDetailId,
         String description,
         String conclusion,
         UUID performedBy,

@@ -48,13 +48,13 @@ public interface QueueTicketRepository extends JpaRepository<QueueTicket, Long> 
     @Query("select max(t.ticketNo) from QueueTicket t where t.queueType = :type and t.serviceDate = :date")
     Integer findMaxTicketNo(@Param("type") QueueType type, @Param("date") LocalDate date);
 
-    Optional<QueueTicket> findFirstByVisitIdAndQueueTypeAndStatusIn(Long visitId, QueueType type, Collection<TicketStatus> statuses);
+    Optional<QueueTicket> findFirstByVisitIdAndQueueTypeAndStatusIn(UUID visitId, QueueType type, Collection<TicketStatus> statuses);
 
-    Optional<QueueTicket> findFirstByVisitIdAndQueueTypeAndStatus(Long visitId, QueueType type, TicketStatus status);
+    Optional<QueueTicket> findFirstByVisitIdAndQueueTypeAndStatus(UUID visitId, QueueType type, TicketStatus status);
 
-    List<QueueTicket> findByVisitIdAndStatusIn(Long visitId, Collection<TicketStatus> statuses);
+    List<QueueTicket> findByVisitIdAndStatusIn(UUID visitId, Collection<TicketStatus> statuses);
 
     /** Phiếu DOCTOR còn hiệu lực của nhiều ca (gắn số phiếu vào danh sách ca). */
-    List<QueueTicket> findByVisitIdInAndQueueTypeAndStatusIn(Collection<Long> visitIds, QueueType type,
+    List<QueueTicket> findByVisitIdInAndQueueTypeAndStatusIn(Collection<UUID> visitIds, QueueType type,
                                                              Collection<TicketStatus> statuses);
 }

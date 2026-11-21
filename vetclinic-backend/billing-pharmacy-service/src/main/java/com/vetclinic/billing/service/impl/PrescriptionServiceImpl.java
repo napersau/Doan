@@ -89,7 +89,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
         return assembler.withVisit(created, visit);
     }
 
-    private PrescriptionResponse persistNew(Long visitId, PrescriptionRequest request) {
+    private PrescriptionResponse persistNew(UUID visitId, PrescriptionRequest request) {
         if (prescriptionRepository.findWithItemsByVisitId(visitId).isPresent()) {
             throw new AppException(ErrorCode.PRESCRIPTION_ALREADY_EXISTS);
         }
@@ -204,7 +204,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
     }
 
     @Override
-    public PrescriptionResponse getByVisit(Long visitId) {
+    public PrescriptionResponse getByVisit(UUID visitId) {
         PrescriptionResponse response = readTx.execute(s -> {
             Prescription prescription = prescriptionRepository.findWithItemsByVisitId(visitId)
                     .orElseThrow(() -> new AppException(ErrorCode.PRESCRIPTION_NOT_FOUND));
@@ -220,7 +220,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
     }
 
     @Override
-    public List<PrescriptionResponse> findByVisits(Collection<Long> visitIds) {
+    public List<PrescriptionResponse> findByVisits(Collection<UUID> visitIds) {
         if (visitIds == null || visitIds.isEmpty()) {
             return List.of();
         }
@@ -242,14 +242,14 @@ public class PrescriptionServiceImpl implements PrescriptionService {
     }
 
     @Override
-    public PageResponse<PrescriptionSummaryResponse> search(Long visitId, int page, int size) {
+    public PageResponse<PrescriptionSummaryResponse> search(UUID visitId, int page, int size) {
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
                 Sort.by("id").descending());
         Page<PrescriptionSummaryResponse> result = readTx.execute(s -> (visitId == null
                 ? prescriptionRepository.findAll(pageable)
                 : prescriptionRepository.findByVisitId(visitId, pageable)).map(assembler::toSummary));
 
-        Map<Long, VisitSummaryResponse> visits = visitLookup.tryFindAll(
+        Map<UUID, VisitSummaryResponse> visits = visitLookup.tryFindAll(
                 result.getContent().stream().map(PrescriptionSummaryResponse::visitId).collect(Collectors.toSet()));
         return PageResponse.of(result.getContent(), result.getNumber(), result.getSize(), result.getTotalElements(),
                 result.getTotalPages(), result.isLast(), item -> assembler.withVisit(item, visits.get(item.visitId())));

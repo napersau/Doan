@@ -17,8 +17,8 @@ import java.util.UUID;
  * </ul>
  */
 public record QueueItemResponse(
-        Long serviceDetailId,
-        Long visitId,
+        UUID serviceDetailId,
+        UUID visitId,
         String visitCode,
         UUID petId,
         String petName,

@@ -111,7 +111,7 @@ export default function QueuePage() {
             <Table caption="Danh sách chờ phân công" empty="Không có ca nào đang chờ phân công." rows={d.unassigned} rowClass={(row) => (row.emergency ? 'emergency' : '')} columns={[
               { title: 'Thú cưng', render: (row) => <VisitCell visit={row} /> },
               { title: 'Phát phiếu', render: (row) => <>{formatTimeOfInstant(row.ticket?.issuedAt || row.checkedInAt)}<small>chờ {waitedMinutes(row.ticket?.issuedAt || row.checkedInAt)} phút</small></> },
-              { title: 'Triệu chứng', render: (row) => row.initialSymptoms || '—' },
+              { title: 'Lý do đến khám', render: (row) => row.reasonForVisit || '—' },
               { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
                 <Button className="small primary" onClick={() => setDialog({ type: 'assign', visit: row })}>Phân công{d.suggestedDoctorId ? ` (gợi ý: ${doctorName(d.suggestedDoctorId)})` : ''}</Button>
                 <Button className="small" onClick={() => setDialog({ type: 'cancel', visit: row })}>Hủy</Button></div> }]} />

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import StaffLayout from '../../layouts/StaffLayout';
-import { ImagingResults, LabResultsTable } from '../../components/shared/MedicalEntry';
+import { ImagingResults, LabResultsTable, VitalSignsTable } from '../../components/shared/MedicalEntry';
 import { AsyncView, Badge, Button, ConfirmDialog, Facts, Field, FormDialog, Input, Notice, PageHead, Panel, Select, Table, Tabs, Textarea } from '../../components/ui';
 import { catalogApi, pharmacyApi, visitsApi, paraclinicApi } from '../../api/endpoints';
 import { mapFieldErrors } from '../../api/client';
@@ -9,7 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import useAction from '../../hooks/useAction';
 import useAsync from '../../hooks/useAsync';
 import usePolling from '../../hooks/usePolling';
-import { blankToNull, formatDateTime, formatMoney, formatNumber } from '../../lib/format';
+import { blankToNull, formatDate, formatDateTime, formatMoney, formatNumber, toNumber } from '../../lib/format';
 import { sameId } from '../../lib/ids';
 import { serviceCategoryLabel, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
 
@@ -18,55 +18,100 @@ const PARACLINICAL_QUEUES = ['LABORATORY', 'IMAGING'];
 const isParaclinical = (item) => PARACLINICAL_QUEUES.includes(item.queueType);
 const isInRoom = (item) => item.queueType === null || item.queueType === undefined;
 
-/** T02: bắt đầu khám (giai đoạn 1). Bác sĩ tự cân / đo trong phòng; sinh hiệu có thể nhập sau nhưng bắt buộc trước khi chỉ định CLS hoặc chốt ca. */
+/** T02: bắt đầu khám (giai đoạn 1): tạo hồ sơ khám. Cân nặng / thân nhiệt lần đầu và bệnh sử là TÙY CHỌN (ghi sau ở các tab Sinh hiệu / Hồ sơ khám),
+ *  nhưng phải có ít nhất một lần đo đủ cả hai chỉ số trước khi chỉ định cận lâm sàng hoặc chốt ca. */
 function StartExam({ visit, onDone }) {
-  const [form, setForm] = useState({ weightAtVisit: '', temperature: '', clinicalNotes: '' });
+  const [form, setForm] = useState({ weightKg: '', temperatureC: '', anamnesis: '' });
   const [errors, setErrors] = useState({});
   const action = useAction();
   const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
   const submit = async (event) => {
     event.preventDefault();
     const found = {};
-    if (form.weightAtVisit !== '' && !(Number(form.weightAtVisit) > 0)) found.weightAtVisit = 'Cân nặng phải lớn hơn 0.';
-    if (form.temperature !== '' && Number.isNaN(Number(form.temperature))) found.temperature = 'Thân nhiệt không hợp lệ.';
+    if (form.weightKg !== '' && !(Number(form.weightKg) > 0)) found.weightKg = 'Cân nặng phải lớn hơn 0.';
+    if (form.temperatureC !== '' && Number.isNaN(Number(form.temperatureC))) found.temperatureC = 'Thân nhiệt không hợp lệ.';
     setErrors(found);
     if (Object.keys(found).length) return;
-    const body = { weightAtVisit: form.weightAtVisit === '' ? null : Number(form.weightAtVisit), temperature: form.temperature === '' ? null : Number(form.temperature), clinicalNotes: blankToNull(form.clinicalNotes) };
+    const hasVitals = form.weightKg !== '' || form.temperatureC !== '';
+    const body = { vitalSigns: hasVitals ? { weightKg: toNumber(form.weightKg), temperatureC: toNumber(form.temperatureC) } : null, anamnesis: blankToNull(form.anamnesis) };
     const result = await action.run(() => visitsApi.startExam(visit.id, body).catch((problem) => { setErrors(mapFieldErrors(problem)); throw problem; }));
     if (result) onDone();
   };
-  return <Panel title="Bắt đầu khám (giai đoạn 1)" subtitle="Thú cưng đã vào phòng. Phí khám tổng quát được tự động thêm vào hóa đơn. Có thể ghi cân nặng / thân nhiệt ngay hoặc nhập sau.">
+  return <Panel title="Bắt đầu khám (giai đoạn 1)" subtitle="Thú cưng đã vào phòng. Phí khám tổng quát đã được thu lúc tiếp đón. Có thể ghi cân nặng / thân nhiệt và bệnh sử ngay hoặc nhập sau.">
     <form onSubmit={submit} noValidate className="ui-stack" style={{ gap: 16 }}>
       <Notice notice={action.notice} onClose={action.clear} />
       <div className="ui-grid">
-        <Field label="Cân nặng (kg)" error={errors.weightAtVisit}><Input type="number" step="0.1" min="0" value={form.weightAtVisit} onChange={set('weightAtVisit')} autoFocus /></Field>
-        <Field label="Thân nhiệt (°C)" error={errors.temperature}><Input type="number" step="0.1" value={form.temperature} onChange={set('temperature')} /></Field>
-        <Field label="Triệu chứng lâm sàng" wide error={errors.clinicalNotes}><Textarea value={form.clinicalNotes} onChange={set('clinicalNotes')} maxLength={1000} /></Field>
+        <Field label="Cân nặng (kg)" error={errors.weightKg}><Input type="number" step="0.1" min="0" value={form.weightKg} onChange={set('weightKg')} autoFocus /></Field>
+        <Field label="Thân nhiệt (°C)" error={errors.temperatureC}><Input type="number" step="0.1" value={form.temperatureC} onChange={set('temperatureC')} /></Field>
+        <Field label="Bệnh sử (chủ nuôi kể)" wide error={errors.anamnesis} hint={visit.reasonForVisit ? `Lý do đến khám lễ tân ghi: ${visit.reasonForVisit}` : undefined}><Textarea value={form.anamnesis} onChange={set('anamnesis')} maxLength={4000} /></Field>
       </div>
       <div><Button type="submit" variant="primary" busy={action.busy}>Bắt đầu khám</Button></div>
     </form>
   </Panel>;
 }
 
-function VitalsTab({ visit, onChanged }) {
-  const [form, setForm] = useState({ weightAtVisit: visit.weightAtVisit ?? '', temperature: visit.temperature ?? '', clinicalNotes: visit.clinicalNotes || '' });
+const BLANK_VITALS = { weightKg: '', temperatureC: '', heartRateBpm: '', respiratoryRateBpm: '', bodyConditionScore: '', mucousMembraneColor: '', capillaryRefillSec: '', notes: '' };
+
+/** Sinh hiệu: mỗi lần đo là MỘT dòng mới (đo lại thì thêm dòng, không ghi đè). Cần ít nhất một lần đo đủ cân nặng + thân nhiệt trước khi chỉ định CLS / chốt ca. */
+function VitalsTab({ visit, onChanged, editable }) {
+  const [form, setForm] = useState(BLANK_VITALS);
   const [errors, setErrors] = useState({});
   const action = useAction();
   const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
   const save = async (event) => {
     event.preventDefault();
-    const body = { weightAtVisit: form.weightAtVisit === '' ? null : Number(form.weightAtVisit), temperature: form.temperature === '' ? null : Number(form.temperature), clinicalNotes: blankToNull(form.clinicalNotes) };
-    if (await action.run(() => visitsApi.clinicalInfo(visit.id, body).catch((problem) => { setErrors(mapFieldErrors(problem)); throw problem; }), 'Đã lưu sinh hiệu và ghi chú lâm sàng.')) onChanged();
+    const body = {
+      weightKg: toNumber(form.weightKg), temperatureC: toNumber(form.temperatureC), heartRateBpm: toNumber(form.heartRateBpm), respiratoryRateBpm: toNumber(form.respiratoryRateBpm),
+      bodyConditionScore: toNumber(form.bodyConditionScore), mucousMembraneColor: blankToNull(form.mucousMembraneColor), capillaryRefillSec: toNumber(form.capillaryRefillSec), notes: blankToNull(form.notes),
+    };
+    if (Object.values(body).every((value) => value === null)) { setErrors({}); action.setNotice({ type: 'error', text: 'Nhập ít nhất một chỉ số.' }); return; }
+    setErrors({});
+    if (await action.run(() => visitsApi.addVitalSigns(visit.id, body).catch((problem) => { setErrors(mapFieldErrors(problem)); throw problem; }), 'Đã ghi lần đo.')) { setForm(BLANK_VITALS); onChanged(); }
   };
-  return <Panel title="Sinh hiệu & ghi chú lâm sàng" subtitle="Cân nặng và thân nhiệt là bắt buộc trước khi chỉ định cận lâm sàng hoặc chốt ca.">
+  const complete = (visit.vitalSigns || []).some((row) => row.weightKg != null && row.temperatureC != null);
+  return <div className="ui-stack">
+    <Panel title="Các lần đo sinh hiệu" subtitle="Theo thứ tự thời gian. Cần có ít nhất một lần đo đủ cả cân nặng và thân nhiệt trước khi chỉ định cận lâm sàng hoặc chốt ca." flush>
+      {editable && !complete && <div className="ui-alert warning" role="status"><span>Chưa có lần đo nào đủ cả cân nặng và thân nhiệt.</span></div>}
+      <VitalSignsTable rows={visit.vitalSigns || []} />
+    </Panel>
+    {editable && <Panel title="Ghi một lần đo mới" subtitle="Chỉ nhập các chỉ số đã đo; để trống chỉ số không đo.">
+      <form onSubmit={save} noValidate className="ui-stack" style={{ gap: 14 }}>
+        <Notice notice={action.notice} onClose={action.clear} />
+        <div className="ui-grid">
+          <Field label="Cân nặng (kg)" error={errors.weightKg}><Input type="number" step="0.1" min="0" value={form.weightKg} onChange={set('weightKg')} /></Field>
+          <Field label="Thân nhiệt (°C)" error={errors.temperatureC}><Input type="number" step="0.1" value={form.temperatureC} onChange={set('temperatureC')} /></Field>
+          <Field label="Nhịp tim (lần/phút)" error={errors.heartRateBpm}><Input type="number" min="0" value={form.heartRateBpm} onChange={set('heartRateBpm')} /></Field>
+          <Field label="Nhịp thở (lần/phút)" error={errors.respiratoryRateBpm}><Input type="number" min="0" value={form.respiratoryRateBpm} onChange={set('respiratoryRateBpm')} /></Field>
+          <Field label="Điểm thể trạng BCS (1–9)" error={errors.bodyConditionScore}><Input type="number" min="1" max="9" value={form.bodyConditionScore} onChange={set('bodyConditionScore')} /></Field>
+          <Field label="Màu niêm mạc" error={errors.mucousMembraneColor}><Input value={form.mucousMembraneColor} onChange={set('mucousMembraneColor')} maxLength={30} placeholder="Hồng, nhợt, vàng…" /></Field>
+          <Field label="Làm đầy mao mạch CRT (giây)" error={errors.capillaryRefillSec}><Input type="number" step="0.1" min="0" value={form.capillaryRefillSec} onChange={set('capillaryRefillSec')} /></Field>
+          <Field label="Ghi chú" wide error={errors.notes}><Input value={form.notes} onChange={set('notes')} maxLength={255} /></Field>
+        </div>
+        <div><Button type="submit" variant="primary" busy={action.busy}>Ghi lần đo</Button></div>
+      </form>
+    </Panel>}
+  </div>;
+}
+
+/** Hồ sơ khám (medical_records): bệnh sử, kết quả khám lâm sàng, chẩn đoán sơ bộ. Có khóa lạc quan (version); khóa hẳn từ lúc chốt ca. */
+function RecordTab({ visit, onChanged }) {
+  const record = visit.medicalRecord || {};
+  const [form, setForm] = useState({ anamnesis: record.anamnesis || '', clinicalFindings: record.clinicalFindings || '', preliminaryDiagnosis: record.preliminaryDiagnosis || '' });
+  const [errors, setErrors] = useState({});
+  const action = useAction();
+  const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
+  const save = async (event) => {
+    event.preventDefault();
+    const body = { anamnesis: form.anamnesis, clinicalFindings: form.clinicalFindings, preliminaryDiagnosis: form.preliminaryDiagnosis, version: record.version ?? null };
+    if (await action.run(() => visitsApi.updateMedicalRecord(visit.id, body).catch((problem) => { setErrors(mapFieldErrors(problem)); throw problem; }), 'Đã lưu hồ sơ khám.')) onChanged();
+  };
+  return <Panel title="Hồ sơ khám" subtitle="Bệnh sử chủ nuôi kể, kết quả khám lâm sàng và chẩn đoán sơ bộ. Chẩn đoán xác định, phác đồ và lời dặn nhập ở tab Kết luận.">
     <form onSubmit={save} noValidate className="ui-stack" style={{ gap: 14 }}>
       <Notice notice={action.notice} onClose={action.clear} />
-      <div className="ui-grid">
-        <Field label="Cân nặng (kg)" error={errors.weightAtVisit}><Input type="number" step="0.1" min="0" value={form.weightAtVisit} onChange={set('weightAtVisit')} /></Field>
-        <Field label="Thân nhiệt (°C)" error={errors.temperature}><Input type="number" step="0.1" value={form.temperature} onChange={set('temperature')} /></Field>
-        <Field label="Ghi chú lâm sàng" wide error={errors.clinicalNotes}><Textarea value={form.clinicalNotes} onChange={set('clinicalNotes')} maxLength={1000} /></Field>
-      </div>
-      <div><Button type="submit" variant="primary" busy={action.busy}>Lưu</Button></div>
+      <Field label="Bệnh sử" error={errors.anamnesis}><Textarea value={form.anamnesis} onChange={set('anamnesis')} maxLength={4000} rows={3} /></Field>
+      <Field label="Kết quả khám lâm sàng" error={errors.clinicalFindings} hint="Tim phổi, da, niêm mạc, hạch…"><Textarea value={form.clinicalFindings} onChange={set('clinicalFindings')} maxLength={4000} rows={3} /></Field>
+      <Field label="Chẩn đoán sơ bộ" error={errors.preliminaryDiagnosis}><Textarea value={form.preliminaryDiagnosis} onChange={set('preliminaryDiagnosis')} maxLength={2000} rows={2} /></Field>
+      <div><Button type="submit" variant="primary" busy={action.busy}>Lưu hồ sơ khám</Button></div>
     </form>
   </Panel>;
 }
@@ -222,7 +267,9 @@ function PrescriptionTab({ visit }) {
 /** Bản nháp kết luận giữ ở trang cha (và sessionStorage) để không mất khi đổi tab hoặc tải lại; chỉ gửi lên máy chủ lúc chốt ca. */
 const DRAFT_KEY = (visitId) => `vetclinic.conclusion.${visitId}`;
 function loadDraft(visit) {
-  const base = { diagnosis: visit.diagnosis || '', treatmentPlan: visit.treatmentPlan || '', doctorAdvice: visit.doctorAdvice || '' };
+  const record = visit.medicalRecord || {};
+  // Chẩn đoán chốt mặc định lấy chẩn đoán xác định đã có, nếu chưa thì chẩn đoán sơ bộ (ca không làm cận lâm sàng được dùng luôn)
+  const base = { finalDiagnosis: record.finalDiagnosis || record.preliminaryDiagnosis || '', treatmentPlan: record.treatmentPlan || '', doctorAdvice: record.doctorAdvice || '', followUpDate: record.followUpDate || '' };
   try { const saved = JSON.parse(sessionStorage.getItem(DRAFT_KEY(visit.id)) || 'null'); if (saved) return { ...base, ...saved }; } catch (problem) { /* không có sessionStorage: dùng dữ liệu máy chủ */ }
   return base;
 }
@@ -232,9 +279,10 @@ function ConclusionTab({ draft, setDraft, onNext }) {
   const set = (key) => (event) => setDraft({ ...draft, [key]: event.target.value });
   return <Panel title="Kết luận" subtitle="Ghi chẩn đoán, phác đồ và lời dặn dựa trên kết quả khám và cận lâm sàng. Bước tiếp theo là kê đơn thuốc, cuối cùng mới chốt ca. Bản nháp được giữ khi bạn đổi tab; chỉ được ghi vào hồ sơ lúc chốt ca.">
     <div className="ui-stack" style={{ gap: 14 }}>
-      <Field label="Chẩn đoán *"><Textarea value={draft.diagnosis} onChange={set('diagnosis')} maxLength={2000} rows={3} autoFocus /></Field>
-      <Field label="Phác đồ điều trị"><Textarea value={draft.treatmentPlan} onChange={set('treatmentPlan')} maxLength={2000} rows={3} /></Field>
+      <Field label="Chẩn đoán xác định *"><Textarea value={draft.finalDiagnosis} onChange={set('finalDiagnosis')} maxLength={2000} rows={3} autoFocus /></Field>
+      <Field label="Phác đồ điều trị"><Textarea value={draft.treatmentPlan} onChange={set('treatmentPlan')} maxLength={4000} rows={3} /></Field>
       <Field label="Lời dặn cho chủ nuôi"><Textarea value={draft.doctorAdvice} onChange={set('doctorAdvice')} maxLength={2000} rows={3} /></Field>
+      <Field label="Hẹn tái khám"><Input type="date" value={draft.followUpDate} onChange={set('followUpDate')} /></Field>
       <div><Button variant="primary" onClick={onNext}>Tiếp tục: kê đơn thuốc</Button></div>
     </div>
   </Panel>;
@@ -244,16 +292,16 @@ function ConclusionTab({ draft, setDraft, onNext }) {
 function CloseTab({ visit, draft, onClosed, goTo }) {
   const prescription = useAsync(() => pharmacyApi.prescriptionByVisit(visit.id).catch((problem) => { if (problem.status === 404) return null; throw problem; }), [visit.id]);
   const [confirming, setConfirming] = useState(false);
-  const diagnosis = draft.diagnosis.trim();
+  const diagnosis = draft.finalDiagnosis.trim();
   const unfinished = (visit.services || []).filter((row) => ['PENDING', 'IN_PROGRESS'].includes(row.status) && isInRoom(row));
-  const noVitals = !visit.weightAtVisit || !visit.temperature;
+  const noVitals = !(visit.vitalSigns || []).some((row) => row.weightKg != null && row.temperatureC != null);
   const medicines = prescription.data?.items?.length || 0;
   return <Panel title="Chốt ca" subtitle="Bước cuối: sau khi chốt, hồ sơ bị khóa (không sửa kết luận, dịch vụ, đơn thuốc) và ca chuyển sang chờ thanh toán. Hóa đơn dịch vụ đã có sẵn cho thu ngân; thuốc bán theo đơn nếu khách chọn mua.">
     <div className="ui-stack" style={{ gap: 14 }}>
-      {!diagnosis && <div className="ui-alert error" role="alert"><span>Chưa có chẩn đoán — bắt buộc để chốt ca. Nhập ở tab Kết luận.</span><Button className="small" onClick={() => goTo('conclusion')}>Đến tab Kết luận</Button></div>}
-      {noVitals && <div className="ui-alert error" role="alert"><span>Chưa có cân nặng / thân nhiệt. Nhập ở tab Sinh hiệu.</span><Button className="small" onClick={() => goTo('vitals')}>Đến tab Sinh hiệu</Button></div>}
+      {!diagnosis && <div className="ui-alert error" role="alert"><span>Chưa có chẩn đoán xác định — bắt buộc để chốt ca. Nhập ở tab Kết luận.</span><Button className="small" onClick={() => goTo('conclusion')}>Đến tab Kết luận</Button></div>}
+      {noVitals && <div className="ui-alert error" role="alert"><span>Chưa có lần đo nào đủ cả cân nặng và thân nhiệt. Nhập ở tab Sinh hiệu.</span><Button className="small" onClick={() => goTo('vitals')}>Đến tab Sinh hiệu</Button></div>}
       {unfinished.length > 0 && <div className="ui-alert warning" role="status"><span>Còn dịch vụ tại phòng chưa xong: {unfinished.map((row) => row.serviceName).join(', ')}. Hãy bấm “Đã thực hiện” hoặc hủy trước khi chốt.</span></div>}
-      <Facts items={[['Chẩn đoán', diagnosis || null], ['Phác đồ điều trị', draft.treatmentPlan], ['Lời dặn cho chủ nuôi', draft.doctorAdvice], ['Đơn thuốc', prescription.loading ? 'Đang tải…' : (medicines ? `Đã kê ${medicines} loại thuốc` : 'Chưa kê đơn (không bán thuốc theo đơn)')]]} />
+      <Facts items={[['Chẩn đoán', diagnosis || null], ['Phác đồ điều trị', draft.treatmentPlan], ['Lời dặn cho chủ nuôi', draft.doctorAdvice], ['Hẹn tái khám', draft.followUpDate ? formatDate(draft.followUpDate) : null], ['Đơn thuốc', prescription.loading ? 'Đang tải…' : (medicines ? `Đã kê ${medicines} loại thuốc` : 'Chưa kê đơn (không bán thuốc theo đơn)')]]} />
       <div className="ui-actions">
         <Button onClick={() => goTo('conclusion')}>Sửa kết luận</Button>
         <Button onClick={() => goTo('prescription')}>Sửa đơn thuốc</Button>
@@ -261,10 +309,10 @@ function CloseTab({ visit, draft, onClosed, goTo }) {
       </div>
     </div>
     {confirming && <ConfirmDialog title="Chốt ca khám" confirmLabel="Chốt ca" onClose={() => setConfirming(false)} onConfirm={async () => {
-      await visitsApi.closeVisit(visit.id, { diagnosis, treatmentPlan: blankToNull(draft.treatmentPlan), doctorAdvice: blankToNull(draft.doctorAdvice), clinicalNotes: blankToNull(visit.clinicalNotes) });
+      await visitsApi.closeVisit(visit.id, { finalDiagnosis: diagnosis, treatmentPlan: blankToNull(draft.treatmentPlan), doctorAdvice: blankToNull(draft.doctorAdvice), followUpDate: draft.followUpDate || null });
       try { sessionStorage.removeItem(DRAFT_KEY(visit.id)); } catch (problem) { /* bỏ qua */ }
       onClosed();
-    }}>Hồ sơ sẽ bị khóa. Hãy chắc chắn đã lưu đơn thuốc và hoàn tất / hủy các dịch vụ tại phòng. Cần có chẩn đoán, cân nặng và thân nhiệt.</ConfirmDialog>}
+    }}>Hồ sơ sẽ bị khóa. Hãy chắc chắn đã lưu đơn thuốc và hoàn tất / hủy các dịch vụ tại phòng. Cần có chẩn đoán xác định và một lần đo đủ cân nặng + thân nhiệt.</ConfirmDialog>}
   </Panel>;
 }
 
@@ -287,13 +335,16 @@ export default function VisitPage() {
         const mine = sameId(v.doctorId, user.id);
         const hasResults = v.labResults?.length > 0 || v.imagingResults?.length > 0;
         const conclusion = draft || loadDraft(v);
+        const record = v.medicalRecord;
+        const vitals = v.vitalSigns || [];
+        const latest = (key) => [...vitals].reverse().find((row) => row[key] != null)?.[key];
         return <>
           <PageHead eyebrow={v.visitCode} title={`${v.petName} (${v.speciesName})`} actions={<><Link className="ui-button" to="/vet/today">← Hàng đợi</Link><Link className="ui-button" to={`/vet/history?petId=${v.petId}`}>Bệnh án trước đây</Link></>}>
             Tiếp nhận {formatDateTime(v.checkedInAt)}{v.emergency ? ' · CẤP CỨU' : ''} · Phòng {v.assignedRoom || '—'}
           </PageHead>
           <Notice notice={action.notice} onClose={action.clear} />
           <Panel title="Tóm tắt" actions={<Badge map={VISIT_STATUS} value={v.status} />}>
-            <Facts items={[['Triệu chứng ban đầu', v.initialSymptoms], ['Cân nặng', v.weightAtVisit ? `${formatNumber(v.weightAtVisit, 2)} kg` : null], ['Thân nhiệt', v.temperature ? `${formatNumber(v.temperature, 1)} °C` : null], ['Ghi chú lâm sàng', v.clinicalNotes], ['Chẩn đoán', v.diagnosis]]} />
+            <Facts items={[['Lý do đến khám', v.reasonForVisit], ['Cân nặng (lần đo gần nhất)', latest('weightKg') != null ? `${formatNumber(latest('weightKg'), 2)} kg` : null], ['Thân nhiệt (lần đo gần nhất)', latest('temperatureC') != null ? `${formatNumber(latest('temperatureC'), 1)} °C` : null], ['Chẩn đoán', record?.finalDiagnosis || record?.preliminaryDiagnosis]]} />
           </Panel>
           {!mine && v.doctorId && <div className="ui-alert warning"><span>Ca này thuộc bác sĩ khác — bạn chỉ xem được.</span></div>}
 
@@ -303,8 +354,9 @@ export default function VisitPage() {
           </> : <div className="ui-alert warning"><span>Khách chưa nộp phí khám nên ca chưa có phiếu và chưa vào hàng đợi. Nộp phí tại quầy thu ngân xong mới bắt đầu khám được.</span></div>)}
 
           {mine && v.status === 'IN_PROGRESS' && <>
-            <Tabs value={tab} onChange={setTab} tabs={[{ key: 'vitals', label: 'Sinh hiệu' }, { key: 'services', label: 'Dịch vụ & cận lâm sàng' }, { key: 'conclusion', label: 'Kết luận' }, { key: 'prescription', label: 'Đơn thuốc' }, { key: 'close', label: 'Chốt ca' }]} />
-            {tab === 'vitals' && <VitalsTab visit={v} onChanged={visit.refresh} />}
+            <Tabs value={tab} onChange={setTab} tabs={[{ key: 'vitals', label: 'Sinh hiệu' }, { key: 'record', label: 'Hồ sơ khám' }, { key: 'services', label: 'Dịch vụ & cận lâm sàng' }, { key: 'conclusion', label: 'Kết luận' }, { key: 'prescription', label: 'Đơn thuốc' }, { key: 'close', label: 'Chốt ca' }]} />
+            {tab === 'vitals' && <VitalsTab visit={v} onChanged={visit.refresh} editable />}
+            {tab === 'record' && <RecordTab visit={v} onChanged={visit.refresh} />}
             {tab === 'services' && <ServicesTab visit={v} onChanged={visit.refresh} />}
             {tab === 'conclusion' && <ConclusionTab draft={conclusion} setDraft={setDraft} onNext={() => setTab('prescription')} />}
             {tab === 'prescription' && <PrescriptionTab visit={v} />}
@@ -323,6 +375,10 @@ export default function VisitPage() {
           {['WAITING_PAYMENT', 'COMPLETED'].includes(v.status) && <div className="ui-alert info"><span>Hồ sơ đã chốt{v.status === 'COMPLETED' ? ' và hoàn tất' : ', đang chờ thanh toán'}; không chỉnh sửa được.{v.status === 'WAITING_PAYMENT' && mine ? ' Cần sửa thì mở lại hồ sơ (hóa đơn dịch vụ đã thu giữ nguyên; dịch vụ thêm mới có hóa đơn mới).' : ''}</span>
             {v.status === 'WAITING_PAYMENT' && (mine || user.role === 'ADMIN') && <Button className="small" onClick={() => setDialog('reopen')}>Mở lại hồ sơ</Button>}</div>}
 
+          {v.status !== 'IN_PROGRESS' && vitals.length > 0 && <Panel title="Sinh hiệu" flush><VitalSignsTable rows={vitals} /></Panel>}
+          {v.status !== 'IN_PROGRESS' && record && <Panel title={`Hồ sơ khám${record.locked ? ' (đã khóa)' : ''}`}>
+            <Facts items={[['Bệnh sử', record.anamnesis], ['Kết quả khám lâm sàng', record.clinicalFindings], ['Chẩn đoán sơ bộ', record.preliminaryDiagnosis], ['Chẩn đoán xác định', record.finalDiagnosis],
+              ['Phác đồ điều trị', record.treatmentPlan], ['Lời dặn cho chủ nuôi', record.doctorAdvice], ['Hẹn tái khám', record.followUpDate ? formatDate(record.followUpDate) : null]]} /></Panel>}
           {(v.services?.length > 0 && v.status !== 'IN_PROGRESS') && <Panel title="Dịch vụ đã chỉ định" flush><Table caption="Dịch vụ" rows={v.services} columns={[
             { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{serviceCategoryLabel(row.category)}</small></> }, { title: 'Trạng thái', render: (row) => <Badge map={SERVICE_DETAIL_STATUS} value={row.status} /> }]} /></Panel>}
           {hasResults && <Panel title="Kết quả cận lâm sàng">

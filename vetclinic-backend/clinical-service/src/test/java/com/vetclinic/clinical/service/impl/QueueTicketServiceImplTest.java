@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.IMAGING_TECH;
@@ -114,7 +115,7 @@ class QueueTicketServiceImplTest {
         QueueTicket head = ticket(60L, QueueType.DOCTOR, 100L, DOCTOR, 4, 0, TicketStatus.WAITING);
         QueueTicket next = ticket(61L, QueueType.DOCTOR, 101L, DOCTOR, 5, 0, TicketStatus.WAITING);
         when(ticketRepository.findDoctorQueue(DOCTOR)).thenReturn(List.of(head, next));
-        when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING, DOCTOR)));
+        when(visitRepository.findWithPetById(lid(100L))).thenReturn(Optional.of(visit(100L, VisitStatus.WAITING, DOCTOR)));
 
         QueueTicketResponse called = service.callNext(QueueType.DOCTOR);
 
@@ -128,7 +129,7 @@ class QueueTicketServiceImplTest {
         assertThat(event.action()).isEqualTo("CALLED");
         assertThat(event.station()).isEqualTo("DOCTOR_ROOM");
         assertThat(event.ticketNo()).isEqualTo(4);
-        assertThat(event.visitId()).isEqualTo(100L);
+        assertThat(event.visitId()).isEqualTo(lid(100L));
     }
 
     @Test
@@ -153,7 +154,7 @@ class QueueTicketServiceImplTest {
         stubRoom(LAB_TECH, RoleCode.LAB_TECHNICIAN, "P201");
         QueueTicket third = ticket(72L, QueueType.LABORATORY, 102L, null, 3, 0, TicketStatus.WAITING);
         when(ticketRepository.findById(72L)).thenReturn(Optional.of(third));
-        when(visitRepository.findWithPetById(102L)).thenReturn(Optional.of(visit(102L, VisitStatus.WAITING_RESULTS, DOCTOR)));
+        when(visitRepository.findWithPetById(lid(102L))).thenReturn(Optional.of(visit(102L, VisitStatus.WAITING_RESULTS, DOCTOR)));
 
         QueueTicketResponse called = service.call(72L);
 
@@ -190,19 +191,19 @@ class QueueTicketServiceImplTest {
         PetVisit visit = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
         when(ticketRepository.findById(80L)).thenReturn(Optional.of(t));
         when(ticketRepository.findByIdForUpdate(80L)).thenReturn(Optional.of(t));
-        when(ticketIssuer.detailIdsOf(80L)).thenReturn(List.of(2L, 1L));
-        when(detailRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(us));
-        when(detailRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(xray));
-        when(support.lock(100L)).thenReturn(visit);
-        when(visitRepository.findWithPetById(100L)).thenReturn(Optional.of(visit));
+        when(ticketIssuer.detailIdsOf(80L)).thenReturn(List.of(lid(2L), lid(1L)));
+        when(detailRepository.findByIdForUpdate(lid(1L))).thenReturn(Optional.of(us));
+        when(detailRepository.findByIdForUpdate(lid(2L))).thenReturn(Optional.of(xray));
+        when(support.lock(lid(100L))).thenReturn(visit);
+        when(visitRepository.findWithPetById(lid(100L))).thenReturn(Optional.of(visit));
 
         QueueTicketResponse started = service.start(80L);
 
         assertThat(started.status()).isEqualTo(TicketStatus.IN_SERVICE);
         assertThat(us.getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
         assertThat(xray.getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
-        verify(support).recordDetail(1L, ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", IMAGING_TECH, null);
-        verify(support).recordDetail(2L, ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", IMAGING_TECH, null);
+        verify(support).recordDetail(lid(1L), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", IMAGING_TECH, null);
+        verify(support).recordDetail(lid(2L), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", IMAGING_TECH, null);
     }
 
     @Test
@@ -217,17 +218,17 @@ class QueueTicketServiceImplTest {
         QueueTicket started = ticket(70L, QueueType.LABORATORY, 101L, null, 1, 0, TicketStatus.IN_SERVICE);
         when(ticketRepository.findById(70L)).thenReturn(Optional.of(started));
         when(ticketRepository.findByIdForUpdate(70L)).thenReturn(Optional.of(started));
-        when(ticketIssuer.detailIdsOf(70L)).thenReturn(List.of(3L));
-        when(detailRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(detail(3L, 101L, CBC, ServiceDetailStatus.IN_PROGRESS)));
-        when(support.lock(101L)).thenReturn(visit(101L, VisitStatus.WAITING_RESULTS, DOCTOR));
+        when(ticketIssuer.detailIdsOf(70L)).thenReturn(List.of(lid(3L)));
+        when(detailRepository.findByIdForUpdate(lid(3L))).thenReturn(Optional.of(detail(3L, 101L, CBC, ServiceDetailStatus.IN_PROGRESS)));
+        when(support.lock(lid(101L))).thenReturn(visit(101L, VisitStatus.WAITING_RESULTS, DOCTOR));
         assertError(ErrorCode.TICKET_NOT_WAITING, () -> service.start(70L));
 
         QueueTicket waiting = ticket(71L, QueueType.LABORATORY, 102L, null, 2, 0, TicketStatus.WAITING);
         when(ticketRepository.findById(71L)).thenReturn(Optional.of(waiting));
         when(ticketRepository.findByIdForUpdate(71L)).thenReturn(Optional.of(waiting));
-        when(ticketIssuer.detailIdsOf(71L)).thenReturn(List.of(4L));
-        when(detailRepository.findByIdForUpdate(4L)).thenReturn(Optional.of(detail(4L, 102L, CBC, ServiceDetailStatus.PENDING)));
-        when(support.lock(102L)).thenReturn(visit(102L, VisitStatus.COMPLETED, DOCTOR));
+        when(ticketIssuer.detailIdsOf(71L)).thenReturn(List.of(lid(4L)));
+        when(detailRepository.findByIdForUpdate(lid(4L))).thenReturn(Optional.of(detail(4L, 102L, CBC, ServiceDetailStatus.PENDING)));
+        when(support.lock(lid(102L))).thenReturn(visit(102L, VisitStatus.COMPLETED, DOCTOR));
         assertError(ErrorCode.INVALID_STATUS_TRANSITION, () -> service.start(71L));
         verify(support, never()).recordDetail(any(), any(), any(), any(), any(), any());
     }

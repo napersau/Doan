@@ -1,5 +1,6 @@
 package com.vetclinic.billing.client;
 
+import java.util.UUID;
 import com.vetclinic.billing.dto.response.VisitSummaryResponse;
 import com.vetclinic.common.dto.ApiResponse;
 import org.springframework.cloud.openfeign.FeignClient;
@@ -17,9 +18,9 @@ public interface ClinicalClient {
 
     /** Trạng thái + bác sĩ phụ trách + chủ nuôi của đợt khám. */
     @GetMapping("/{id}/summary")
-    ApiResponse<VisitSummaryResponse> getVisit(@PathVariable("id") Long id);
+    ApiResponse<VisitSummaryResponse> getVisit(@PathVariable("id") UUID id);
 
     /** Như trên theo lô (làm giàu danh sách); id không tồn tại bị bỏ qua. */
     @GetMapping("/summaries")
-    ApiResponse<List<VisitSummaryResponse>> getVisits(@RequestParam("ids") List<Long> ids);
+    ApiResponse<List<VisitSummaryResponse>> getVisits(@RequestParam("ids") List<UUID> ids);
 }

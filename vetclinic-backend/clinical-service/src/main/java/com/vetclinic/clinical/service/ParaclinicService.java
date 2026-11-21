@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service;
 
+import java.util.UUID;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
 import com.vetclinic.clinical.dto.response.LabTestItemResponse;
 import com.vetclinic.clinical.constant.QueueType;
@@ -25,38 +26,38 @@ public interface ParaclinicService {
     List<QueueItemResponse> queue(QueueType queueType);
 
     /** Phòng Lab: ghi nhận đã lấy mẫu (action SAMPLE_COLLECTED, trạng thái vẫn IN_PROGRESS) để bên CĐHA thấy huy hiệu liên phòng. */
-    ServiceDetailResponse sampleCollected(Long detailId);
+    ServiceDetailResponse sampleCollected(UUID detailId);
 
     /**
      * Form nhập kết quả xét nghiệm của một chỉ định: các chỉ số thuộc dịch vụ đó (dịch vụ chưa cấu hình thì mọi chỉ số),
      * kèm khoảng tham chiếu CỦA LOÀI thú cưng trong đợt khám.
      */
-    List<LabTestItemResponse> labForm(Long detailId);
+    List<LabTestItemResponse> labForm(UUID detailId);
 
     /**
      * FR-30: Bác sĩ bấm "Đã thực hiện" cho dịch vụ tại phòng (PENDING -> COMPLETED; ghi lịch sử START_PROCESSING rồi COMPLETED).
      * Chỉ Bác sĩ được gán, khi ca đang khám (IN_PROGRESS) và chưa khóa.
      */
-    ServiceDetailResponse perform(Long detailId);
+    ServiceDetailResponse perform(UUID detailId);
 
     /**
      * EX-08 (17/11/2026): hủy một dịch vụ. Hóa đơn chưa thu -> CANCELLED; đã thu và {@code reasonType = CLINIC} (phòng khám không
      * thực hiện được XN / CĐHA) -> REFUNDED; đã thu và CUSTOMER (khách tự hủy) -> giữ PAID. {@code reasonType} null: Bác sĩ = CLINIC,
      * kỹ thuật viên = CUSTOMER.
      */
-    ServiceDetailResponse cancel(Long detailId, String reason, String reasonType);
+    ServiceDetailResponse cancel(UUID detailId, String reason, String reasonType);
 
     /** GET /lab-results/{detailId}: kết quả đã nhập của một chỉ định xét nghiệm, kèm nhãn đánh giá theo khoảng đã snapshot. */
-    List<LabResultResponse> labResults(Long detailId);
+    List<LabResultResponse> labResults(UUID detailId);
 
     /**
      * UC-25: nhập chỉ số xét nghiệm, tự đối chiếu khoảng tham chiếu theo loài và snapshot lại (BR-23, BR-24). Dịch vụ đã cấu hình
      * gói chỉ số ({@code service_lab_test_items}) thì PHẢI nhập đủ mọi chỉ số của gói (thiếu -> SYS_1001).
      */
-    ServiceDetailResponse submitLabResults(Long detailId, LabResultRequest request);
+    ServiceDetailResponse submitLabResults(UUID detailId, LabResultRequest request);
 
     /** UC-26: mô tả, kết luận hình thái học và tải ảnh. Cần ít nhất một ảnh hợp lệ. */
-    ServiceDetailResponse submitImagingResult(Long detailId, String description, String conclusion,
+    ServiceDetailResponse submitImagingResult(UUID detailId, String description, String conclusion,
                                               List<MultipartFile> files);
 
     AttachmentDownload downloadAttachment(Long attachmentId);

@@ -1,5 +1,6 @@
 package com.vetclinic.billing.service;
 
+import java.util.UUID;
 import com.vetclinic.billing.client.ClinicalClient;
 import com.vetclinic.billing.dto.response.VisitSummaryResponse;
 import com.vetclinic.common.dto.ApiResponse;
@@ -27,7 +28,7 @@ public class VisitLookup {
 
     private final ClinicalClient clinicalClient;
 
-    public VisitSummaryResponse require(Long visitId) {
+    public VisitSummaryResponse require(UUID visitId) {
         ApiResponse<VisitSummaryResponse> response = clinicalClient.getVisit(visitId);
         VisitSummaryResponse visit = response == null ? null : response.getData();
         if (visit == null) {
@@ -36,7 +37,7 @@ public class VisitLookup {
         return visit;
     }
 
-    public VisitSummaryResponse tryFind(Long visitId) {
+    public VisitSummaryResponse tryFind(UUID visitId) {
         try {
             return require(visitId);
         } catch (RuntimeException e) {
@@ -45,7 +46,7 @@ public class VisitLookup {
         }
     }
 
-    public Map<Long, VisitSummaryResponse> tryFindAll(Collection<Long> visitIds) {
+    public Map<UUID, VisitSummaryResponse> tryFindAll(Collection<UUID> visitIds) {
         if (visitIds.isEmpty()) {
             return Map.of();
         }

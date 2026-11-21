@@ -1,5 +1,8 @@
 package com.vetclinic.clinical.entity;
 
+import jakarta.persistence.Version;
+import java.util.UUID;
+import org.hibernate.annotations.UuidGenerator;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,11 +23,11 @@ import java.time.Instant;
 @AllArgsConstructor
 public class VisitServiceDetail {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @UuidGenerator(style = UuidGenerator.Style.VERSION_7)
+    private UUID id;
 
     @Column(name = "visit_id", nullable = false)
-    private Long visitId;
+    private UUID visitId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "service_id", nullable = false)
@@ -44,6 +47,10 @@ public class VisitServiceDetail {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
 
     // Dịch vụ XN / CĐHA vào hàng đợi qua queue_ticket_items sau khi khách nộp tiền (17/11/2026); bảng này không có cột hàng đợi.
     // Giá/VAT KHÔNG nằm ở đây mà ở service_invoices (1-1 với dòng chỉ định này).

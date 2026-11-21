@@ -25,7 +25,7 @@ public class VisitServiceDetailHistory {
     private Long id;
 
     @Column(name = "visit_service_detail_id", nullable = false)
-    private Long visitServiceDetailId;
+    private UUID visitServiceDetailId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "from_status")

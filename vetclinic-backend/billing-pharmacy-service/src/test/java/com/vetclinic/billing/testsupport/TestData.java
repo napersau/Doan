@@ -45,8 +45,13 @@ public final class TestData {
                 .salePrice(new BigDecimal(price)).vatRate(new BigDecimal("0.05")).stockQuantity(stock).minStockAlert(10).active(true).version(0L).build();
     }
 
+    /** UUID cố định của đợt khám thử (019a9442-d840-7000-8000-0000000000NN), cùng dạng với bên clinical. */
+    public static UUID vid(long n) {
+        return UUID.fromString(String.format("019a9442-d840-7000-8000-%012d", n));
+    }
+
     public static VisitSummaryResponse visit(long id, VisitStatus status, UUID doctorId) {
-        return new VisitSummaryResponse(id, "VIS-2026-" + id, status, uid(11), "Lu", OWNER, doctorId);
+        return new VisitSummaryResponse(vid(id), "VIS-2026-" + id, status, uid(11), "Lu", OWNER, doctorId);
     }
 
     public static PrescriptionItem item(long id, Medicine medicine, int quantity) {
@@ -55,7 +60,7 @@ public final class TestData {
     }
 
     public static Prescription prescription(long id, long visitId, PrescriptionItem... items) {
-        Prescription prescription = Prescription.builder().id(id).visitId(visitId).build();
+        Prescription prescription = Prescription.builder().id(id).visitId(vid(visitId)).build();
         for (PrescriptionItem item : items) {
             prescription.addItem(item);
         }

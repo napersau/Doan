@@ -150,10 +150,10 @@ owner_pet = f"PET-CK-{SUFFIX}"
 pet_id = str(uuid.uuid4())   # pets.id là UUID (v4.0, bước 4.1)
 sql("INSERT INTO pet_clinic_clinical_db.pets (id, owner_id, owner_name_snapshot, owner_phone_snapshot, species_id, pet_code, name) VALUES "
     f"(UNHEX(REPLACE('{pet_id}','-','')), UNHEX(REPLACE('{OWNER}','-','')), 'Hoàng Thị Lan', '0912000008', 1, '{owner_pet}', 'Thử giá')")
-st, res = call("POST", "/api/v1/clinical/pet-visits/check-in", RECEPTION, {"petId": pet_id, "isEmergency": False, "initialSymptoms": "thử giá"})
+st, res = call("POST", "/api/v1/clinical/pet-visits/check-in", RECEPTION, {"petId": pet_id, "isEmergency": False, "reasonForVisit": "thử giá"})
 check("check-in -> 201 (phí khám lập từ bảng giá)", st == 201, (st, res))
 if st == 201:
-    visit_id = res["data"]["id"]
+    visit_id = f"UNHEX(REPLACE('{res['data']['id']}','-',''))"   # pet_visits.id là BINARY(16) (v4.0, bước 4.2)
     row = sql("SELECT i.unit_price, i.vat_rate FROM pet_clinic_clinical_db.service_invoices i "
               "JOIN pet_clinic_clinical_db.visit_service_details d ON d.id = i.visit_service_detail_id "
               f"WHERE d.visit_id = {visit_id}").split("\t")

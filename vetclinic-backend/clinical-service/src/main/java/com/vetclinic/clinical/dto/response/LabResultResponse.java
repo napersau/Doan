@@ -7,7 +7,7 @@ import java.time.Instant;
 
 public record LabResultResponse(
         Long id,
-        Long serviceDetailId,
+        UUID serviceDetailId,
         Short labTestItemId,
         String code,
         String name,

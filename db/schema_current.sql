@@ -14,7 +14,7 @@
 -- 4 Cơ sở dữ liệu logic:
 -- 1. pet_clinic_auth_db             : auth-service (:8081)             - 9 bảng (v4.0, bước 2.1)
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
--- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 20 bảng (v4.0, bước 3.1 + 4.1 processed_events: + service_categories, service_prices, species/lab_test_items SMALLINT)
+-- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 22 bảng (v4.0, bước 3.1 + 4.1 processed_events + 4.2 vital_signs, medical_records: + service_categories, service_prices, species/lab_test_items SMALLINT)
 -- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 6 bảng
 -- TỔNG CỘNG: 27 BẢNG
 --
@@ -430,41 +430,73 @@ CREATE TABLE IF NOT EXISTS lab_test_reference_ranges (
     CONSTRAINT chk_ltrr_range CHECK (min_value <= max_value)
 );
 
--- 12. PET_VISITS (ĐỢT KHÁM NGOẠI TRÚ 2 PHA)
--- Đã bỏ: assigned_room (= users.room_number của bác sĩ), cancel_reason, started_at,
---        closed_at, completed_at (lấy từ pet_visit_status_histories).
--- Giữ checked_in_at: thời điểm tiếp đón. Thông tin xếp hàng nằm ở queue_tickets (không lưu trên hồ sơ khám).
+-- 22. PET_VISITS (ĐỢT KHÁM - CHỈ THÔNG TIN HÀNH CHÍNH, LỄ TÂN NHẬP LÚC TIẾP ĐÓN)
+-- status: WAITING | IN_PROGRESS | WAITING_RESULTS | RESULTS_READY | WAITING_PAYMENT | COMPLETED | CANCELLED.
+-- Sinh hiệu ở vital_signs, nội dung chuyên môn ở medical_records, hàng đợi ở Redis.
 CREATE TABLE IF NOT EXISTS pet_visits (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
     visit_code VARCHAR(50) NOT NULL UNIQUE,
-    pet_id BINARY(16) NOT NULL, -- LFK-nội-bộ: pets.id (UUIDv7)
+    pet_id BINARY(16) NOT NULL,
     appointment_id BINARY(16) NULL UNIQUE, -- LFK: appointment.appointments (NULL = khách vãng lai)
-    doctor_id BINARY(16) NULL, -- LFK: auth.users (bác sĩ được phân công)
-    receptionist_id BINARY(16) NOT NULL, -- LFK: auth.users (lễ tân tiếp đón)
+    doctor_id BINARY(16) NULL, -- LFK: auth.users (Bác sĩ được phân công)
+    doctor_name_snapshot VARCHAR(150) NULL, -- Tránh N+1 khi liệt kê; cập nhật qua UserProfileUpdatedEvent
+    receptionist_id BINARY(16) NOT NULL, -- LFK: auth.users (Lễ tân tiếp đón)
     is_emergency BOOLEAN NOT NULL DEFAULT FALSE,
-    weight_at_visit DECIMAL(5, 2) NULL, -- Bác sĩ cân tại phòng khám
-    temperature DECIMAL(4, 1) NULL, -- Bác sĩ đo tại phòng khám
-    initial_symptoms TEXT NULL,
-    clinical_notes TEXT NULL,
-    diagnosis TEXT NULL,
-    treatment_plan TEXT NULL,
-    doctor_advice TEXT NULL,
-    status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
+    reason_for_visit TEXT NULL, -- Lý do đến khám do chủ nuôi khai với Lễ tân
+    status VARCHAR(20) NOT NULL DEFAULT 'WAITING',
     checked_in_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version BIGINT NOT NULL DEFAULT 0, -- Khóa lạc quan
+    version BIGINT NOT NULL DEFAULT 0, -- Khóa lạc quan (đổi trạng thái đợt khám)
     CONSTRAINT fk_visits_pet FOREIGN KEY (pet_id) REFERENCES pets(id)
 );
 CREATE INDEX idx_visits_pet ON pet_visits(pet_id);
 CREATE INDEX idx_visits_doctor_status ON pet_visits(doctor_id, status);
+CREATE INDEX idx_visits_status_date ON pet_visits(status, checked_in_at);
 CREATE INDEX idx_visits_receptionist ON pet_visits(receptionist_id);
 
--- 13. PET_VISIT_STATUS_HISTORIES (AUDIT TRAIL ĐỢT KHÁM)
--- Thời điểm bắt đầu khám / chốt ca / hoàn tất / lý do hủy đều truy từ bảng này.
+-- 23. VITAL_SIGNS (SINH HIỆU / TIỀN TRẠM - CÓ THỂ ĐO NHIỀU LẦN TRONG MỘT ĐỢT KHÁM)
+CREATE TABLE IF NOT EXISTS vital_signs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    visit_id BINARY(16) NOT NULL,
+    weight_kg DECIMAL(5, 2) NULL,
+    temperature_c DECIMAL(4, 1) NULL,
+    heart_rate_bpm SMALLINT NULL,
+    respiratory_rate_bpm SMALLINT NULL,
+    body_condition_score TINYINT NULL, -- Thang 1 - 9
+    mucous_membrane_color VARCHAR(30) NULL, -- Hồng, nhợt, vàng, tím...
+    capillary_refill_sec DECIMAL(3, 1) NULL, -- Thời gian làm đầy mao mạch
+    notes VARCHAR(255) NULL,
+    recorded_by BINARY(16) NOT NULL, -- LFK: auth.users
+    recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vs_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
+    CONSTRAINT chk_vs_weight CHECK (weight_kg IS NULL OR weight_kg > 0),
+    CONSTRAINT chk_vs_temp CHECK (temperature_c IS NULL OR temperature_c BETWEEN 30 AND 45),
+    CONSTRAINT chk_vs_bcs CHECK (body_condition_score IS NULL OR body_condition_score BETWEEN 1 AND 9)
+);
+CREATE INDEX idx_vs_visit ON vital_signs(visit_id, recorded_at);
+
+-- 24. MEDICAL_RECORDS (HỒ SƠ KHÁM CHUYÊN MÔN - BÁC SĨ, 1-1 VỚI PET_VISITS)
+-- Tạo khi Bác sĩ bắt đầu khám; khóa chỉnh sửa khi đợt khám COMPLETED.
+CREATE TABLE IF NOT EXISTS medical_records (
+    visit_id BINARY(16) PRIMARY KEY,
+    anamnesis TEXT NULL, -- Bệnh sử, triệu chứng chủ nuôi kể
+    clinical_findings TEXT NULL, -- Kết quả khám lâm sàng
+    preliminary_diagnosis TEXT NULL, -- Chẩn đoán sơ bộ (pha 1)
+    final_diagnosis TEXT NULL, -- Chẩn đoán xác định (pha 2, sau cận lâm sàng)
+    treatment_plan TEXT NULL,
+    doctor_advice TEXT NULL,
+    follow_up_date DATE NULL, -- Hẹn tái khám
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    version BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT fk_mr_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id)
+);
+
+-- 25. PET_VISIT_STATUS_HISTORIES (AUDIT TRAIL ĐỢT KHÁM)
 CREATE TABLE IF NOT EXISTS pet_visit_status_histories (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    visit_id BIGINT NOT NULL,
-    from_status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NULL,
-    to_status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NOT NULL,
+    visit_id BINARY(16) NOT NULL,
+    from_status VARCHAR(20) NULL,
+    to_status VARCHAR(20) NOT NULL,
     changed_by_user_id BINARY(16) NULL, -- LFK: auth.users (NULL = hệ thống tự chuyển)
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -473,16 +505,19 @@ CREATE TABLE IF NOT EXISTS pet_visit_status_histories (
 CREATE INDEX idx_pvsh_visit ON pet_visit_status_histories(visit_id);
 CREATE INDEX idx_pvsh_user ON pet_visit_status_histories(changed_by_user_id);
 
--- 14. VISIT_SERVICE_DETAILS (CHỈ ĐỊNH DỊCH VỤ - THUẦN CHUYÊN MÔN)
--- Đã bỏ: unit_price, subtotal (thông tin tiền chuyển sang service_invoices).
+-- ----- 3C. CHỈ ĐỊNH DỊCH VỤ & KẾT QUẢ -----
+
+-- 26. VISIT_SERVICE_DETAILS (CHỈ ĐỊNH DỊCH VỤ - THUẦN CHUYÊN MÔN)
+-- status: PENDING | IN_PROGRESS | COMPLETED | CANCELLED.
 CREATE TABLE IF NOT EXISTS visit_service_details (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    visit_id BIGINT NOT NULL,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
+    visit_id BINARY(16) NOT NULL,
     service_id BINARY(16) NOT NULL,
     quantity INT NOT NULL DEFAULT 1,
-    status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version BIGINT NOT NULL DEFAULT 0,
     CONSTRAINT fk_vsd_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
     CONSTRAINT fk_vsd_service FOREIGN KEY (service_id) REFERENCES services(id),
     CONSTRAINT chk_vsd_quantity CHECK (quantity > 0)
@@ -490,14 +525,14 @@ CREATE TABLE IF NOT EXISTS visit_service_details (
 CREATE INDEX idx_vsd_visit ON visit_service_details(visit_id);
 CREATE INDEX idx_vsd_service ON visit_service_details(service_id);
 
--- 15. VISIT_SERVICE_DETAIL_HISTORIES (AUDIT TRAIL TIẾN ĐỘ DỊCH VỤ)
--- "Gọi" / "Gọi lại" không ghi lịch sử vì không đổi trạng thái hay thứ tự.
+-- 27. VISIT_SERVICE_DETAIL_HISTORIES (AUDIT TRAIL TIẾN ĐỘ DỊCH VỤ)
+-- action: ORDERED | START_PROCESSING | SAMPLE_COLLECTED | COMPLETED | CANCELLED.
 CREATE TABLE IF NOT EXISTS visit_service_detail_histories (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    visit_service_detail_id BIGINT NOT NULL,
-    from_status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NULL,
-    to_status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL,
-    action VARCHAR(50) NOT NULL, -- ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED
+    visit_service_detail_id BINARY(16) NOT NULL,
+    from_status VARCHAR(20) NULL,
+    to_status VARCHAR(20) NOT NULL,
+    action VARCHAR(30) NOT NULL,
     changed_by_user_id BINARY(16) NOT NULL, -- LFK: auth.users
     reason TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -506,12 +541,11 @@ CREATE TABLE IF NOT EXISTS visit_service_detail_histories (
 CREATE INDEX idx_vsdh_detail ON visit_service_detail_histories(visit_service_detail_id);
 CREATE INDEX idx_vsdh_user ON visit_service_detail_histories(changed_by_user_id);
 
--- 16. LAB_TEST_RESULTS (KẾT QUẢ XÉT NGHIỆM)
--- Đã bỏ: evaluation (LOW/NORMAL/HIGH tính từ result_value so với min/max snapshot).
--- Giữ min/max snapshot: không dẫn xuất được vì danh mục tham chiếu có thể đổi sau này.
+-- 28. LAB_TEST_RESULTS (KẾT QUẢ TỪNG CHỈ SỐ XÉT NGHIỆM)
+-- Giữ min/max snapshot: danh mục tham chiếu có thể đổi sau này. Đánh giá thấp/cao tính khi hiển thị.
 CREATE TABLE IF NOT EXISTS lab_test_results (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    visit_service_detail_id BIGINT NOT NULL,
+    visit_service_detail_id BINARY(16) NOT NULL,
     lab_test_item_id SMALLINT NOT NULL,
     result_value DECIMAL(8, 2) NOT NULL,
     min_value_snapshot DECIMAL(8, 2) NOT NULL,
@@ -525,10 +559,10 @@ CREATE TABLE IF NOT EXISTS lab_test_results (
 );
 CREATE INDEX idx_ltr_performer ON lab_test_results(performed_by);
 
--- 17. IMAGING_RESULTS (KẾT QUẢ CHẨN ĐOÁN HÌNH ẢNH)
+-- 29. IMAGING_RESULTS (KẾT QUẢ CHẨN ĐOÁN HÌNH ẢNH)
 CREATE TABLE IF NOT EXISTS imaging_results (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    visit_service_detail_id BIGINT NOT NULL UNIQUE,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
+    visit_service_detail_id BINARY(16) NOT NULL UNIQUE,
     description TEXT NOT NULL,
     conclusion TEXT NOT NULL,
     performed_by BINARY(16) NOT NULL, -- LFK: auth.users (IMAGING_TECHNICIAN)
@@ -537,10 +571,10 @@ CREATE TABLE IF NOT EXISTS imaging_results (
 );
 CREATE INDEX idx_ir_performer ON imaging_results(performed_by);
 
--- 18. IMAGING_ATTACHMENTS (TỆP ẢNH ĐÍNH KÈM)
+-- 30. IMAGING_ATTACHMENTS (TỆP ẢNH ĐÍNH KÈM)
 CREATE TABLE IF NOT EXISTS imaging_attachments (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    imaging_result_id BIGINT NOT NULL,
+    imaging_result_id BINARY(16) NOT NULL, -- imaging_results.id (UUIDv7); cấu trúc còn lại đổi ở bước 4.3
     file_url VARCHAR(500) NOT NULL,
     file_name VARCHAR(255) NOT NULL,
     file_size BIGINT NULL,
@@ -549,21 +583,18 @@ CREATE TABLE IF NOT EXISTS imaging_attachments (
 );
 CREATE INDEX idx_ia_result ON imaging_attachments(imaging_result_id);
 
--- 19. SERVICE_INVOICES (HÓA ĐƠN RIÊNG CHO TỪNG DỊCH VỤ) - MỚI
--- Mỗi dòng chỉ định dịch vụ có đúng 1 hóa đơn (quan hệ 1-1).
--- Hóa đơn được tạo cùng lúc chỉ định (phí khám: lúc check-in), snapshot đơn giá & thuế suất.
--- Dịch vụ chưa thu bị hủy (EX-08) -> hóa đơn CANCELLED trong cùng giao dịch.
--- Thu tiền dịch vụ thu trước (khám, XN, CĐHA) -> phát phiếu queue_tickets trong cùng giao dịch.
--- REFUNDED: dịch vụ XN / CĐHA đã thu nhưng phòng khám không thực hiện được.
--- Số tiền phải trả = quantity * unit_price * (1 + vat_rate) - discount_amount (xem VIEW bên dưới).
+-- 31. SERVICE_INVOICES (HÓA ĐƠN RIÊNG CHO TỪNG DỊCH VỤ, 1-1 VỚI CHỈ ĐỊNH)
+-- payment_status: PENDING | PAID | CANCELLED | REFUNDED.
+-- unit_price, vat_rate: snapshot từ service_prices đang hiệu lực lúc chỉ định (chứng từ không đổi
+-- dù bảng giá đổi sau đó). Số tiền phải trả tính bằng VIEW, không lưu.
 CREATE TABLE IF NOT EXISTS service_invoices (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
     invoice_code VARCHAR(50) NOT NULL UNIQUE,
-    visit_service_detail_id BIGINT NOT NULL UNIQUE,
-    unit_price DECIMAL(12, 2) NOT NULL, -- Snapshot đơn giá lúc chỉ định
-    vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.00, -- Snapshot thuế suất lúc chỉ định
+    visit_service_detail_id BINARY(16) NOT NULL UNIQUE,
+    unit_price DECIMAL(12, 2) NOT NULL,
+    vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.00,
     discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-    payment_status ENUM('PENDING', 'PAID', 'CANCELLED', 'REFUNDED') NOT NULL DEFAULT 'PENDING',
+    payment_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     cashier_id BINARY(16) NULL, -- LFK: auth.users (gán khi thu tiền)
     paid_at TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -586,7 +617,7 @@ CREATE TABLE IF NOT EXISTS queue_tickets (
     queue_type ENUM('DOCTOR', 'LABORATORY', 'IMAGING') NOT NULL,
     service_date DATE NOT NULL,
     ticket_no INT NOT NULL,
-    visit_id BIGINT NOT NULL,
+    visit_id BINARY(16) NOT NULL,
     doctor_id BINARY(16) NULL, -- LFK: auth.users (chỉ phiếu DOCTOR; NULL = danh sách chờ phân công)
     priority TINYINT NOT NULL DEFAULT 0, -- 2 = cấp cứu, 1 = quay lại với kết quả CLS, 0 = thường
     status ENUM('WAITING', 'IN_SERVICE', 'DONE', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
@@ -604,7 +635,7 @@ CREATE INDEX idx_qt_visit ON queue_tickets(visit_id);
 -- 21. QUEUE_TICKET_ITEMS (CÁC DỊCH VỤ XN / CĐHA THUỘC MỘT PHIẾU - "MỘT CA") - MỚI 16/11
 CREATE TABLE IF NOT EXISTS queue_ticket_items (
     ticket_id BIGINT NOT NULL,
-    visit_service_detail_id BIGINT NOT NULL UNIQUE,
+    visit_service_detail_id BINARY(16) NOT NULL UNIQUE,
     PRIMARY KEY (ticket_id, visit_service_detail_id),
     CONSTRAINT fk_qti_ticket FOREIGN KEY (ticket_id) REFERENCES queue_tickets(id) ON DELETE CASCADE,
     CONSTRAINT fk_qti_vsd FOREIGN KEY (visit_service_detail_id) REFERENCES visit_service_details(id)
@@ -769,7 +800,7 @@ CREATE TABLE IF NOT EXISTS medicines (
 -- Đã bỏ: status, dispensed_by, dispensed_at (việc mua/xuất thuốc thể hiện qua medicine_invoices).
 CREATE TABLE IF NOT EXISTS prescriptions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    visit_id BIGINT NOT NULL UNIQUE, -- LFK: clinical.pet_visits
+    visit_id BINARY(16) NOT NULL UNIQUE, -- LFK: clinical.pet_visits (UUIDv7)
     doctor_notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

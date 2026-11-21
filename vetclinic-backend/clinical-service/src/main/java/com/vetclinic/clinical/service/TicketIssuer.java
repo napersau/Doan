@@ -105,7 +105,7 @@ public class TicketIssuer {
 
     // ================================================================== vòng đời phiếu DOCTOR (gắn với T02 / T04 / T05 / T07 / T09 / T11)
 
-    public Optional<QueueTicket> activeDoctorTicket(Long visitId) {
+    public Optional<QueueTicket> activeDoctorTicket(UUID visitId) {
         return ticketRepository.findFirstByVisitIdAndQueueTypeAndStatusIn(visitId, QueueType.DOCTOR, TicketStatus.ACTIVE);
     }
 
@@ -113,7 +113,7 @@ public class TicketIssuer {
      * T02 / T07: Bác sĩ bấm "Bắt đầu" khi bệnh nhân vào phòng. Ca phải có phiếu DOCTOR đang chờ (đã nộp phí khám, ca cấp cứu,
      * hoặc phiếu ưu tiên của ca có kết quả) - thanh toán tách khỏi khám (BR-35). Phiếu -> IN_SERVICE.
      */
-    public QueueTicket startDoctorTicket(Long visitId, UUID doctorId) {
+    public QueueTicket startDoctorTicket(UUID visitId, UUID doctorId) {
         QueueTicket ticket = ticketRepository
                 .findFirstByVisitIdAndQueueTypeAndStatus(visitId, QueueType.DOCTOR, TicketStatus.WAITING)
                 .orElseThrow(() -> new AppException(ErrorCode.NO_QUEUE_TICKET));
@@ -123,7 +123,7 @@ public class TicketIssuer {
     }
 
     /** T04 / T05 / T09: Bác sĩ rời ca (chỉ định CLS hoặc chốt ca) -> phiếu DONE. Không có phiếu (mở lại hồ sơ - T14) thì bỏ qua. */
-    public void finishDoctorTicket(Long visitId) {
+    public void finishDoctorTicket(UUID visitId) {
         ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(visitId, QueueType.DOCTOR, TicketStatus.IN_SERVICE)
                 .ifPresent(t -> {
                     t.setStatus(TicketStatus.DONE);
@@ -132,7 +132,7 @@ public class TicketIssuer {
     }
 
     /** Lễ tân đổi / gỡ Bác sĩ (Q3): phiếu DOCTOR đang chờ đi theo, GIỮ NGUYÊN số phiếu và giờ phát. */
-    public void reassignDoctorTicket(Long visitId, UUID doctorId) {
+    public void reassignDoctorTicket(UUID visitId, UUID doctorId) {
         ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(visitId, QueueType.DOCTOR, TicketStatus.WAITING)
                 .ifPresent(t -> {
                     t.setDoctorId(doctorId);
@@ -141,7 +141,7 @@ public class TicketIssuer {
     }
 
     /** Khách bỏ về / hủy ca (T03, T08, T11, T12): mọi phiếu còn hiệu lực của ca -> CANCELLED. */
-    public void cancelActiveTickets(Long visitId) {
+    public void cancelActiveTickets(UUID visitId) {
         for (QueueTicket t : ticketRepository.findByVisitIdAndStatusIn(visitId, TicketStatus.ACTIVE)) {
             t.setStatus(TicketStatus.CANCELLED);
             ticketRepository.save(t);
@@ -151,12 +151,12 @@ public class TicketIssuer {
     // ================================================================== vòng đời phiếu phòng XN / CĐHA
 
     /** Phiếu phòng chứa dịch vụ này (null nếu dịch vụ chưa có phiếu: khách chưa nộp tiền, hoặc dịch vụ không cần phiếu). */
-    public Optional<QueueTicket> roomTicketOf(Long detailId) {
+    public Optional<QueueTicket> roomTicketOf(UUID detailId) {
         return itemRepository.findByVisitServiceDetailId(detailId).flatMap(i -> ticketRepository.findById(i.getTicketId()));
     }
 
     /** Các dịch vụ của một phiếu phòng. */
-    public List<Long> detailIdsOf(Long ticketId) {
+    public List<UUID> detailIdsOf(Long ticketId) {
         return itemRepository.findByTicketIdIn(List.of(ticketId)).stream().map(QueueTicketItem::getVisitServiceDetailId).toList();
     }
 
@@ -164,7 +164,7 @@ public class TicketIssuer {
      * Sau khi một dịch vụ của phiếu phòng hoàn tất / bị hủy (SM-07): phiếu đang chờ mà không còn dịch vụ chờ -> CANCELLED; phiếu đang
      * làm (IN_SERVICE) mà mọi dịch vụ đã xong / hủy -> DONE (đã phục vụ xong lượt này, kể cả khi dịch vụ bị hủy giữa chừng).
      */
-    public void refreshRoomTicketOf(Long detailId) {
+    public void refreshRoomTicketOf(UUID detailId) {
         roomTicketOf(detailId).ifPresent(ticket -> {
             if (!TicketStatus.ACTIVE.contains(ticket.getStatus())) {
                 return;

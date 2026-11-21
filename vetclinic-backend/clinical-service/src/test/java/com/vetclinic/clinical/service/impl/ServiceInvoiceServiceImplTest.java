@@ -43,6 +43,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST;
@@ -107,7 +108,7 @@ class ServiceInvoiceServiceImplTest {
     }
 
     private static ServiceInvoice invoice(long id, long detailId, String unit, String vat) {
-        return ServiceInvoice.builder().id(id).invoiceCode("SINV-2026-" + id).visitServiceDetailId(detailId)
+        return ServiceInvoice.builder().id(lid(id)).invoiceCode("SINV-2026-" + id).visitServiceDetailId(lid(detailId))
                 .unitPrice(new BigDecimal(unit)).vatRate(new BigDecimal(vat)).build();
     }
 
@@ -118,9 +119,9 @@ class ServiceInvoiceServiceImplTest {
         VisitServiceDetail lab = detail(2L, 100L, service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00"), ServiceDetailStatus.COMPLETED);
         VisitServiceDetail xray = detail(3L, 100L, service(7L, "IMG_XRAY", ServiceCategory.IMAGING, "180000.00"), ServiceDetailStatus.COMPLETED);
         // lenient: mỗi test chỉ dùng một phần các lời gọi này (bảng kê không khóa dòng, thu tiền không dùng findById)
-        lenient().when(visitRepository.findById(100L)).thenReturn(Optional.of(visit));
-        lenient().when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        lenient().when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(exam, lab, xray));
+        lenient().when(visitRepository.findById(lid(100L))).thenReturn(Optional.of(visit));
+        lenient().when(visitRepository.findByIdForUpdate(lid(100L))).thenReturn(Optional.of(visit));
+        lenient().when(detailRepository.findByVisitIdOrderByIdAsc(lid(100L))).thenReturn(List.of(exam, lab, xray));
         lenient().when(invoiceRepository.findByVisitServiceDetailIdIn(ArgumentMatchers.anyCollection()))
                 .thenReturn(List.of(examInvoice, labInvoice, xrayInvoice));
         return visit;
@@ -134,7 +135,7 @@ class ServiceInvoiceServiceImplTest {
         xrayInvoice.setDiscountAmount(new BigDecimal("30000.00"));
         examInvoice.setPaymentStatus(PaymentStatus.PAID);
 
-        InvoiceStatementResponse statement = service.statement(100L);
+        InvoiceStatementResponse statement = service.statement(lid(100L));
 
         assertThat(statement.invoices()).extracting(ServiceInvoiceResponse::invoiceCode)
                 .containsExactly("SINV-2026-11", "SINV-2026-12", "SINV-2026-13");
@@ -151,7 +152,7 @@ class ServiceInvoiceServiceImplTest {
         stubVisit(VisitStatus.WAITING_PAYMENT);
         labInvoice.setPaymentStatus(PaymentStatus.CANCELLED);
 
-        InvoiceStatementResponse statement = service.statement(100L);
+        InvoiceStatementResponse statement = service.statement(lid(100L));
 
         assertThat(statement.invoices()).hasSize(3);
         assertThat(statement.totalPending()).isEqualByComparingTo("280000.00");
@@ -159,8 +160,8 @@ class ServiceInvoiceServiceImplTest {
 
     @Test
     void statement_unknownVisit_isNotFound() {
-        when(visitRepository.findById(404L)).thenReturn(Optional.empty());
-        assertError(ErrorCode.VISIT_NOT_FOUND, () -> service.statement(404L));
+        when(visitRepository.findById(lid(404L))).thenReturn(Optional.empty());
+        assertError(ErrorCode.VISIT_NOT_FOUND, () -> service.statement(lid(404L)));
     }
 
     @Test
@@ -168,7 +169,7 @@ class ServiceInvoiceServiceImplTest {
         stubVisit(VisitStatus.WAITING_PAYMENT);
         examInvoice.setVatRate(new BigDecimal("0.05"));   // 100.000 x 1,05
 
-        ServiceInvoiceResponse exam = service.statement(100L).invoices().get(0);
+        ServiceInvoiceResponse exam = service.statement(lid(100L)).invoices().get(0);
 
         assertThat(exam.vatAmount()).isEqualByComparingTo("5000.00");
         assertThat(exam.payableAmount()).isEqualByComparingTo("105000.00");
@@ -185,8 +186,8 @@ class ServiceInvoiceServiceImplTest {
         VisitServiceDetail d = detail(detailId, visitId, svc, ServiceDetailStatus.COMPLETED);
         d.setQuantity(quantity);
         lenient().when(invoiceRepository.findById(invoice.getId())).thenReturn(Optional.of(invoice));
-        lenient().when(detailRepository.findById(detailId)).thenReturn(Optional.of(d));
-        lenient().when(visitRepository.findById(visitId)).thenReturn(Optional.of(visit(visitId, visitStatus, DOCTOR)));
+        lenient().when(detailRepository.findById(lid(detailId))).thenReturn(Optional.of(d));
+        lenient().when(visitRepository.findById(lid(visitId))).thenReturn(Optional.of(visit(visitId, visitStatus, DOCTOR)));
     }
 
     @Test
@@ -194,7 +195,7 @@ class ServiceInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubInvoiceOf(xrayInvoice, 3L, 100L, 1, VisitStatus.WAITING_PAYMENT);
 
-        ServiceInvoiceResponse response = service.discount(13L, new BigDecimal("30000"));
+        ServiceInvoiceResponse response = service.discount(lid(13L), new BigDecimal("30000"));
 
         assertThat(xrayInvoice.getDiscountAmount()).isEqualByComparingTo("30000.00");
         assertThat(response.payableAmount()).isEqualByComparingTo("150000.00");
@@ -207,7 +208,7 @@ class ServiceInvoiceServiceImplTest {
         stubInvoiceOf(xrayInvoice, 3L, 100L, 1, VisitStatus.WAITING_PAYMENT);
 
         // 300.000 > 180.000 của chính hóa đơn X-quang (dù tổng ca là 530.000)
-        assertError(ErrorCode.DISCOUNT_EXCEEDS_INVOICE_AMOUNT, () -> service.discount(13L, new BigDecimal("300000")));
+        assertError(ErrorCode.DISCOUNT_EXCEEDS_INVOICE_AMOUNT, () -> service.discount(lid(13L), new BigDecimal("300000")));
         assertThat(xrayInvoice.getDiscountAmount()).isEqualByComparingTo("0");
         verify(invoiceRepository, never()).saveAndFlush(any());
     }
@@ -218,8 +219,8 @@ class ServiceInvoiceServiceImplTest {
         ServiceInvoice vaccine = invoice(14L, 4L, "150000.00", "0.05");
         stubInvoiceOf(vaccine, 4L, 100L, 2, VisitStatus.COMPLETED);   // 2 x 150.000 x 1,05 = 315.000; ca còn công nợ cũng được giảm
 
-        assertError(ErrorCode.DISCOUNT_EXCEEDS_INVOICE_AMOUNT, () -> service.discount(14L, new BigDecimal("315000.01")));
-        service.discount(14L, new BigDecimal("315000.00"));
+        assertError(ErrorCode.DISCOUNT_EXCEEDS_INVOICE_AMOUNT, () -> service.discount(lid(14L), new BigDecimal("315000.01")));
+        service.discount(lid(14L), new BigDecimal("315000.00"));
 
         assertThat(vaccine.getDiscountAmount()).isEqualByComparingTo("315000.00");
     }
@@ -229,19 +230,19 @@ class ServiceInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         xrayInvoice.setPaymentStatus(PaymentStatus.PAID);
         stubInvoiceOf(xrayInvoice, 3L, 100L, 1, VisitStatus.WAITING_PAYMENT);
-        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.discount(13L, new BigDecimal("1000")));
+        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.discount(lid(13L), new BigDecimal("1000")));
 
         labInvoice.setPaymentStatus(PaymentStatus.CANCELLED);
         stubInvoiceOf(labInvoice, 2L, 100L, 1, VisitStatus.WAITING_PAYMENT);
-        assertError(ErrorCode.INVOICE_ALREADY_CANCELLED, () -> service.discount(12L, new BigDecimal("1000")));
+        assertError(ErrorCode.INVOICE_ALREADY_CANCELLED, () -> service.discount(lid(12L), new BigDecimal("1000")));
 
-        when(invoiceRepository.findById(404L)).thenReturn(Optional.empty());
-        assertError(ErrorCode.INVOICE_NOT_FOUND, () -> service.discount(404L, new BigDecimal("1000")));
+        when(invoiceRepository.findById(lid(404L))).thenReturn(Optional.empty());
+        assertError(ErrorCode.INVOICE_NOT_FOUND, () -> service.discount(lid(404L), new BigDecimal("1000")));
 
         // Dịch vụ làm tại phòng: chỉ giảm (và thu) khi Bác sĩ đã chốt ca
         ServiceInvoice early = invoice(15L, 5L, "200000.00", "0.00");
         stubInvoiceOf(early, 5L, 101L, 1, VisitStatus.IN_PROGRESS, service(8L, "VAC_5IN1", "VACCINATION", "200000.00"));
-        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.discount(15L, new BigDecimal("1000")));
+        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.discount(lid(15L), new BigDecimal("1000")));
         verify(invoiceRepository, never()).saveAndFlush(any());
     }
 
@@ -252,7 +253,7 @@ class ServiceInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
 
-        InvoiceStatementResponse result = service.confirmPayment(100L, List.of(11L, 12L, 13L));
+        InvoiceStatementResponse result = service.confirmPayment(lid(100L), List.of(lid(11L), lid(12L), lid(13L)));
 
         assertThat(List.of(examInvoice, labInvoice, xrayInvoice)).allSatisfy(i -> {
             assertThat(i.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
@@ -278,7 +279,7 @@ class ServiceInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
 
-        InvoiceStatementResponse result = service.confirmPayment(100L, List.of(11L, 12L));
+        InvoiceStatementResponse result = service.confirmPayment(lid(100L), List.of(lid(11L), lid(12L)));
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING_PAYMENT);   // còn hóa đơn X-quang PENDING
         assertThat(xrayInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
@@ -293,7 +294,7 @@ class ServiceInvoiceServiceImplTest {
         PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
         xrayInvoice.setPaymentStatus(PaymentStatus.CANCELLED);   // dịch vụ đã hủy
 
-        service.confirmPayment(100L, List.of(11L, 12L));
+        service.confirmPayment(lid(100L), List.of(lid(11L), lid(12L)));
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);   // mọi hóa đơn PAID hoặc CANCELLED
     }
@@ -303,7 +304,7 @@ class ServiceInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.COMPLETED);   // khách bỏ về trước đó: hóa đơn đã làm giữ PENDING
 
-        InvoiceStatementResponse result = service.confirmPayment(100L, List.of(11L));
+        InvoiceStatementResponse result = service.confirmPayment(lid(100L), List.of(lid(11L)));
 
         assertThat(examInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
@@ -319,11 +320,11 @@ class ServiceInvoiceServiceImplTest {
         examInvoice.setPaymentStatus(PaymentStatus.PAID);
         labInvoice.setPaymentStatus(PaymentStatus.CANCELLED);
 
-        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(100L, List.of(11L)));   // bấm đúp / thu lần hai
-        assertError(ErrorCode.INVOICE_ALREADY_CANCELLED, () -> service.confirmPayment(100L, List.of(12L)));
-        assertError(ErrorCode.INVOICE_NOT_FOUND, () -> service.confirmPayment(100L, List.of(999L)));   // không thuộc ca
+        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(lid(100L), List.of(lid(11L))));   // bấm đúp / thu lần hai
+        assertError(ErrorCode.INVOICE_ALREADY_CANCELLED, () -> service.confirmPayment(lid(100L), List.of(lid(12L))));
+        assertError(ErrorCode.INVOICE_NOT_FOUND, () -> service.confirmPayment(lid(100L), List.of(lid(999L))));   // không thuộc ca
         // Một hóa đơn hợp lệ + một hóa đơn đã thu: kiểm tra hết TRƯỚC khi ghi nên hóa đơn X-quang vẫn PENDING
-        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(100L, List.of(13L, 11L)));
+        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(lid(100L), List.of(lid(13L), lid(11L))));
         assertThat(xrayInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PENDING);
         verify(invoiceRepository, never()).saveAndFlush(any());
     }
@@ -334,13 +335,13 @@ class ServiceInvoiceServiceImplTest {
         PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
         VisitServiceDetail vaccine = detail(4L, 100L, service(8L, "VAC_5IN1", "VACCINATION", "200000.00"), ServiceDetailStatus.COMPLETED);
         ServiceInvoice vaccineInvoice = invoice(14L, 4L, "200000.00", "0.00");
-        when(visitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
-        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(vaccine));
+        when(visitRepository.findByIdForUpdate(lid(100L))).thenReturn(Optional.of(visit));
+        when(detailRepository.findByVisitIdOrderByIdAsc(lid(100L))).thenReturn(List.of(vaccine));
         when(invoiceRepository.findByVisitServiceDetailIdIn(ArgumentMatchers.anyCollection())).thenReturn(List.of(vaccineInvoice));
-        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.confirmPayment(100L, List.of(14L)));
+        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.confirmPayment(lid(100L), List.of(lid(14L))));
 
-        when(visitRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(visit(101L, VisitStatus.CANCELLED, DOCTOR)));
-        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.confirmPayment(101L, List.of(11L)));
+        when(visitRepository.findByIdForUpdate(lid(101L))).thenReturn(Optional.of(visit(101L, VisitStatus.CANCELLED, DOCTOR)));
+        assertError(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, () -> service.confirmPayment(lid(101L), List.of(lid(11L))));
         verify(invoiceRepository, never()).saveAndFlush(any());
     }
 
@@ -349,14 +350,14 @@ class ServiceInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.WAITING);
 
-        service.confirmPayment(100L, List.of(11L));
+        service.confirmPayment(lid(100L), List.of(lid(11L)));
 
         assertThat(examInvoice.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING);   // thu tiền không đổi trạng thái ca, chỉ phát phiếu
         ArgumentCaptor<Collection<VisitServiceDetail>> paid = ArgumentCaptor.forClass(Collection.class);
         verify(ticketIssuer).issueForPaidServices(ArgumentMatchers.eq(visit), paid.capture(),
                 ArgumentMatchers.eq(RECEPTIONIST));
-        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(1L);
+        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(lid(1L));
         verify(historyRepository, never()).save(any());
     }
 
@@ -366,12 +367,12 @@ class ServiceInvoiceServiceImplTest {
         PetVisit visit = stubVisit(VisitStatus.WAITING_RESULTS);
         examInvoice.setPaymentStatus(PaymentStatus.PAID);
 
-        service.confirmPayment(100L, List.of(12L, 13L));
+        service.confirmPayment(lid(100L), List.of(lid(12L), lid(13L)));
 
         ArgumentCaptor<Collection<VisitServiceDetail>> paid = ArgumentCaptor.forClass(Collection.class);
         verify(ticketIssuer).issueForPaidServices(ArgumentMatchers.eq(visit), paid.capture(),
                 ArgumentMatchers.eq(RECEPTIONIST));
-        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(2L, 3L);
+        assertThat(paid.getValue()).extracting(VisitServiceDetail::getId).containsExactly(lid(2L), lid(3L));
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.WAITING_RESULTS);
     }
 
@@ -381,8 +382,8 @@ class ServiceInvoiceServiceImplTest {
         PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
         xrayInvoice.setPaymentStatus(PaymentStatus.REFUNDED);   // máy X-quang hỏng: đã hoàn tiền
 
-        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(100L, List.of(13L)));
-        service.confirmPayment(100L, List.of(11L, 12L));
+        assertError(ErrorCode.INVOICE_ALREADY_PAID, () -> service.confirmPayment(lid(100L), List.of(lid(13L))));
+        service.confirmPayment(lid(100L), List.of(lid(11L), lid(12L)));
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
     }
@@ -391,10 +392,10 @@ class ServiceInvoiceServiceImplTest {
     void confirmPayment_withNothingLeftToPay_completesTheVisit_AD03_butAnEmptyListIsRefusedWhileSomethingIsPending() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         PetVisit visit = stubVisit(VisitStatus.WAITING_PAYMENT);
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.confirmPayment(100L, List.of()));   // còn 3 hóa đơn PENDING
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.confirmPayment(lid(100L), List.of()));   // còn 3 hóa đơn PENDING
 
         List.of(examInvoice, labInvoice, xrayInvoice).forEach(i -> i.setPaymentStatus(PaymentStatus.PAID));   // đã thu trước hết
-        service.confirmPayment(100L, List.of());
+        service.confirmPayment(lid(100L), List.of());
 
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.COMPLETED);
         verify(invoiceRepository, never()).saveAndFlush(any());
@@ -413,7 +414,7 @@ class ServiceInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubVisit(VisitStatus.WAITING_PAYMENT);
 
-        service.confirmPayment(100L, List.of(11L, 11L));
+        service.confirmPayment(lid(100L), List.of(lid(11L), lid(11L)));
 
         verify(invoiceRepository).saveAndFlush(examInvoice);
     }

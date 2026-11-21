@@ -1,5 +1,6 @@
 package com.vetclinic.billing.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.billing.constant.PaymentStatus;
 
 import java.time.Instant;
@@ -12,7 +13,7 @@ import java.util.List;
  */
 public record PrescriptionResponse(
         Long id,
-        Long visitId,
+        UUID visitId,
         String visitCode,
         String petName,
         String doctorNotes,

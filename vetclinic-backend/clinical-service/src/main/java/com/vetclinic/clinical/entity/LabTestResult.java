@@ -25,7 +25,7 @@ public class LabTestResult {
     private Long id;
 
     @Column(name = "visit_service_detail_id", nullable = false)
-    private Long visitServiceDetailId;
+    private UUID visitServiceDetailId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "lab_test_item_id", nullable = false)

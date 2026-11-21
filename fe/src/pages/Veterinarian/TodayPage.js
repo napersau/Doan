@@ -18,7 +18,7 @@ function VisitLine({ visit, highlight, children }) {
   return <li style={highlight ? { background: 'var(--ui-raised)', borderRadius: 8 } : undefined}>
     <div>{visit.ticket && <strong className="ui-ticket-no">Số {visit.ticket.ticketNo}</strong>}{' '}<strong>{visit.petName}</strong> <small style={{ display: 'inline' }}>({visit.speciesName})</small>{' '}
       {visit.emergency && <span className="ui-emergency">CẤP CỨU</span>}
-      <small>{visit.visitCode} · tiếp nhận {formatTimeOfInstant(visit.checkedInAt)}{visit.initialSymptoms ? ` · ${visit.initialSymptoms}` : ''}</small></div>
+      <small>{visit.visitCode} · tiếp nhận {formatTimeOfInstant(visit.checkedInAt)}{visit.reasonForVisit ? ` · ${visit.reasonForVisit}` : ''}</small></div>
     <div className="ui-actions"><Badge map={VISIT_STATUS} value={visit.status} />{children}</div>
   </li>;
 }

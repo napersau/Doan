@@ -14,7 +14,7 @@ public record PatientCalledEvent(
         UUID actorUserId,
         String action,           // CALLED = mời vào phòng (giá trị duy nhất hiện nay)
         String station,          // DOCTOR_ROOM | LAB | IMAGING
-        Long visitId,
+        UUID visitId,
         String visitCode,
         UUID petId,
         UUID doctorId,           // Bác sĩ của hàng đợi (null nếu gọi ở Lab/CĐHA cho ca chưa có bác sĩ)

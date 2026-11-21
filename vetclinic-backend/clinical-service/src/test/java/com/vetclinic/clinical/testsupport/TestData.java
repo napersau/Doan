@@ -76,8 +76,16 @@ public final class TestData {
                 .species(species).petCode("PET-2026-" + id.toString().substring(31)).name("Lu").gender(PetGender.MALE).build();
     }
 
+    /**
+     * UUID cố định cho đợt khám / dịch vụ chỉ định / hóa đơn dịch vụ thử (019a9442-d840-7000-8000-0000000000NN): test vẫn đánh số
+     * ngắn (10L, 100L...) nhưng khóa thật là UUID. Cùng một ánh xạ cho mọi bảng nên tránh dùng cùng số cho hai bảng trong một test.
+     */
+    public static UUID lid(long n) {
+        return UUID.fromString(String.format("019a9442-d840-7000-8000-%012d", n));
+    }
+
     public static PetVisit visit(long id, VisitStatus status, UUID doctorId) {
-        return PetVisit.builder().id(id).visitCode("VIS-2026-" + id).pet(pet(pid(11), dog())).doctorId(doctorId)
+        return PetVisit.builder().id(lid(id)).visitCode("VIS-2026-" + id).pet(pet(pid(11), dog())).doctorId(doctorId)
                 .receptionistId(RECEPTIONIST).status(status)
                 .checkedInAt(Instant.parse("2026-10-30T01:00:00Z"))
                 .build();
@@ -121,7 +129,7 @@ public final class TestData {
     public static VisitServiceDetail detail(long id, long visitId, ClinicService service, ServiceDetailStatus status) {
         Instant createdAt = Instant.parse("2026-10-30T01:30:00Z").plusSeconds(id);
         // Giá / VAT không còn ở dòng chỉ định (v3.0) mà ở hóa đơn dịch vụ
-        return VisitServiceDetail.builder().id(id).visitId(visitId).service(service)
+        return VisitServiceDetail.builder().id(lid(id)).visitId(lid(visitId)).service(service)
                 .quantity(1).status(status).createdAt(createdAt).build();
     }
 
@@ -130,7 +138,7 @@ public final class TestData {
                                                                    long visitId, UUID doctorId, int ticketNo, int priority,
                                                                    TicketStatus status) {
         return QueueTicket.builder().id(id).queueType(type)
-                .serviceDate(LocalDate.of(2026, 10, 30)).ticketNo(ticketNo).visitId(visitId).doctorId(doctorId)
+                .serviceDate(LocalDate.of(2026, 10, 30)).ticketNo(ticketNo).visitId(lid(visitId)).doctorId(doctorId)
                 .priority(priority).status(status).issuedAt(Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
     }
 

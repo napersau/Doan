@@ -1,5 +1,6 @@
 package com.vetclinic.billing.controller;
 
+import java.util.UUID;
 import com.vetclinic.billing.dto.response.PrescriptionResponse;
 import com.vetclinic.billing.service.PrescriptionService;
 import com.vetclinic.common.dto.ApiResponse;
@@ -25,7 +26,7 @@ public class InternalBillingController {
 
     /** clinical-service ghép đơn thuốc vào bệnh án trọn đời của thú cưng (kể cả đơn khách mua ngoài). */
     @GetMapping("/prescriptions")
-    public ResponseEntity<ApiResponse<List<PrescriptionResponse>>> prescriptions(@RequestParam("visitIds") List<Long> visitIds) {
+    public ResponseEntity<ApiResponse<List<PrescriptionResponse>>> prescriptions(@RequestParam("visitIds") List<UUID> visitIds) {
         return ResponseEntity.ok(ApiResponse.success(prescriptionService.findByVisits(visitIds)));
     }
 }

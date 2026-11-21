@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.request;
 
+import java.util.UUID;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -12,6 +13,6 @@ import java.util.List;
 public record ConfirmPaymentRequest(
         @NotNull(message = "Thiếu danh sách hóa đơn")
         @Size(max = 100, message = "Tối đa 100 hóa đơn mỗi lần thu")
-        List<@NotNull(message = "Mã hóa đơn không được để trống") Long> invoiceIds
+        List<@NotNull(message = "Mã hóa đơn không được để trống") UUID> invoiceIds
 ) {
 }

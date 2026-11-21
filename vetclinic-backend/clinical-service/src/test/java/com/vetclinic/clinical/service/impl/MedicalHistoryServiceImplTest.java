@@ -4,6 +4,7 @@ import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.client.BillingClient;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.MedicalHistoryEntry;
+import com.vetclinic.clinical.dto.response.MedicalRecordResponse;
 import com.vetclinic.clinical.dto.response.PrescriptionSummary;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
@@ -30,6 +31,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 import java.util.Optional;
 
 import static com.vetclinic.clinical.testsupport.TestData.uid;
@@ -41,6 +43,7 @@ import static com.vetclinic.clinical.testsupport.TestData.dog;
 import static com.vetclinic.clinical.testsupport.TestData.loginAs;
 import static com.vetclinic.clinical.testsupport.TestData.pet;
 import static com.vetclinic.clinical.testsupport.TestData.visit;
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.pid;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -80,10 +83,11 @@ class MedicalHistoryServiceImplTest {
         SecurityContextHolder.clearContext();
     }
 
-    private static VisitResponse response(long id) {
-        return new VisitResponse(id, "VIS-2026-" + id, pid(11), "Lu", "PET-2026-11", "Chó", OWNER, null, DOCTOR, RECEPTIONIST, "P01",
-                false, VisitStatus.COMPLETED, true, null, BigDecimal.TEN, BigDecimal.TEN, null, null, "Viêm da", null, null,
-                null, null, null, null, null, List.of(), List.of(), List.of());
+    private static VisitResponse response(UUID id) {
+        MedicalRecordResponse record = new MedicalRecordResponse(id, null, null, null, "Viêm da", null, null, null, null, null, 1L, true);
+        return new VisitResponse(id, "VIS-2026-" + id.toString().substring(31), pid(11), "Lu", "PET-2026-11", "Chó", OWNER, null, DOCTOR, null,
+                RECEPTIONIST, "P01", false, VisitStatus.COMPLETED, true, null, null, null,
+                null, null, null, null, List.of(), List.of(), List.of(), List.of(), record);
     }
 
     private void stubVisits(long... ids) {
@@ -95,14 +99,14 @@ class MedicalHistoryServiceImplTest {
     }
 
     private static PrescriptionSummary prescription(long visitId) {
-        return new PrescriptionSummary(3L, visitId, null, List.of());
+        return new PrescriptionSummary(3L, lid(visitId), null, List.of());
     }
 
     @Test
     void staff_seeTheTimelineWithDoctorNameAndPrescription() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         stubVisits(7L, 8L);
-        when(billingClient.getPrescriptions(List.of(7L, 8L))).thenReturn(ApiResponse.success(List.of(prescription(8L))));
+        when(billingClient.getPrescriptions(List.of(lid(7L), lid(8L)))).thenReturn(ApiResponse.success(List.of(prescription(8L))));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(
                 new UserSummaryResponse(DOCTOR, "BS Lan", "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), "P01", "ACTIVE"))));
 
@@ -156,7 +160,7 @@ class MedicalHistoryServiceImplTest {
         assertThat(page.getItems()).hasSize(1);
         assertThat(page.getItems().get(0).prescription()).isNull();
         assertThat(page.getItems().get(0).doctorName()).isNull();
-        assertThat(page.getItems().get(0).visit().diagnosis()).isEqualTo("Viêm da");
+        assertThat(page.getItems().get(0).visit().medicalRecord().finalDiagnosis()).isEqualTo("Viêm da");
     }
 
     @Test

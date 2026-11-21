@@ -48,7 +48,7 @@ export default function VisitsPage() {
           <Table caption="Đợt khám" rows={data.items} columns={[
             { title: 'Mã ca', render: (row) => <><strong>{row.visitCode}</strong><small>{formatDateTime(row.checkedInAt)}</small></> },
             { title: 'Thú cưng', render: (row) => <>{row.petName}{row.emergency && <span className="ui-emergency"> · CẤP CỨU</span>}<small>{row.speciesName}</small></> },
-            { title: 'Chẩn đoán', render: (row) => row.diagnosis || '—' },
+            { title: 'Lý do đến khám', render: (row) => row.reasonForVisit || '—' },
             { title: 'Trạng thái', render: (row) => <Badge map={VISIT_STATUS} value={row.status} /> },
             { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
               {row.status === 'WAITING_PAYMENT' && <Button className="small danger" onClick={() => setDialog({ type: 'reopen', visit: row })}>Mở lại</Button>}

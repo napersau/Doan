@@ -28,7 +28,7 @@ class OutboxWriterTest {
     @Test
     void writesAPendingRowThatCarriesTheEventIdRoutingKeyAndJsonPayload() {
         when(repository.save(any(OutboxEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-        VisitCompletedEvent event = new VisitCompletedEvent(UuidV7.generate(), NOW, UuidV7.generate(), 42L, "VIS-2026-00042", UuidV7.generate(), false);
+        VisitCompletedEvent event = new VisitCompletedEvent(UuidV7.generate(), NOW, UuidV7.generate(), UuidV7.generate(), "VIS-2026-00042", UuidV7.generate(), false);
 
         OutboxEvent row = writer.write("VISIT", 42L, event);
 
@@ -52,7 +52,7 @@ class OutboxWriterTest {
                 Clock.fixed(Instant.parse("2026-11-20T03:00:00.700Z"), ZoneOffset.UTC));
 
         OutboxEvent row = atFraction.write("VISIT", 1L,
-                new VisitCompletedEvent(UuidV7.generate(), NOW, null, 1L, "VIS-1", UuidV7.generate(), false));
+                new VisitCompletedEvent(UuidV7.generate(), NOW, null, UuidV7.generate(), "VIS-1", UuidV7.generate(), false));
 
         assertThat(row.getNextAttemptAt()).isEqualTo(NOW);   // không bị làm tròn lên 03:00:01 (tương lai)
         assertThat(row.getCreatedAt()).isEqualTo(NOW);

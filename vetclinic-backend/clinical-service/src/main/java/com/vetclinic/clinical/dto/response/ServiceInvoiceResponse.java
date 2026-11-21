@@ -8,9 +8,9 @@ import java.time.Instant;
 
 /** Một hóa đơn dịch vụ kèm số tiền tính khi hiển thị (theo công thức của VIEW v_service_invoice_amounts, không lưu). */
 public record ServiceInvoiceResponse(
-        Long id,
+        UUID id,
         String invoiceCode,
-        Long visitServiceDetailId,
+        UUID visitServiceDetailId,
         UUID serviceId,
         String serviceName,
         String category,

@@ -31,6 +31,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.detail;
@@ -58,6 +59,10 @@ class VisitAssemblerTest {
     private ServiceInvoiceRepository invoiceRepository;
     @Mock
     private PetVisitStatusHistoryRepository historyRepository;
+    @Mock
+    private com.vetclinic.clinical.repository.VitalSignRepository vitalSignRepository;
+    @Mock
+    private com.vetclinic.clinical.repository.MedicalRecordRepository medicalRecordRepository;
 
     private VisitAssembler assembler;
 
@@ -65,11 +70,11 @@ class VisitAssemblerTest {
     void setUp() {
         assembler = new VisitAssembler(detailRepository, labResultRepository, imagingResultRepository, attachmentRepository,
                 invoiceRepository, new VisitTimeline(historyRepository),
-                Mockito.mock(QueueTicketRepository.class));
+                Mockito.mock(QueueTicketRepository.class), vitalSignRepository, medicalRecordRepository);
     }
 
     private static PetVisitStatusHistory h(VisitStatus from, VisitStatus to, String at, String notes) {
-        return PetVisitStatusHistory.builder().visitId(100L).fromStatus(from).toStatus(to).notes(notes)
+        return PetVisitStatusHistory.builder().visitId(lid(100L)).fromStatus(from).toStatus(to).notes(notes)
                 .createdAt(Instant.parse(at)).build();
     }
 
@@ -102,14 +107,40 @@ class VisitAssemblerTest {
     }
 
     @Test
+    void detail_carriesTheVitalSignsInOrderAndTheMedicalRecord_lockedOnceClosed_whileSummaryDoesNot() {
+        PetVisit visit = visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR);
+        visit.setDoctorNameSnapshot("BS Tiến");
+        visit.setReasonForVisit("Bỏ ăn");
+        when(detailRepository.findByVisitIdOrderByIdAsc(lid(100L))).thenReturn(List.of());
+        when(historyRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of());
+        when(vitalSignRepository.findByVisitIdOrderByRecordedAtAscIdAsc(lid(100L))).thenReturn(List.of(
+                com.vetclinic.clinical.entity.VitalSign.builder().id(1L).visitId(lid(100L)).weightKg(new BigDecimal("4.60")).build(),
+                com.vetclinic.clinical.entity.VitalSign.builder().id(2L).visitId(lid(100L)).temperatureC(new BigDecimal("38.4")).build()));
+        when(medicalRecordRepository.findById(lid(100L))).thenReturn(java.util.Optional.of(
+                com.vetclinic.clinical.entity.MedicalRecord.builder().visitId(lid(100L)).finalDiagnosis("Viêm da").version(2L).build()));
+
+        var detail = assembler.detail(visit);
+
+        assertThat(detail.doctorName()).isEqualTo("BS Tiến");     // bản chụp trên đợt khám, không gọi auth-service
+        assertThat(detail.reasonForVisit()).isEqualTo("Bỏ ăn");
+        assertThat(detail.vitalSigns()).extracting(v -> v.id()).containsExactly(1L, 2L);   // mỗi lần đo một dòng, theo thứ tự thời gian
+        assertThat(detail.medicalRecord().finalDiagnosis()).isEqualTo("Viêm da");
+        assertThat(detail.medicalRecord().locked()).isTrue();      // WAITING_PAYMENT trở đi: khóa
+        // API danh sách không kèm sinh hiệu / hồ sơ khám (tránh N+1)
+        var summary = assembler.summary(visit);
+        assertThat(summary.vitalSigns()).isNull();
+        assertThat(summary.medicalRecord()).isNull();
+    }
+
+    @Test
     void detail_serviceLinesGetPriceAndVatFromTheirInvoice_notFromTheLine() {
         ClinicService vaccine = service(2L, "VAC_7B", "VACCINATION", "999999.00");   // giá hiện hành đã khác
         VisitServiceDetail line = detail(1L, 100L, vaccine, ServiceDetailStatus.COMPLETED);
         line.setQuantity(2);
         PetVisit visit = visit(100L, VisitStatus.IN_PROGRESS, DOCTOR);
-        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(line));
+        when(detailRepository.findByVisitIdOrderByIdAsc(lid(100L))).thenReturn(List.of(line));
         when(invoiceRepository.findByVisitServiceDetailIdIn(anyCollection())).thenReturn(List.of(
-                ServiceInvoice.builder().id(50L).invoiceCode("SINV-2026-0050").visitServiceDetailId(1L)
+                ServiceInvoice.builder().id(lid(50L)).invoiceCode("SINV-2026-0050").visitServiceDetailId(lid(1L))
                         .unitPrice(new BigDecimal("150000.00")).vatRate(new BigDecimal("0.05"))
                         .paymentStatus(PaymentStatus.PENDING).build()));
         when(labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of());
@@ -129,7 +160,7 @@ class VisitAssemblerTest {
     void toServiceDetail_withoutInvoice_hasNoPrice() {
         VisitServiceDetail line = detail(1L, 100L, service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00"),
                 ServiceDetailStatus.PENDING);
-        when(invoiceRepository.findByVisitServiceDetailId(1L)).thenReturn(Optional.empty());
+        when(invoiceRepository.findByVisitServiceDetailId(lid(1L))).thenReturn(Optional.empty());
 
         var d = assembler.toServiceDetail(line);
 
@@ -142,14 +173,14 @@ class VisitAssemblerTest {
         ClinicService cbc = service(5L, "LAB_CBC", ServiceCategory.LABORATORY, "250000.00");
         VisitServiceDetail line = detail(1L, 100L, cbc, ServiceDetailStatus.COMPLETED);
         LabTestItem wbc = LabTestItem.builder().id((short) 1).code("WBC").name("WBC").unit("10^9/L").build();
-        when(detailRepository.findByVisitIdOrderByIdAsc(100L)).thenReturn(List.of(line));
+        when(detailRepository.findByVisitIdOrderByIdAsc(lid(100L))).thenReturn(List.of(line));
         when(invoiceRepository.findByVisitServiceDetailIdIn(anyCollection())).thenReturn(List.of());
         when(labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
-                LabTestResult.builder().id(1L).visitServiceDetailId(1L).labTestItem(wbc).resultValue(new BigDecimal("21.00"))
+                LabTestResult.builder().id(1L).visitServiceDetailId(lid(1L)).labTestItem(wbc).resultValue(new BigDecimal("21.00"))
                         .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(uid(31)).build(),
-                LabTestResult.builder().id(2L).visitServiceDetailId(1L).labTestItem(wbc).resultValue(new BigDecimal("3.00"))
+                LabTestResult.builder().id(2L).visitServiceDetailId(lid(1L)).labTestItem(wbc).resultValue(new BigDecimal("3.00"))
                         .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(uid(31)).build(),
-                LabTestResult.builder().id(3L).visitServiceDetailId(1L).labTestItem(wbc).resultValue(new BigDecimal("10.00"))
+                LabTestResult.builder().id(3L).visitServiceDetailId(lid(1L)).labTestItem(wbc).resultValue(new BigDecimal("10.00"))
                         .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(uid(31)).build()));
         when(imagingResultRepository.findByVisitServiceDetailIdIn(anyCollection())).thenReturn(List.of());
         when(historyRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of());

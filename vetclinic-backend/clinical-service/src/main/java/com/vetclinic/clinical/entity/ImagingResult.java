@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import org.hibernate.annotations.UuidGenerator;
 import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -20,11 +21,11 @@ import java.time.Instant;
 @AllArgsConstructor
 public class ImagingResult {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @UuidGenerator(style = UuidGenerator.Style.VERSION_7)
+    private UUID id;
 
     @Column(name = "visit_service_detail_id", nullable = false, unique = true)
-    private Long visitServiceDetailId;
+    private UUID visitServiceDetailId;
 
     @Column(name = "description", nullable = false, columnDefinition = "TEXT")
     private String description;

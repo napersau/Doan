@@ -145,11 +145,11 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         if (tickets.isEmpty()) {
             return List.of();
         }
-        Map<Long, List<Long>> detailIdsByTicket = ticketItemRepository
+        Map<Long, List<UUID>> detailIdsByTicket = ticketItemRepository
                 .findByTicketIdIn(tickets.stream().map(QueueTicket::getId).toList()).stream()
                 .collect(Collectors.groupingBy(QueueTicketItem::getTicketId,
                         Collectors.mapping(QueueTicketItem::getVisitServiceDetailId, Collectors.toList())));
-        Map<Long, VisitServiceDetail> details = detailRepository.findAllById(detailIdsByTicket.values().stream()
+        Map<UUID, VisitServiceDetail> details = detailRepository.findAllById(detailIdsByTicket.values().stream()
                         .flatMap(List::stream).toList()).stream()
                 .collect(Collectors.toMap(VisitServiceDetail::getId, d -> d));
         List<Row> rows = new ArrayList<>();
@@ -176,12 +176,12 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         if (rows.isEmpty()) {
             return List.of();
         }
-        List<Long> visitIds = rows.stream().map(r -> r.detail().getVisitId()).distinct().toList();
-        Map<Long, PetVisit> visits = visitRepository.findWithPetByIdIn(visitIds).stream()
+        List<UUID> visitIds = rows.stream().map(r -> r.detail().getVisitId()).distinct().toList();
+        Map<UUID, PetVisit> visits = visitRepository.findWithPetByIdIn(visitIds).stream()
                 .collect(Collectors.toMap(PetVisit::getId, v -> v));
-        Map<Long, List<VisitServiceDetail>> siblings = detailRepository.findByVisitIdInOrderByIdAsc(visitIds).stream()
+        Map<UUID, List<VisitServiceDetail>> siblings = detailRepository.findByVisitIdInOrderByIdAsc(visitIds).stream()
                 .collect(Collectors.groupingBy(VisitServiceDetail::getVisitId));
-        Map<Long, String> latestAction = latestActions(siblings.values().stream().flatMap(List::stream)
+        Map<UUID, String> latestAction = latestActions(siblings.values().stream().flatMap(List::stream)
                 .map(VisitServiceDetail::getId).toList());
 
         return rows.stream()
@@ -203,8 +203,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     }
 
     /** action mới nhất của từng chỉ định (lịch sử luôn có dòng ORDERED đầu tiên). */
-    private Map<Long, String> latestActions(List<Long> detailIds) {
-        Map<Long, String> latest = new HashMap<>();
+    private Map<UUID, String> latestActions(List<UUID> detailIds) {
+        Map<UUID, String> latest = new HashMap<>();
         for (VisitServiceDetailHistory h : detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(detailIds)) {
             latest.put(h.getVisitServiceDetailId(), h.getAction());   // đã sắp theo id tăng dần: dòng cuối thắng
         }
@@ -226,7 +226,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
      * EX-09 / FR-36: huy hiệu liên phòng trên hàng đợi CĐHA. SAMPLING nếu có dịch vụ Lab của ca đang lấy mẫu; SAMPLE_COLLECTED nếu
      * các dịch vụ Lab đang làm đều đã lấy mẫu xong (sẵn sàng chụp); null nếu không có dịch vụ Lab IN_PROGRESS.
      */
-    static String labBadge(List<VisitServiceDetail> siblings, Map<Long, String> latestAction) {
+    static String labBadge(List<VisitServiceDetail> siblings, Map<UUID, String> latestAction) {
         boolean anyLab = false;
         for (VisitServiceDetail s : siblings) {
             if (s.getService().getCategory().is(ServiceCategory.LABORATORY) && s.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
@@ -243,7 +243,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse sampleCollected(Long detailId) {
+    public ServiceDetailResponse sampleCollected(UUID detailId) {
         UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
@@ -263,7 +263,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse perform(Long detailId) {
+    public ServiceDetailResponse perform(UUID detailId) {
         UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), true);
@@ -280,7 +280,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse cancel(Long detailId, String reason, String reasonType) {
+    public ServiceDetailResponse cancel(UUID detailId, String reason, String reasonType) {
         UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), true);
@@ -323,7 +323,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<LabTestItemResponse> labForm(Long detailId) {
+    public List<LabTestItemResponse> labForm(UUID detailId) {
         VisitServiceDetail detail = detailRepository.findById(detailId)
                 .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
         assertOperator(detail, true);
@@ -348,7 +348,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<LabResultResponse> labResults(Long detailId) {
+    public List<LabResultResponse> labResults(UUID detailId) {
         VisitServiceDetail detail = detailRepository.findById(detailId)
                 .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
         if (!detail.getService().getCategory().is(ServiceCategory.LABORATORY)) {
@@ -359,7 +359,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ServiceDetailResponse submitLabResults(Long detailId, LabResultRequest request) {
+    public ServiceDetailResponse submitLabResults(UUID detailId, LabResultRequest request) {
         UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
@@ -427,7 +427,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
      * thất bại thì xóa các tệp vừa lưu để không để lại tệp mồ côi.
      */
     @Override
-    public ServiceDetailResponse submitImagingResult(Long detailId, String description, String conclusion,
+    public ServiceDetailResponse submitImagingResult(UUID detailId, String description, String conclusion,
                                                      List<MultipartFile> files) {
         UUID actor = SecurityUtils.getCurrentUserId();
         if (SecurityUtils.getCurrentRole().orElse(null) != RoleCode.IMAGING_TECHNICIAN) {
@@ -459,7 +459,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         }
     }
 
-    private ServiceDetailResponse saveImaging(UUID actor, Long detailId, String description, String conclusion,
+    private ServiceDetailResponse saveImaging(UUID actor, UUID detailId, String description, String conclusion,
                                               List<ImagingStorage.StoredFile> stored) {
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
@@ -506,7 +506,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     // ================================================================== helper
 
     /** Khóa chỉ định rồi khóa đợt khám (luôn theo thứ tự này). Câu truy vấn khóa là lệnh đầu tiên của transaction. */
-    private Ctx lockForAction(Long detailId) {
+    private Ctx lockForAction(UUID detailId) {
         VisitServiceDetail detail = detailRepository.findByIdForUpdate(detailId)
                 .orElseThrow(() -> new AppException(ErrorCode.SERVICE_DETAIL_NOT_FOUND));
         PetVisit visit = support.lock(detail.getVisitId());

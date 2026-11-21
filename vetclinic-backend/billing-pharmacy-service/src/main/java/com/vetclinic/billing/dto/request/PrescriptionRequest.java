@@ -1,5 +1,6 @@
 package com.vetclinic.billing.dto.request;
 
+import java.util.UUID;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
@@ -11,7 +12,7 @@ import java.util.List;
  * Cập nhật = thay toàn bộ danh sách thuốc.
  */
 public record PrescriptionRequest(
-        Long visitId,
+        UUID visitId,
         @Size(max = 4000) String doctorNotes,
         @NotEmpty @Size(max = 20) List<@Valid PrescriptionItemRequest> items
 ) {

@@ -16,7 +16,7 @@ public record MedicineInvoiceResponse(
         Long id,
         String invoiceCode,
         Long prescriptionId,
-        Long visitId,
+        UUID visitId,
         String visitCode,
         String petName,
         UUID ownerId,

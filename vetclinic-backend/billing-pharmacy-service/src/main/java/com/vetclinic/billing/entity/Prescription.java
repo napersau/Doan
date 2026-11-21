@@ -1,5 +1,6 @@
 package com.vetclinic.billing.entity;
 
+import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -30,7 +31,7 @@ public class Prescription {
 
     /** Khóa ngoại logic -> pet_clinic_clinical_db.pet_visits(id); mỗi đợt khám tối đa một đơn (BR-18). */
     @Column(name = "visit_id", nullable = false, unique = true)
-    private Long visitId;
+    private UUID visitId;
 
     @Column(name = "doctor_notes", columnDefinition = "TEXT")
     private String doctorNotes;

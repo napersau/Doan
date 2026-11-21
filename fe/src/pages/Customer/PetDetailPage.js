@@ -36,7 +36,7 @@ export default function PetDetailPage() {
             {(items) => <Table caption="Các đợt khám" columns={[
               { title: 'Mã đợt khám', render: (row) => <strong>{row.visitCode}</strong> },
               { title: 'Tiếp nhận', render: (row) => formatDateTime(row.checkedInAt) },
-              { title: 'Chẩn đoán', render: (row) => row.diagnosis || '—' },
+              { title: 'Lý do đến khám', render: (row) => row.reasonForVisit || '—' },
               { title: 'Trạng thái', render: (row) => <Badge map={VISIT_STATUS} value={row.status} /> }]} rows={items} />}
           </AsyncView>
         </Panel>

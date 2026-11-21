@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.UUID;
 import java.util.List;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,9 +30,9 @@ class VisitEnricherTest {
     private AuthClient authClient;
 
     private static VisitResponse visit(long id, UUID doctorId) {
-        return new VisitResponse(id, "VIS-" + id, uid(11), "Lu", "PET-11", "Chó", uid(5), null, doctorId, uid(9), null, false,
-                VisitStatus.WAITING, false, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null);
+        return new VisitResponse(com.vetclinic.clinical.testsupport.TestData.lid(id), "VIS-" + id, uid(11), "Lu", "PET-11", "Chó", uid(5), null,
+                doctorId, null, uid(9), null, false, VisitStatus.WAITING, false, null, null, null, null, null, null, null,
+                null, null, null, null, null);
     }
 
     private static UserSummaryResponse doctor(long id, String room) {
@@ -64,6 +65,6 @@ class VisitEnricherTest {
         VisitResponse result = new VisitEnricher(authClient).enrich(visit(1, uid(2)));
 
         assertThat(result.assignedRoom()).isNull();
-        assertThat(result.id()).isEqualTo(1L);
+        assertThat(result.id()).isEqualTo(com.vetclinic.clinical.testsupport.TestData.lid(1L));
     }
 }

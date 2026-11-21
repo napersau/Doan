@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.VisitStatus;
 
 import java.math.BigDecimal;
@@ -11,7 +12,7 @@ import java.util.List;
  * tickets = phiếu xếp hàng còn hiệu lực của ca (thu phí khám / tiền CLS xong thì có phiếu mới để in số thứ tự).
  */
 public record InvoiceStatementResponse(
-        Long visitId,
+        UUID visitId,
         String visitCode,
         VisitStatus visitStatus,
         List<ServiceInvoiceResponse> invoices,

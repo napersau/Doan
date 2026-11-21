@@ -8,7 +8,7 @@ import com.vetclinic.clinical.constant.VisitStatus;
  * bằng mã ca khám, tên thú cưng.
  */
 public record VisitSummaryResponse(
-        Long id,
+        UUID id,
         String visitCode,
         VisitStatus status,
         UUID petId,

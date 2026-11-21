@@ -29,6 +29,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.billing.testsupport.TestData.vid;
 import static com.vetclinic.billing.testsupport.TestData.uid;
 import static com.vetclinic.billing.testsupport.TestData.DOCTOR;
 import static com.vetclinic.billing.testsupport.TestData.OTHER_DOCTOR;
@@ -84,12 +85,12 @@ class PrescriptionServiceImplTest {
     }
 
     private static PrescriptionRequest request(long visitId, PrescriptionItemRequest... lines) {
-        return new PrescriptionRequest(visitId, "Cho ăn nhẹ", List.of(lines));
+        return new PrescriptionRequest(vid(visitId), "Cho ăn nhẹ", List.of(lines));
     }
 
     private void doctorOnInProgressVisit(long visitId) {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(visitLookup.require(visitId)).thenReturn(visit(visitId, VisitStatus.IN_PROGRESS, DOCTOR));
+        when(visitLookup.require(vid(visitId))).thenReturn(visit(visitId, VisitStatus.IN_PROGRESS, DOCTOR));
     }
 
     // ================================================================== kê đơn
@@ -98,12 +99,12 @@ class PrescriptionServiceImplTest {
     void create_hasNoPriceNoStatus_andDoesNotTouchStock() {
         doctorOnInProgressVisit(7L);
         Medicine amox = medicine(1L, "Clavamox", "15000", 200);
-        when(prescriptionRepository.findWithItemsByVisitId(7L)).thenReturn(Optional.empty());
+        when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
         when(medicineRepository.findAllById(any())).thenReturn(List.of(amox));
 
         PrescriptionResponse response = service.create(request(7L, line(1L, 10)));
 
-        assertThat(response.visitId()).isEqualTo(7L);
+        assertThat(response.visitId()).isEqualTo(com.vetclinic.billing.testsupport.TestData.vid(7L));
         assertThat(response.items()).hasSize(1);
         assertThat(response.items().get(0).quantity()).isEqualTo(10);
         assertThat(response.stockWarnings()).isEmpty();
@@ -116,7 +117,7 @@ class PrescriptionServiceImplTest {
     void create_overStock_savesAndOnlyWarns() {
         doctorOnInProgressVisit(7L);
         Medicine amox = medicine(1L, "Clavamox 250mg", "15000", 200);
-        when(prescriptionRepository.findWithItemsByVisitId(7L)).thenReturn(Optional.empty());
+        when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
         when(medicineRepository.findAllById(any())).thenReturn(List.of(amox));
 
         PrescriptionResponse response = service.create(request(7L, line(1L, 300)));   // EX-13
@@ -129,7 +130,7 @@ class PrescriptionServiceImplTest {
     @Test
     void create_byAnotherDoctorIsRefused() {
         loginAs(OTHER_DOCTOR, RoleCode.VETERINARIAN);
-        when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
 
         assertError(ErrorCode.NOT_ASSIGNED_DOCTOR, () -> service.create(request(7L, line(1L, 1))));
         verify(prescriptionRepository, never()).saveAndFlush(any());
@@ -138,7 +139,7 @@ class PrescriptionServiceImplTest {
     @Test
     void create_afterTheVisitIsClosedIsRefused() {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
-        when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
 
         assertError(ErrorCode.PRESCRIPTION_LOCKED, () -> service.create(request(7L, line(1L, 1))));
     }
@@ -146,7 +147,7 @@ class PrescriptionServiceImplTest {
     @Test
     void create_secondPrescriptionForTheSameVisitIsRefused() {
         doctorOnInProgressVisit(7L);
-        when(prescriptionRepository.findWithItemsByVisitId(7L))
+        when(prescriptionRepository.findWithItemsByVisitId(vid(7L)))
                 .thenReturn(Optional.of(prescription(3L, 7L, item(1L, medicine(1L, "Clavamox", "15000", 200), 5))));
 
         assertError(ErrorCode.PRESCRIPTION_ALREADY_EXISTS, () -> service.create(request(7L, line(1L, 1))));
@@ -155,7 +156,7 @@ class PrescriptionServiceImplTest {
     @Test
     void create_concurrentDuplicateCaughtByUniqueConstraint() {
         doctorOnInProgressVisit(7L);
-        when(prescriptionRepository.findWithItemsByVisitId(7L)).thenReturn(Optional.empty());
+        when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
         when(medicineRepository.findAllById(any())).thenReturn(List.of(medicine(1L, "Clavamox", "15000", 200)));
         when(prescriptionRepository.saveAndFlush(any(Prescription.class))).thenThrow(new DataIntegrityViolationException("dup"));
 
@@ -175,7 +176,7 @@ class PrescriptionServiceImplTest {
         doctorOnInProgressVisit(7L);
         Medicine inactive = medicine(1L, "Thuốc cũ", "1000", 10);
         inactive.setActive(false);
-        when(prescriptionRepository.findWithItemsByVisitId(7L)).thenReturn(Optional.empty());
+        when(prescriptionRepository.findWithItemsByVisitId(vid(7L))).thenReturn(Optional.empty());
         when(medicineRepository.findAllById(any())).thenReturn(List.of(inactive));
 
         assertError(ErrorCode.MEDICINE_NOT_FOUND, () -> service.create(request(7L, line(1L, 1))));
@@ -192,7 +193,7 @@ class PrescriptionServiceImplTest {
         Medicine vanguard = medicine(3L, "Vanguard", "180000", 50);
         Prescription existing = prescription(3L, 7L, item(10L, amox, 5), item(11L, drontal, 2));
         when(prescriptionRepository.findById(3L)).thenReturn(Optional.of(existing));
-        when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
         when(prescriptionRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
         when(invoiceRepository.existsByPrescriptionIdAndPaymentStatusNot(3L, PaymentStatus.CANCELLED)).thenReturn(false);
         when(invoiceItemRepository.existsByPrescriptionItemId(11L)).thenReturn(false);
@@ -212,7 +213,7 @@ class PrescriptionServiceImplTest {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         Prescription existing = prescription(3L, 7L, item(10L, medicine(1L, "Clavamox", "15000", 200), 5));
         when(prescriptionRepository.findById(3L)).thenReturn(Optional.of(existing));
-        when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));   // ca đã được mở lại (T14)
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));   // ca đã được mở lại (T14)
         when(prescriptionRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
         when(invoiceRepository.existsByPrescriptionIdAndPaymentStatusNot(3L, PaymentStatus.CANCELLED)).thenReturn(true);
 
@@ -227,7 +228,7 @@ class PrescriptionServiceImplTest {
         Medicine drontal = medicine(2L, "Drontal", "45000", 100);
         Prescription existing = prescription(3L, 7L, item(10L, amox, 5), item(11L, drontal, 2));
         when(prescriptionRepository.findById(3L)).thenReturn(Optional.of(existing));
-        when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.IN_PROGRESS, DOCTOR));
         when(prescriptionRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
         when(invoiceRepository.existsByPrescriptionIdAndPaymentStatusNot(3L, PaymentStatus.CANCELLED)).thenReturn(false);   // hóa đơn đã hủy
         when(medicineRepository.findAllById(any())).thenReturn(List.of(amox));
@@ -241,7 +242,7 @@ class PrescriptionServiceImplTest {
         loginAs(DOCTOR, RoleCode.VETERINARIAN);
         Prescription existing = prescription(3L, 7L, item(10L, medicine(1L, "Clavamox", "15000", 200), 5));
         when(prescriptionRepository.findById(3L)).thenReturn(Optional.of(existing));
-        when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
 
         assertError(ErrorCode.PRESCRIPTION_LOCKED, () -> service.update(3L, request(7L, line(1L, 1))));
     }
@@ -253,7 +254,7 @@ class PrescriptionServiceImplTest {
         Prescription existing = prescription(3L, 7L, item(10L, medicine(1L, "Clavamox", "15000", 200), 5));
         when(prescriptionRepository.findWithItemsById(3L)).thenReturn(Optional.of(existing));
         when(invoiceRepository.findByPrescriptionId(3L)).thenReturn(Optional.empty());
-        when(visitLookup.require(7L)).thenReturn(visit(7L, VisitStatus.COMPLETED, DOCTOR));   // chủ nuôi = OWNER
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, VisitStatus.COMPLETED, DOCTOR));   // chủ nuôi = OWNER
 
         loginAs(OWNER, RoleCode.PET_OWNER);
         assertThat(service.getById(3L).petName()).isEqualTo("Lu");
@@ -268,7 +269,7 @@ class PrescriptionServiceImplTest {
         Prescription existing = prescription(3L, 7L, item(10L, medicine(1L, "Clavamox", "15000", 200), 5));
         when(prescriptionRepository.findWithItemsById(3L)).thenReturn(Optional.of(existing));
         when(invoiceRepository.findByPrescriptionId(3L)).thenReturn(Optional.empty());
-        when(visitLookup.tryFind(anyLong())).thenReturn(null);   // clinical tạm sập
+        when(visitLookup.tryFind(any(java.util.UUID.class))).thenReturn(null);   // clinical tạm sập
 
         PrescriptionResponse response = service.getById(3L);
 

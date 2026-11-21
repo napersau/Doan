@@ -1,5 +1,6 @@
 package com.vetclinic.billing.repository;
 
+import java.util.UUID;
 import com.vetclinic.billing.entity.Prescription;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
@@ -28,11 +29,11 @@ public interface PrescriptionRepository extends JpaRepository<Prescription, Long
     Optional<Prescription> findWithItemsById(Long id);
 
     @EntityGraph(attributePaths = {"items", "items.medicine"})
-    Optional<Prescription> findWithItemsByVisitId(Long visitId);
+    Optional<Prescription> findWithItemsByVisitId(UUID visitId);
 
     /** Cho tra cứu bệnh án: đơn của nhiều đợt khám cùng lúc. */
     @EntityGraph(attributePaths = {"items", "items.medicine"})
-    List<Prescription> findWithItemsByVisitIdIn(Collection<Long> visitIds);
+    List<Prescription> findWithItemsByVisitIdIn(Collection<UUID> visitIds);
 
-    Page<Prescription> findByVisitId(Long visitId, Pageable pageable);
+    Page<Prescription> findByVisitId(UUID visitId, Pageable pageable);
 }

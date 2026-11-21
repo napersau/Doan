@@ -2,21 +2,22 @@ package com.vetclinic.clinical.dto.response;
 
 import com.vetclinic.clinical.constant.VisitStatus;
 
-import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.UUID;
 import java.util.List;
+import java.util.UUID;
 
 /**
- * Hồ sơ một đợt khám. services / labResults / imagingResults chỉ có ở API chi tiết, null ở các API danh sách.
- * locked = true từ lúc Bác sĩ chốt chuyên môn (WAITING_PAYMENT trở đi): không được sửa chẩn đoán, dịch vụ, đơn thuốc (BR-27).
+ * Đợt khám. services / labResults / imagingResults / vitalSigns / medicalRecord chỉ có ở API chi tiết, null ở các API danh sách
+ * (tránh N+1). locked = true từ lúc Bác sĩ chốt chuyên môn (WAITING_PAYMENT trở đi): không được sửa hồ sơ khám, dịch vụ, đơn
+ * thuốc (BR-27).
  * <p>
- * Lược đồ v3.0 bỏ các cột assigned_room, started_at, closed_at, completed_at, cancel_reason khỏi pet_visits: hình dạng
- * response giữ các trường đó nhưng được SUY RA (phòng từ Bác sĩ qua auth-service, các mốc và lý do hủy từ lịch sử trạng thái).
- * ticket: phiếu xếp hàng còn hiệu lực của ca (chỉ gắn ở các API hàng đợi; null ở chỗ khác). Thứ tự hàng đợi nằm ở queue_tickets.
+ * Lược đồ v4.0: {@code pet_visits} chỉ giữ thông tin hành chính. Sinh hiệu ở {@code vital_signs} (nhiều lần đo) và nội dung chuyên
+ * môn ở {@code medical_records}. Các mốc (bắt đầu, chốt, hoàn tất) và lý do hủy SUY RA từ lịch sử trạng thái; phòng khám của Bác sĩ
+ * lấy từ auth-service ở tầng controller. doctorName là bản chụp (snapshot) trên đợt khám.
+ * ticket: phiếu xếp hàng còn hiệu lực của ca (chỉ gắn ở các API hàng đợi / chi tiết; null ở chỗ khác).
  */
 public record VisitResponse(
-        Long id,
+        UUID id,
         String visitCode,
         UUID petId,
         String petName,
@@ -25,19 +26,14 @@ public record VisitResponse(
         UUID ownerId,
         UUID appointmentId,
         UUID doctorId,
+        String doctorName,
         UUID receptionistId,
         String assignedRoom,
         boolean emergency,
         VisitStatus status,
         boolean locked,
         TicketInfo ticket,
-        BigDecimal weightAtVisit,
-        BigDecimal temperature,
-        String initialSymptoms,
-        String clinicalNotes,
-        String diagnosis,
-        String treatmentPlan,
-        String doctorAdvice,
+        String reasonForVisit,
         String cancelReason,
         Instant checkedInAt,
         Instant startedAt,
@@ -45,22 +41,29 @@ public record VisitResponse(
         Instant completedAt,
         List<ServiceDetailResponse> services,
         List<LabResultResponse> labResults,
-        List<ImagingResultResponse> imagingResults
+        List<ImagingResultResponse> imagingResults,
+        List<VitalSignResponse> vitalSigns,
+        MedicalRecordResponse medicalRecord
 ) {
 
     /** Gắn số phòng của Bác sĩ phụ trách (users.room_number): lấy từ auth-service ở tầng controller, ngoài transaction. */
     public VisitResponse withAssignedRoom(String room) {
-        return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId,
-                receptionistId, room, emergency, status, locked, ticket, weightAtVisit, temperature,
-                initialSymptoms, clinicalNotes, diagnosis, treatmentPlan, doctorAdvice, cancelReason, checkedInAt,
-                startedAt, closedAt, completedAt, services, labResults, imagingResults);
+        return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId, doctorName,
+                receptionistId, room, emergency, status, locked, ticket, reasonForVisit, cancelReason, checkedInAt,
+                startedAt, closedAt, completedAt, services, labResults, imagingResults, vitalSigns, medicalRecord);
     }
 
     /** Gắn phiếu xếp hàng (số in trên phiếu, ưu tiên, giờ gọi) cho màn hình hàng đợi. */
     public VisitResponse withTicket(TicketInfo t) {
-        return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId,
-                receptionistId, assignedRoom, emergency, status, locked, t, weightAtVisit, temperature,
-                initialSymptoms, clinicalNotes, diagnosis, treatmentPlan, doctorAdvice, cancelReason, checkedInAt,
-                startedAt, closedAt, completedAt, services, labResults, imagingResults);
+        return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId, doctorName,
+                receptionistId, assignedRoom, emergency, status, locked, t, reasonForVisit, cancelReason, checkedInAt,
+                startedAt, closedAt, completedAt, services, labResults, imagingResults, vitalSigns, medicalRecord);
+    }
+
+    /** Gắn sinh hiệu và hồ sơ khám (chỉ API chi tiết). */
+    public VisitResponse withClinical(List<VitalSignResponse> vitals, MedicalRecordResponse record) {
+        return new VisitResponse(id, visitCode, petId, petName, petCode, speciesName, ownerId, appointmentId, doctorId, doctorName,
+                receptionistId, assignedRoom, emergency, status, locked, ticket, reasonForVisit, cancelReason, checkedInAt,
+                startedAt, closedAt, completedAt, services, labResults, imagingResults, vitals, record);
     }
 }

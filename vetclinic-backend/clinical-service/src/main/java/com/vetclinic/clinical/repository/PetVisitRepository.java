@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -21,7 +22,7 @@ import java.util.Optional;
 import java.util.Set;
 
 @Repository
-public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSpecificationExecutor<PetVisit> {
+public interface PetVisitRepository extends JpaRepository<PetVisit, UUID>, JpaSpecificationExecutor<PetVisit> {
 
     /**
      * Khóa dòng (SELECT ... FOR UPDATE) cho mọi thao tác ghi lên đợt khám: serialize các thao tác cùng lúc
@@ -29,13 +30,13 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select v from PetVisit v where v.id = :id")
-    Optional<PetVisit> findByIdForUpdate(@Param("id") Long id);
+    Optional<PetVisit> findByIdForUpdate(@Param("id") UUID id);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    Optional<PetVisit> findWithPetById(Long id);
+    Optional<PetVisit> findWithPetById(UUID id);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
-    List<PetVisit> findWithPetByIdIn(Collection<Long> ids);
+    List<PetVisit> findWithPetByIdIn(Collection<UUID> ids);
 
     /** Số ca đang chờ (WAITING, RESULTS_READY) của từng Bác sĩ: các dòng [doctorId, count]. */
     @Query("select v.doctorId, count(v) from PetVisit v where v.doctorId is not null "
@@ -58,12 +59,17 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
     List<PetVisit> findDoctorVisits(@Param("doctorId") UUID doctorId, @Param("statuses") Collection<VisitStatus> statuses);
 
     /**
-     * Cân nặng gần nhất của mỗi thú cưng = weight_at_visit của đợt khám gần nhất có cân (pets không còn cột weight).
-     * Trả các dòng [petId, weight].
+     * Cân nặng gần nhất của mỗi thú cưng = lần đo (vital_signs) có cân ghi sau cùng; pets không còn cột weight.
+     * Trả các dòng [petId, weightKg].
      */
-    @Query("select v.pet.id, v.weightAtVisit from PetVisit v where v.weightAtVisit is not null and v.id in "
-            + "(select max(v2.id) from PetVisit v2 where v2.pet.id in :petIds and v2.weightAtVisit is not null group by v2.pet.id)")
+    @Query("select v.pet.id, s.weightKg from VitalSign s, PetVisit v where s.visitId = v.id and s.weightKg is not null and s.id in "
+            + "(select max(s2.id) from VitalSign s2, PetVisit v2 where s2.visitId = v2.id and v2.pet.id in :petIds and s2.weightKg is not null group by v2.pet.id)")
     List<Object[]> findLatestWeights(@Param("petIds") Collection<UUID> petIds);
+
+    /** Bác sĩ đổi họ tên (UserProfileUpdatedEvent): cập nhật bản chụp tên trên mọi đợt khám đã gán Bác sĩ đó, một câu UPDATE. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update PetVisit v set v.doctorNameSnapshot = :name where v.doctorId = :doctorId and (v.doctorNameSnapshot is null or v.doctorNameSnapshot <> :name)")
+    int updateDoctorNameSnapshot(@Param("doctorId") UUID doctorId, @Param("name") String name);
 
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     List<PetVisit> findByPetIdOrderByIdDesc(UUID petId);

@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,9 +36,9 @@ class ImagingStorageTest {
 
     @Test
     void store_writesJpegUnderTheVisitFolderWithAServerGeneratedName() throws IOException {
-        ImagingStorage.StoredFile stored = storage.store(12L, new MockMultipartFile("files", "sieu-am.jpg", "image/jpeg", JPEG));
+        ImagingStorage.StoredFile stored = storage.store(lid(12L), new MockMultipartFile("files", "sieu-am.jpg", "image/jpeg", JPEG));
 
-        assertThat(stored.relativePath()).matches("12/[0-9a-f-]{36}\\.jpg");
+        assertThat(stored.relativePath()).matches(lid(12L) + "/[0-9a-f-]{36}\\.jpg");
         assertThat(stored.originalName()).isEqualTo("sieu-am.jpg");
         assertThat(stored.size()).isEqualTo(JPEG.length);
         assertThat(stored.contentType()).isEqualTo("image/jpeg");
@@ -52,8 +53,8 @@ class ImagingStorageTest {
         dicom[130] = 'C';
         dicom[131] = 'M';
 
-        assertThat(storage.store(1L, new MockMultipartFile("files", "x.png", "image/png", PNG)).relativePath()).endsWith(".png");
-        assertThat(storage.store(1L, new MockMultipartFile("files", "x.dcm", "application/dicom", dicom)).relativePath()).endsWith(".dcm");
+        assertThat(storage.store(lid(1L), new MockMultipartFile("files", "x.png", "image/png", PNG)).relativePath()).endsWith(".png");
+        assertThat(storage.store(lid(1L), new MockMultipartFile("files", "x.dcm", "application/dicom", dicom)).relativePath()).endsWith(".dcm");
     }
 
     @Test
@@ -74,7 +75,7 @@ class ImagingStorageTest {
 
     @Test
     void store_neverWritesOutsideTheStorageRootEvenWithAMaliciousOriginalName() throws IOException {
-        ImagingStorage.StoredFile stored = storage.store(7L,
+        ImagingStorage.StoredFile stored = storage.store(lid(7L),
                 new MockMultipartFile("files", "../../../etc/evil.jpg", "image/jpeg", JPEG));
 
         // Tên gốc chỉ để hiển thị (đã bỏ phần đường dẫn); nơi lưu thật do server sinh
@@ -93,7 +94,7 @@ class ImagingStorageTest {
 
     @Test
     void loadAndDelete_roundTrip() throws IOException {
-        ImagingStorage.StoredFile stored = storage.store(3L, new MockMultipartFile("files", "a.jpg", "image/jpeg", JPEG));
+        ImagingStorage.StoredFile stored = storage.store(lid(3L), new MockMultipartFile("files", "a.jpg", "image/jpeg", JPEG));
 
         Resource resource = storage.load(stored.relativePath());
         assertThat(resource.contentLength()).isEqualTo(JPEG.length);

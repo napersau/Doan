@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.entity.PetVisitStatusHistory;
@@ -38,14 +39,14 @@ public class VisitTimeline {
         return ofAll(List.of(visit)).getOrDefault(visit.getId(), Times.EMPTY);
     }
 
-    public Map<Long, Times> ofAll(Collection<PetVisit> visits) {
+    public Map<UUID, Times> ofAll(Collection<PetVisit> visits) {
         if (visits.isEmpty()) {
             return Map.of();
         }
-        Map<Long, List<PetVisitStatusHistory>> histories = historyRepository
+        Map<UUID, List<PetVisitStatusHistory>> histories = historyRepository
                 .findByVisitIdInOrderByIdAsc(visits.stream().map(PetVisit::getId).toList()).stream()
                 .collect(Collectors.groupingBy(PetVisitStatusHistory::getVisitId));
-        Map<Long, Times> result = new HashMap<>();
+        Map<UUID, Times> result = new HashMap<>();
         for (PetVisit v : visits) {
             result.put(v.getId(), compute(v.getStatus(), histories.getOrDefault(v.getId(), List.of())));
         }

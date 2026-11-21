@@ -73,7 +73,7 @@ export const ERROR_HINTS = {
   CLIN_1303: 'Hàng đợi hiện không còn bệnh nhân nào.',
   CLIN_1306: 'Thú cưng này đang có một đợt khám chưa kết thúc.',
   CLIN_1307: 'Cần nhập chẩn đoán trước khi chốt ca.',
-  CLIN_1308: 'Cần ghi cân nặng và thân nhiệt trước khi chỉ định cận lâm sàng.',
+  CLIN_1308: 'Cần có ít nhất một lần đo sinh hiệu đủ cả cân nặng và thân nhiệt trước khi chỉ định cận lâm sàng hoặc chốt ca.',
   CLIN_1309: 'Còn dịch vụ tại phòng chưa bấm “Đã thực hiện” hoặc chưa hủy.',
   CLIN_1310: 'Phí khám và dịch vụ khách tự hủy không được hoàn tiền.',
   CLIN_1311: 'Ca này đã được phân công cho bác sĩ khác.',

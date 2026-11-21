@@ -111,7 +111,7 @@ public class ReportServiceImpl implements ReportService {
                             e.getValue()[0], e.getValue()[1], e.getValue()[2], e.getValue()[3]))
                     .toList();
 
-            Set<Long> debtVisits = new HashSet<>();
+            Set<UUID> debtVisits = new HashSet<>();
             long debtInvoices = 0;
             BigDecimal debtAmount = zero();
             for (InvoiceAmountRow row : invoiceRepository.findDebt()) {

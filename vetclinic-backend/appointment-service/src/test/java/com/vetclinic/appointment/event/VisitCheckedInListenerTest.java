@@ -37,7 +37,7 @@ class VisitCheckedInListenerTest {
     private static final UUID PET = UUID.fromString("019a9442-d820-7000-8000-000000000001");
 
     private static VisitCheckedInEvent event(UUID eventId, UUID appointmentId) {
-        return new VisitCheckedInEvent(eventId, NOW, ACTOR, 42L, "VIS-2026-00042", PET, appointmentId, false, UuidV7.generate());
+        return new VisitCheckedInEvent(eventId, NOW, ACTOR, UuidV7.generate(), "VIS-2026-00042", PET, appointmentId, false, UuidV7.generate());
     }
 
     @Test

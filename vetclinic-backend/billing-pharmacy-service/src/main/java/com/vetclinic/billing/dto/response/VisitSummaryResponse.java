@@ -5,7 +5,7 @@ import com.vetclinic.billing.constant.VisitStatus;
 
 /** Bản rút gọn đợt khám do clinical-service trả về qua endpoint nội bộ. */
 public record VisitSummaryResponse(
-        Long id,
+        UUID id,
         String visitCode,
         VisitStatus status,
         UUID petId,

@@ -31,7 +31,7 @@ const newPet = async (name, owner = ID.user.khach_lan, species = ID.species.DOG)
   if (res.status !== 201) throw new Error(`newPet ${name}: ${brief(res)}`);
   return res.data.id;
 };
-const checkIn = (petId, doctorId, extra = {}) => call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId, doctorId, isEmergency: false, initialSymptoms: 'e2e', ...extra } });
+const checkIn = (petId, doctorId, extra = {}) => call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId, doctorId, isEmergency: false, reasonForVisit: 'e2e', ...extra } });
 const visitOf = async (id) => (await call('GET', `${CLIN}/pet-visits/${id}`, { token: T.rec })).data;
 const docToken = (id) => (id === ID.user.bs_tien ? T.doc2 : id === ID.user.bs_an ? T.doc3 : T.doc4);
 const callNext = (token) => call('POST', `${CLIN}/queue-tickets/call-next?queueType=DOCTOR`, { token });
@@ -54,8 +54,8 @@ async function startRoom(kind, v) {   // nộp tiền CLS (nếu chưa) rồi KT
   if (rows[0]) await startTicket(kind === 'lab' ? T.lab : T.img, rows[0].ticketId);
   return rows;
 }
-const startExam = (token, id, vitals = true) => call('POST', `${CLIN}/pet-visits/${id}/start-exam`, { token, body: vitals ? { weightAtVisit: 6, temperature: 38.6 } : {} });
-const closeVisit = (token, id, diagnosis = 'Chẩn đoán e2e') => call('POST', `${CLIN}/pet-visits/${id}/close-visit`, { token, body: { diagnosis, treatmentPlan: 'Điều trị', doctorAdvice: 'Theo dõi' } });
+const startExam = (token, id, vitals = true) => call('POST', `${CLIN}/pet-visits/${id}/start-exam`, { token, body: vitals ? { vitalSigns: { weightKg: 6, temperatureC: 38.6 } } : {} });
+const closeVisit = (token, id, diagnosis = 'Chẩn đoán e2e') => call('POST', `${CLIN}/pet-visits/${id}/close-visit`, { token, body: { finalDiagnosis: diagnosis, treatmentPlan: 'Điều trị', doctorAdvice: 'Theo dõi' } });
 async function inProgress(petName, doctorId = ID.user.bs_mai) {
   const pet = await newPet(petName);
   const v = (await checkIn(pet, doctorId)).data.id;
@@ -338,7 +338,9 @@ async function main() {
   check('hủy tiếp nhận ca đang khám bị từ chối (chỉ WAITING)', (await call('POST', `${CLIN}/pet-visits/${va.id}/cancel`, { token: T.rec, body: { reason: 'x' } })).status === 400);
   check('thiếu sinh hiệu → chỉ định CLS bị từ chối CLIN_1308', (await call('POST', `${CLIN}/pet-visits/${va.id}/paraclinical-orders`, { token: T.doc4, body: { serviceIds: [S.LAB_CBC] } })).code === 'CLIN_1308');
   check('chốt ca thiếu chẩn đoán → CLIN_1307', (await call('POST', `${CLIN}/pet-visits/${va.id}/close-visit`, { token: T.doc4, body: { treatmentPlan: 'x' } })).code === 'CLIN_1307');
-  check('cập nhật sinh hiệu (PUT clinical-info)', (await call('PUT', `${CLIN}/pet-visits/${va.id}/clinical-info`, { token: T.doc4, body: { weightAtVisit: 7.5, temperature: 38.9, clinicalNotes: 'Ghi chú' } })).data?.weightAtVisit == 7.5);
+  check('ghi lần đo sinh hiệu (POST vital-signs, một dòng mỗi lần đo)', (await call('POST', `${CLIN}/pet-visits/${va.id}/vital-signs`, { token: T.doc4, body: { weightKg: 7.5, temperatureC: 38.9 } })).status === 201
+    && (await call('GET', `${CLIN}/pet-visits/${va.id}/vital-signs`, { token: T.doc4 })).data?.length === 1);
+  check('sửa hồ sơ khám (PUT medical-record) giữ nguyên trường không gửi', (await call('PUT', `${CLIN}/pet-visits/${va.id}/medical-record`, { token: T.doc4, body: { clinicalFindings: 'Ghi chú', preliminaryDiagnosis: 'Nghi viêm da' } })).data?.clinicalFindings === 'Ghi chú');
   const st = (await call('GET', `${CLIN}/doctors/status`, { token: T.rec })).data;
   check('doctors/status: bs_mai BUSY, bs_an AVAILABLE', st.find((d) => d.doctorId === DOC4)?.status === 'BUSY' && st.find((d) => d.doctorId === DOC3)?.status === 'AVAILABLE');
   // dịch vụ tại phòng

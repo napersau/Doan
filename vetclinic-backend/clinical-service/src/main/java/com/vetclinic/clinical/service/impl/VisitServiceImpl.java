@@ -8,32 +8,40 @@ import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.request.AssignDoctorRequest;
 import com.vetclinic.clinical.dto.request.CheckInRequest;
-import com.vetclinic.clinical.dto.request.ClinicalInfoRequest;
 import com.vetclinic.clinical.dto.request.ParaclinicalOrderRequest;
 import com.vetclinic.clinical.dto.request.CloseVisitRequest;
 import com.vetclinic.clinical.dto.request.OrderServicesRequest;
 import com.vetclinic.clinical.dto.request.ReasonRequest;
 import com.vetclinic.clinical.dto.request.ServiceOrderItem;
 import com.vetclinic.clinical.dto.request.StartExamRequest;
+import com.vetclinic.clinical.dto.request.UpdateMedicalRecordRequest;
+import com.vetclinic.clinical.dto.request.VitalSignsRequest;
 import com.vetclinic.clinical.dto.response.AppointmentSummaryResponse;
+import com.vetclinic.clinical.dto.response.MedicalRecordResponse;
 import com.vetclinic.clinical.dto.response.UserSummaryResponse;
 import com.vetclinic.clinical.dto.response.VisitHistoryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.dto.response.VisitSummaryResponse;
+import com.vetclinic.clinical.dto.response.VitalSignResponse;
 import com.vetclinic.clinical.entity.ClinicService;
+import com.vetclinic.clinical.entity.MedicalRecord;
 import com.vetclinic.clinical.entity.Pet;
 import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
+import com.vetclinic.clinical.entity.VitalSign;
 import com.vetclinic.clinical.repository.ClinicServiceRepository;
+import com.vetclinic.clinical.repository.MedicalRecordRepository;
 import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.repository.PetVisitStatusHistoryRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
+import com.vetclinic.clinical.repository.VitalSignRepository;
 import com.vetclinic.clinical.service.TicketIssuer;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.clinical.service.VisitSupport;
 import com.vetclinic.common.event.outbox.OutboxWriter;
+import com.vetclinic.common.util.Codes;
 import com.vetclinic.common.util.UuidV7;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
@@ -81,6 +89,8 @@ public class VisitServiceImpl implements VisitService {
     private final PetRepository petRepository;
     private final PetVisitStatusHistoryRepository historyRepository;
     private final VisitServiceDetailRepository detailRepository;
+    private final VitalSignRepository vitalSignRepository;
+    private final MedicalRecordRepository medicalRecordRepository;
     private final ClinicServiceRepository serviceRepository;
     private final AuthClient authClient;
     private final AppointmentClient appointmentClient;
@@ -94,7 +104,8 @@ public class VisitServiceImpl implements VisitService {
 
     public VisitServiceImpl(PetVisitRepository visitRepository, PetRepository petRepository,
                             PetVisitStatusHistoryRepository historyRepository,
-                            VisitServiceDetailRepository detailRepository, ClinicServiceRepository serviceRepository,
+                            VisitServiceDetailRepository detailRepository, VitalSignRepository vitalSignRepository,
+                            MedicalRecordRepository medicalRecordRepository, ClinicServiceRepository serviceRepository,
                             AuthClient authClient, AppointmentClient appointmentClient,
                             VisitSupport support, TicketIssuer ticketIssuer, VisitAssembler assembler,
                             NamedLockService lockService, OutboxWriter outboxWriter, Clock clock,
@@ -103,6 +114,8 @@ public class VisitServiceImpl implements VisitService {
         this.petRepository = petRepository;
         this.historyRepository = historyRepository;
         this.detailRepository = detailRepository;
+        this.vitalSignRepository = vitalSignRepository;
+        this.medicalRecordRepository = medicalRecordRepository;
         this.serviceRepository = serviceRepository;
         this.authClient = authClient;
         this.appointmentClient = appointmentClient;
@@ -130,9 +143,11 @@ public class VisitServiceImpl implements VisitService {
         Actor actor = currentActor();
         UUID petId = request.petId();
         UUID appointmentId = request.appointmentId();
-        String symptoms = blankToNull(request.initialSymptoms());
+        String reason = blankToNull(request.reasonForVisit());
         // Bác sĩ chọn ngay khi tiếp nhận (tùy chọn): kiểm tra qua Feign NGOÀI transaction
-        UUID doctorId = request.doctorId() == null ? null : fetchActiveDoctor(request.doctorId()).id();
+        UserSummaryResponse chosenDoctor = request.doctorId() == null ? null : fetchActiveDoctor(request.doctorId());
+        UUID doctorId = chosenDoctor == null ? null : chosenDoctor.id();
+        String doctorName = chosenDoctor == null ? null : chosenDoctor.fullName();
 
         if (appointmentId != null) {
             if (visitRepository.existsByAppointmentId(appointmentId)) {
@@ -150,8 +165,8 @@ public class VisitServiceImpl implements VisitService {
                 throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Thú cưng không khớp với lịch hẹn");
             }
             petId = appointment.petId();
-            if (symptoms == null) {
-                symptoms = blankToNull(appointment.reason());
+            if (reason == null) {
+                reason = blankToNull(appointment.reason());
             }
         }
         if (petId == null) {
@@ -159,13 +174,13 @@ public class VisitServiceImpl implements VisitService {
         }
 
         UUID finalPetId = petId;
-        String finalSymptoms = symptoms;
+        String finalReason = reason;
         boolean emergency = Boolean.TRUE.equals(request.emergency());
         return lockService.runLocked(List.of("vetclinic:visit-pet:" + petId), () -> {
             for (int attempt = 1; ; attempt++) {
                 try {
                     return transactionTemplate.execute(
-                            tx -> createVisit(actor.id(), finalPetId, appointmentId, finalSymptoms, emergency, doctorId));
+                            tx -> createVisit(actor.id(), finalPetId, appointmentId, finalReason, emergency, doctorId, doctorName));
                 } catch (DataIntegrityViolationException e) {
                     // ca cấp cứu được phát phiếu ngay: hai quầy cùng phát có thể trùng số phiếu -> thử lại trong giao dịch mới
                     if (attempt >= ServiceInvoiceServiceImpl.MAX_TICKET_ATTEMPTS || !ServiceInvoiceServiceImpl.isTicketNumberClash(e)) {
@@ -177,8 +192,8 @@ public class VisitServiceImpl implements VisitService {
         });
     }
 
-    private VisitResponse createVisit(UUID receptionistId, UUID petId, UUID appointmentId, String symptoms,
-                                      boolean emergency, UUID doctorId) {
+    private VisitResponse createVisit(UUID receptionistId, UUID petId, UUID appointmentId, String reasonForVisit,
+                                      boolean emergency, UUID doctorId, String doctorName) {
         Pet pet = petRepository.findWithSpeciesByIdAndDeletedAtIsNull(petId)
                 .orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
         if (visitRepository.existsByPetIdAndStatusIn(petId, VisitStatus.ACTIVE)) {
@@ -190,19 +205,19 @@ public class VisitServiceImpl implements VisitService {
 
         Instant now = clock.instant();
         PetVisit visit = PetVisit.builder()
-                // Mã tạm duy nhất; đổi thành mã theo id ngay bên dưới (id chỉ có sau khi INSERT)
-                .visitCode("TMP-" + UUID.randomUUID())
+                // Khóa là UUID nên mã hiển thị không dựa vào id: VIS-YYYY-XXXXXX (đuôi ngẫu nhiên), tính duy nhất do UNIQUE(visit_code) bảo đảm
+                .visitCode(String.format("VIS-%d-%s", LocalDate.now(clock).getYear(), Codes.randomSuffix(6)))
                 .pet(pet)
                 .appointmentId(appointmentId)
                 .doctorId(doctorId)
+                .doctorNameSnapshot(doctorName)
                 .receptionistId(receptionistId)
                 .emergency(emergency)
-                .initialSymptoms(symptoms)
+                .reasonForVisit(reasonForVisit)
                 .status(VisitStatus.WAITING)
                 .checkedInAt(now)
                 .build();
         visit = visitRepository.saveAndFlush(visit);
-        visit.setVisitCode(String.format("VIS-%d-%05d", LocalDate.now(clock).getYear(), visit.getId()));
 
         support.record(visit.getId(), null, VisitStatus.WAITING, receptionistId,
                 (appointmentId == null ? "Tiếp nhận khách vãng lai" : "Tiếp nhận khách có lịch hẹn #" + appointmentId)
@@ -249,7 +264,7 @@ public class VisitServiceImpl implements VisitService {
                 Sort.by(Sort.Direction.DESC, "id"));
         Page<PetVisit> result = visitRepository.findAll(spec, pageable);
         // Một truy vấn lịch sử cho cả trang (VisitTimeline), không N+1
-        Map<Long, VisitResponse> byId = assembler.summaries(result.getContent()).stream()
+        Map<UUID, VisitResponse> byId = assembler.summaries(result.getContent()).stream()
                 .collect(Collectors.toMap(VisitResponse::id, Function.identity()));
         return PageResponse.of(result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages(), result.isLast(), v -> byId.get(v.getId()));
@@ -257,7 +272,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional(readOnly = true)
-    public VisitResponse getById(Long id) {
+    public VisitResponse getById(UUID id) {
         Actor actor = currentActor();
         PetVisit visit = visitRepository.findWithPetById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
@@ -270,7 +285,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<VisitHistoryResponse> getHistory(Long id) {
+    public List<VisitHistoryResponse> getHistory(UUID id) {
         if (!visitRepository.existsById(id)) {
             throw new AppException(ErrorCode.VISIT_NOT_FOUND);
         }
@@ -283,13 +298,13 @@ public class VisitServiceImpl implements VisitService {
 
     /** KHÔNG @Transactional: kiểm tra Bác sĩ qua Feign NGOÀI transaction; việc ghi chạy trong transactionTemplate. */
     @Override
-    public VisitResponse assignDoctor(Long id, AssignDoctorRequest request) {
+    public VisitResponse assignDoctor(UUID id, AssignDoctorRequest request) {
         Actor actor = currentActor();
         UserSummaryResponse doctor = fetchActiveDoctor(request.doctorId());
         return transactionTemplate.execute(tx -> applyAssignment(id, doctor));
     }
 
-    private VisitResponse applyAssignment(Long visitId, UserSummaryResponse doctor) {
+    private VisitResponse applyAssignment(UUID visitId, UserSummaryResponse doctor) {
         PetVisit visit = support.lock(visitId);   // khóa dòng + @Version: người đến sau thấy trạng thái mới nhất (FR-25)
         support.assertStatus(visit, VisitStatus.WAITING, "Chỉ xếp / chuyển được ca đang chờ khám (WAITING)");
         if (doctor.id().equals(visit.getDoctorId())) {
@@ -298,6 +313,7 @@ public class VisitServiceImpl implements VisitService {
         // KHÔNG kiểm tra Bác sĩ rảnh/bận (v3.0). Phiếu DOCTOR đang chờ (nếu đã nộp phí) đi theo, GIỮ số phiếu và giờ phát (Q3).
         // Trạng thái không đổi nên không ghi pet_visit_status_histories.
         visit.setDoctorId(doctor.id());
+        visit.setDoctorNameSnapshot(doctor.fullName());   // chụp tên Bác sĩ lúc phân công (tránh N+1 khi liệt kê)
         visitRepository.save(visit);
         ticketIssuer.reassignDoctorTicket(visit.getId(), doctor.id());
         return assembler.summary(visit).withAssignedRoom(doctor.roomNumber());
@@ -305,13 +321,14 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse unassignDoctor(Long id) {
+    public VisitResponse unassignDoctor(UUID id) {
         PetVisit visit = support.lock(id);
         support.assertStatus(visit, VisitStatus.WAITING, "Chỉ gỡ phân công được ca đang chờ khám (WAITING)");
         if (visit.getDoctorId() == null) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Ca này chưa được xếp vào hàng đợi của bác sĩ nào");
         }
         visit.setDoctorId(null);
+        visit.setDoctorNameSnapshot(null);
         visitRepository.save(visit);
         ticketIssuer.reassignDoctorTicket(visit.getId(), null);   // phiếu về danh sách chờ phân công, giữ số
         return assembler.summary(visit);
@@ -321,7 +338,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse startExam(Long id, StartExamRequest request) {
+    public VisitResponse startExam(UUID id, StartExamRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
@@ -334,8 +351,11 @@ public class VisitServiceImpl implements VisitService {
 
         // BR-35: ca phải có phiếu DOCTOR đang chờ (đã nộp phí khám, hoặc ca cấp cứu) -> phiếu IN_SERVICE (CLIN_1314 nếu chưa có)
         ticketIssuer.startDoctorTicket(visit.getId(), doctorId);
-        if (request != null) {
-            applyClinicalInfo(visit, request.weightAtVisit(), request.temperature(), request.clinicalNotes());
+        // T02: tạo hồ sơ khám (medical_records, 1-1 với đợt khám); lần đo sinh hiệu đầu tiên là tùy chọn
+        medicalRecordRepository.save(MedicalRecord.builder().visitId(visit.getId())
+                .anamnesis(request == null ? null : blankToNull(request.anamnesis())).build());
+        if (request != null && request.vitalSigns() != null && !request.vitalSigns().isEmpty()) {
+            saveVitalSigns(visit.getId(), request.vitalSigns(), doctorId);
         }
         // Thời điểm bắt đầu khám = created_at của dòng lịch sử này (không còn cột started_at)
         support.transition(visit, VisitStatus.IN_PROGRESS, doctorId, "Bác sĩ bắt đầu khám lâm sàng Giai đoạn 1");
@@ -354,31 +374,73 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse updateClinicalInfo(Long id, ClinicalInfoRequest request) {
+    public VitalSignResponse recordVitalSigns(UUID id, VitalSignsRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
+        if (request == null || request.isEmpty()) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Phải nhập ít nhất một chỉ số sinh hiệu");
+        }
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
-        support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ cập nhật được thông tin lâm sàng khi ca đang khám (IN_PROGRESS)");
-        applyClinicalInfo(visit, request.weightAtVisit(), request.temperature(), request.clinicalNotes());
-        visitRepository.save(visit);
-        return assembler.detail(visit);
+        support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ ghi sinh hiệu được khi ca đang khám (IN_PROGRESS)");
+        return VitalSignResponse.of(saveVitalSigns(visit.getId(), request, doctorId));
     }
 
-    private static void applyClinicalInfo(PetVisit visit, BigDecimal weight, BigDecimal temperature, String notes) {
-        if (weight != null) {
-            visit.setWeightAtVisit(weight);
+    /** Mỗi lần đo là MỘT dòng mới (không ghi đè lần đo trước); số liệu "hiện tại" là dòng ghi gần nhất. */
+    private VitalSign saveVitalSigns(UUID visitId, VitalSignsRequest r, UUID recordedBy) {
+        return vitalSignRepository.save(VitalSign.builder()
+                .visitId(visitId)
+                .weightKg(r.weightKg())
+                .temperatureC(r.temperatureC())
+                .heartRateBpm(r.heartRateBpm())
+                .respiratoryRateBpm(r.respiratoryRateBpm())
+                .bodyConditionScore(r.bodyConditionScore())
+                .mucousMembraneColor(blankToNull(r.mucousMembraneColor()))
+                .capillaryRefillSec(r.capillaryRefillSec())
+                .notes(blankToNull(r.notes()))
+                .recordedBy(recordedBy)
+                .recordedAt(clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS))
+                .build());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<VitalSignResponse> vitalSigns(UUID id) {
+        if (!visitRepository.existsById(id)) {
+            throw new AppException(ErrorCode.VISIT_NOT_FOUND);
         }
-        if (temperature != null) {
-            visit.setTemperature(temperature);
-        }
-        if (notes != null) {
-            visit.setClinicalNotes(blankToNull(notes));
-        }
+        return vitalSignRepository.findByVisitIdOrderByRecordedAtAscIdAsc(id).stream().map(VitalSignResponse::of).toList();
     }
 
     @Override
     @Transactional
-    public VisitResponse orderParaclinical(Long id, ParaclinicalOrderRequest request) {
+    public MedicalRecordResponse updateMedicalRecord(UUID id, UpdateMedicalRecordRequest request) {
+        UUID doctorId = SecurityUtils.getCurrentUserId();
+        PetVisit visit = support.lock(id);
+        support.assertAssignedTo(visit, doctorId);
+        // Khóa một chiều từ lúc chốt chuyên môn (BR-27 / NFR-06): CLIN_1317. "Mở lại hồ sơ" (T14) đưa ca về IN_PROGRESS thì sửa được lại.
+        if (visit.getStatus() == VisitStatus.WAITING_PAYMENT || visit.getStatus() == VisitStatus.COMPLETED
+                || visit.getStatus() == VisitStatus.CANCELLED) {
+            throw new AppException(ErrorCode.MEDICAL_RECORD_LOCKED);
+        }
+        support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ sửa được hồ sơ khám khi ca đang khám (IN_PROGRESS)");
+        MedicalRecord record = medicalRecordRepository.findById(id)
+                .orElseGet(() -> MedicalRecord.builder().visitId(id).build());
+        if (request.version() != null && record.getVersion() != null && !request.version().equals(record.getVersion())) {
+            throw new AppException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);   // đã có người / thiết bị khác sửa trước
+        }
+        if (request.anamnesis() != null) record.setAnamnesis(blankToNull(request.anamnesis()));
+        if (request.clinicalFindings() != null) record.setClinicalFindings(blankToNull(request.clinicalFindings()));
+        if (request.preliminaryDiagnosis() != null) record.setPreliminaryDiagnosis(blankToNull(request.preliminaryDiagnosis()));
+        if (request.finalDiagnosis() != null) record.setFinalDiagnosis(blankToNull(request.finalDiagnosis()));
+        if (request.treatmentPlan() != null) record.setTreatmentPlan(blankToNull(request.treatmentPlan()));
+        if (request.doctorAdvice() != null) record.setDoctorAdvice(blankToNull(request.doctorAdvice()));
+        if (request.followUpDate() != null) record.setFollowUpDate(request.followUpDate());
+        return MedicalRecordResponse.of(medicalRecordRepository.saveAndFlush(record), false);
+    }
+
+    @Override
+    @Transactional
+    public VisitResponse orderParaclinical(UUID id, ParaclinicalOrderRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
         List<UUID> serviceIds = request.serviceIds().stream().distinct().toList();
         List<ClinicService> services = loadActiveServices(serviceIds);
@@ -394,7 +456,7 @@ public class VisitServiceImpl implements VisitService {
             throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION, "Ca đã ở Giai đoạn 2: không chỉ định thêm cận lâm sàng");
         }
         // T04: phải có cân nặng và thân nhiệt (> 0) trước khi đẩy sang cận lâm sàng
-        if (visit.getWeightAtVisit() == null || visit.getTemperature() == null || visit.getTemperature().signum() <= 0) {
+        if (!vitalSignRepository.existsCompleteMeasurement(visit.getId())) {
             throw new AppException(ErrorCode.VITAL_SIGNS_REQUIRED);
         }
         // T04: các dịch vụ làm tại phòng đã chỉ định ở Giai đoạn 1 phải xong (COMPLETED) hoặc hủy (CANCELLED)
@@ -424,7 +486,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse orderInRoomServices(Long id, OrderServicesRequest request) {
+    public VisitResponse orderInRoomServices(UUID id, OrderServicesRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
         List<UUID> serviceIds = request.services().stream().map(ServiceOrderItem::serviceId).distinct().toList();
         Map<UUID, ClinicService> found = loadActiveServices(serviceIds).stream()
@@ -458,7 +520,7 @@ public class VisitServiceImpl implements VisitService {
      * Tạo dòng chỉ định + HÓA ĐƠN RIÊNG của nó trong cùng giao dịch (BR-19, FR-32). Đơn giá / VAT được snapshot vào hóa đơn
      * (BR-25), visit_service_details không chứa giá. Dịch vụ XN / CĐHA vào hàng đợi phòng khi thu tiền xong (queue_ticket_items).
      */
-    private VisitServiceDetail createDetail(Long visitId, ClinicService service, int quantity, String notes, UUID actorId,
+    private VisitServiceDetail createDetail(UUID visitId, ClinicService service, int quantity, String notes, UUID actorId,
                                             ServiceDetailStatus status) {
         VisitServiceDetail detail = detailRepository.saveAndFlush(VisitServiceDetail.builder()
                 .visitId(visitId)
@@ -476,7 +538,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse startPhase2(Long id) {
+    public VisitResponse startPhase2(UUID id) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
@@ -494,34 +556,41 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse closeVisit(Long id, CloseVisitRequest request) {
+    public VisitResponse closeVisit(UUID id, CloseVisitRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
-        String diagnosis = blankToNull(request.diagnosis());
-        // EX-12: chặn chốt ca khi chưa có chẩn đoán xác định
-        if (diagnosis == null) {
-            throw new AppException(ErrorCode.DIAGNOSIS_REQUIRED);
-        }
-
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
         support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ chốt được ca đang khám (IN_PROGRESS)");
+        MedicalRecord record = medicalRecordRepository.findById(id)
+                .orElseGet(() -> MedicalRecord.builder().visitId(id).build());
+        // EX-12: chặn chốt ca khi chưa có chẩn đoán xác định. Ca không làm cận lâm sàng (chưa qua Giai đoạn 2) được dùng
+        // chẩn đoán sơ bộ đã ghi trên hồ sơ khám (FR-54).
+        String finalDiagnosis = blankToNull(request.finalDiagnosis());
+        if (finalDiagnosis == null) {
+            finalDiagnosis = blankToNull(record.getFinalDiagnosis());
+        }
+        if (finalDiagnosis == null && !support.isPhaseTwo(visit.getId())) {
+            finalDiagnosis = blankToNull(record.getPreliminaryDiagnosis());
+        }
+        if (finalDiagnosis == null) {
+            throw new AppException(ErrorCode.DIAGNOSIS_REQUIRED);
+        }
         if (detailRepository.countByVisitAndKindAndStatuses(visit.getId(), ServiceKind.PARACLINICAL,
                 ServiceDetailStatus.OPEN) > 0) {
             throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION, "Còn dịch vụ cận lâm sàng chưa hoàn tất");
         }
-        if (visit.getWeightAtVisit() == null || visit.getTemperature() == null || visit.getTemperature().signum() <= 0) {
+        if (!vitalSignRepository.existsCompleteMeasurement(visit.getId())) {
             throw new AppException(ErrorCode.VITAL_SIGNS_REQUIRED);
         }
         if (detailRepository.countByVisitAndKindAndStatuses(visit.getId(), ServiceKind.IN_ROOM, ServiceDetailStatus.OPEN) > 0) {
             throw new AppException(ErrorCode.IN_ROOM_SERVICE_PENDING);
         }
 
-        visit.setDiagnosis(diagnosis);
-        visit.setTreatmentPlan(blankToNull(request.treatmentPlan()));
-        visit.setDoctorAdvice(blankToNull(request.doctorAdvice()));
-        if (request.clinicalNotes() != null) {
-            visit.setClinicalNotes(blankToNull(request.clinicalNotes()));
-        }
+        record.setFinalDiagnosis(finalDiagnosis);
+        if (request.treatmentPlan() != null) record.setTreatmentPlan(blankToNull(request.treatmentPlan()));
+        if (request.doctorAdvice() != null) record.setDoctorAdvice(blankToNull(request.doctorAdvice()));
+        if (request.followUpDate() != null) record.setFollowUpDate(request.followUpDate());
+        medicalRecordRepository.save(record);
         support.completeExamDetails(visit.getId(), doctorId);   // dịch vụ khám hoàn tất khi Bác sĩ rời giai đoạn khám
         ticketIssuer.finishDoctorTicket(visit.getId());         // phiếu DOCTOR -> DONE (mở lại hồ sơ thì không có phiếu)
         // Khóa hồ sơ chuyên môn một chiều (BR-27); thời điểm chốt = created_at của dòng lịch sử (không còn cột closed_at)
@@ -532,7 +601,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse cancelExam(Long id, ReasonRequest request) {
+    public VisitResponse cancelExam(UUID id, ReasonRequest request) {
         UUID doctorId = SecurityUtils.getCurrentUserId();
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
@@ -559,7 +628,7 @@ public class VisitServiceImpl implements VisitService {
      * -> CANCELLED, đã thu -> giữ PAID (khách tự bỏ, không hoàn). {@code includeExam = false} thì chỉ hủy dịch vụ cận lâm sàng
      * (khách bỏ về: dịch vụ khám và dịch vụ tại phòng đã làm giữ nguyên, hóa đơn chưa thu làm công nợ).
      */
-    private void cancelOpenDetails(Long visitId, UUID actorId, String reason, boolean includeExam) {
+    private void cancelOpenDetails(UUID visitId, UUID actorId, String reason, boolean includeExam) {
         for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
             if (!ServiceDetailStatus.OPEN.contains(detail.getStatus())) {
                 continue;
@@ -577,7 +646,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse reopen(Long id, ReasonRequest request) {
+    public VisitResponse reopen(UUID id, ReasonRequest request) {
         Actor actor = currentActor();
         if (actor.role() != RoleCode.VETERINARIAN && actor.role() != RoleCode.ADMIN) {
             throw new AppException(ErrorCode.ACCESS_DENIED);
@@ -599,7 +668,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse abandon(Long id) {
+    public VisitResponse abandon(UUID id) {
         Actor actor = currentActor();
         PetVisit visit = support.lock(id);
         if (actor.role() == RoleCode.VETERINARIAN) {
@@ -628,7 +697,7 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional
-    public VisitResponse cancel(Long id, ReasonRequest request) {
+    public VisitResponse cancel(UUID id, ReasonRequest request) {
         Actor actor = currentActor();
         if (actor.role() != RoleCode.RECEPTIONIST) {
             throw new AppException(ErrorCode.ACCESS_DENIED);
@@ -656,14 +725,14 @@ public class VisitServiceImpl implements VisitService {
 
     @Override
     @Transactional(readOnly = true)
-    public VisitSummaryResponse summary(Long visitId) {
+    public VisitSummaryResponse summary(UUID visitId) {
         return visitRepository.findWithPetById(visitId).map(VisitServiceImpl::toSummary)
                 .orElseThrow(() -> new AppException(ErrorCode.VISIT_NOT_FOUND));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<VisitSummaryResponse> summaries(Collection<Long> visitIds) {
+    public List<VisitSummaryResponse> summaries(Collection<UUID> visitIds) {
         if (visitIds == null || visitIds.isEmpty()) {
             return List.of();
         }

@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.repository;
 
+import java.util.UUID;
 import com.vetclinic.clinical.entity.ServiceInvoice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -12,13 +13,13 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ServiceInvoiceRepository extends JpaRepository<ServiceInvoice, Long> {
+public interface ServiceInvoiceRepository extends JpaRepository<ServiceInvoice, UUID> {
 
     /** Mỗi dòng chỉ định có đúng một hóa đơn (UNIQUE visit_service_detail_id). */
-    Optional<ServiceInvoice> findByVisitServiceDetailId(Long visitServiceDetailId);
+    Optional<ServiceInvoice> findByVisitServiceDetailId(UUID visitServiceDetailId);
 
     /** Tra cứu theo lô để dựng response của cả một đợt khám bằng MỘT câu truy vấn (không N+1). */
-    List<ServiceInvoice> findByVisitServiceDetailIdIn(Collection<Long> visitServiceDetailIds);
+    List<ServiceInvoice> findByVisitServiceDetailIdIn(Collection<UUID> visitServiceDetailIds);
 
     /** FR-69: hóa đơn dịch vụ đã thu trong [start, end) (theo paid_at), kèm nhóm dịch vụ. */
     @Query("select new com.vetclinic.clinical.repository.InvoiceAmountRow(s.category.code, s.category.displayOrder, d.visitId, d.quantity, i.unitPrice, i.vatRate, i.discountAmount) "

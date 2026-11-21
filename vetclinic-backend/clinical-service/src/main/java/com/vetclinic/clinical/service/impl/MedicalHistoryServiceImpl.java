@@ -85,17 +85,19 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
             return found.map(assembler::detail);
         });
 
-        List<Long> visitIds = visits.getContent().stream().map(VisitResponse::id).toList();
-        Map<Long, PrescriptionSummary> prescriptions = prescriptionsOf(visitIds);
-        Map<UUID, String> doctorNames = doctorNamesOf(visits.getContent().stream().map(VisitResponse::doctorId)
-                .filter(Objects::nonNull).collect(Collectors.toSet()));
+        List<UUID> visitIds = visits.getContent().stream().map(VisitResponse::id).toList();
+        Map<UUID, PrescriptionSummary> prescriptions = prescriptionsOf(visitIds);
+        // Tên Bác sĩ lấy từ bản chụp trên đợt khám (không gọi auth-service); chỉ ca cũ chưa có bản chụp mới phải tra
+        Map<UUID, String> doctorNames = doctorNamesOf(visits.getContent().stream()
+                .filter(v -> v.doctorId() != null && v.doctorName() == null).map(VisitResponse::doctorId)
+                .collect(Collectors.toSet()));
 
         return PageResponse.of(visits.getContent(), visits.getNumber(), visits.getSize(), visits.getTotalElements(),
                 visits.getTotalPages(), visits.isLast(), v -> new MedicalHistoryEntry(v,
-                        v.doctorId() == null ? null : doctorNames.get(v.doctorId()), prescriptions.get(v.id())));
+                        v.doctorName() != null ? v.doctorName() : v.doctorId() == null ? null : doctorNames.get(v.doctorId()), prescriptions.get(v.id())));
     }
 
-    private Map<Long, PrescriptionSummary> prescriptionsOf(List<Long> visitIds) {
+    private Map<UUID, PrescriptionSummary> prescriptionsOf(List<UUID> visitIds) {
         if (visitIds.isEmpty()) {
             return Map.of();
         }

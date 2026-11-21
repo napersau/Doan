@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import java.util.List;
 
 /**
@@ -8,7 +9,7 @@ import java.util.List;
  */
 public record PrescriptionSummary(
         Long id,
-        Long visitId,
+        UUID visitId,
         String doctorNotes,
         List<Item> items
 ) {

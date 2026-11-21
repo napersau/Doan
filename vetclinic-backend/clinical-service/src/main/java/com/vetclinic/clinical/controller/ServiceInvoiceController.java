@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.controller;
 
+import java.util.UUID;
 import com.vetclinic.clinical.dto.request.ConfirmPaymentRequest;
 import com.vetclinic.clinical.dto.request.DiscountRequest;
 import com.vetclinic.clinical.dto.response.InvoiceStatementResponse;
@@ -33,20 +34,20 @@ public class ServiceInvoiceController {
 
     @GetMapping("/pet-visits/{id}/service-invoices")
     @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<InvoiceStatementResponse>> statement(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<InvoiceStatementResponse>> statement(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(invoiceService.statement(id)));
     }
 
     @PostMapping("/service-invoices/{id}/discount")
     @PreAuthorize("hasRole('RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<ServiceInvoiceResponse>> discount(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<ServiceInvoiceResponse>> discount(@PathVariable UUID id,
                                                                         @Valid @RequestBody DiscountRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã áp dụng giảm giá", invoiceService.discount(id, request.discountAmount())));
     }
 
     @PostMapping("/pet-visits/{id}/service-invoices/confirm-payment")
     @PreAuthorize("hasRole('RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<InvoiceStatementResponse>> confirmPayment(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<InvoiceStatementResponse>> confirmPayment(@PathVariable UUID id,
                                                                                 @Valid @RequestBody ConfirmPaymentRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đã xác nhận thanh toán", invoiceService.confirmPayment(id, request.invoiceIds())));
     }

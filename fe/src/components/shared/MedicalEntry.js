@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { paraclinicApi } from '../../api/endpoints';
 import { Badge, Facts, Table } from '../ui';
 import { LAB_EVALUATION, serviceCategoryLabel, SERVICE_DETAIL_STATUS, VISIT_STATUS } from '../../lib/labels';
-import { formatDateTime, formatMoney, formatNumber } from '../../lib/format';
+import { formatDate, formatDateTime, formatMoney, formatNumber } from '../../lib/format';
 
 /** Ảnh CĐHA: tải qua API có xác thực (không dùng thẻ img trực tiếp vì cần Authorization). DICOM chỉ tải về. */
 export function AttachmentView({ attachment }) {
@@ -52,15 +52,32 @@ export function PrescriptionView({ prescription }) {
   </div>;
 }
 
+/** Các lần đo sinh hiệu của một đợt khám (vital_signs), theo thứ tự thời gian. */
+export function VitalSignsTable({ rows }) {
+  const cell = (value, digits, unit) => (value === null || value === undefined ? '—' : `${formatNumber(value, digits)}${unit ? ` ${unit}` : ''}`);
+  return <Table caption="Sinh hiệu" empty="Chưa đo lần nào." rows={rows} columns={[
+    { title: 'Thời điểm', render: (row) => formatDateTime(row.recordedAt) },
+    { title: 'Cân nặng', align: 'right', render: (row) => cell(row.weightKg, 2, 'kg') },
+    { title: 'Thân nhiệt', align: 'right', render: (row) => cell(row.temperatureC, 1, '°C') },
+    { title: 'Nhịp tim', align: 'right', render: (row) => cell(row.heartRateBpm, 0, 'lần/phút') },
+    { title: 'Nhịp thở', align: 'right', render: (row) => cell(row.respiratoryRateBpm, 0, 'lần/phút') },
+    { title: 'BCS', align: 'right', render: (row) => cell(row.bodyConditionScore, 0, '/9') },
+    { title: 'Niêm mạc · CRT', render: (row) => [row.mucousMembraneColor, row.capillaryRefillSec != null ? `CRT ${formatNumber(row.capillaryRefillSec, 1)} s` : null].filter(Boolean).join(' · ') || '—' },
+    { title: 'Ghi chú', render: (row) => row.notes || '—' }]} />;
+}
+
 /** Một đợt khám trong bệnh án (MedicalHistoryEntry của backend): chẩn đoán, dịch vụ, xét nghiệm, hình ảnh, đơn thuốc. */
 export default function MedicalEntry({ entry }) {
   const { visit, doctorName, prescription } = entry;
   const services = (visit.services || []).filter((item) => item.status !== 'CANCELLED');
+  const record = visit.medicalRecord;
+  const vitals = visit.vitalSigns || [];
   return <article className="ui-panel">
     <header className="ui-panel-head"><div><h2>{visit.visitCode} · {formatDateTime(visit.checkedInAt)}</h2><p>Bác sĩ phụ trách: {doctorName || (visit.doctorId ? `#${visit.doctorId}` : 'Chưa ghi nhận')}{visit.emergency ? ' · Cấp cứu' : ''}</p></div><Badge map={VISIT_STATUS} value={visit.status} /></header>
     <div className="ui-panel-body ui-stack" style={{ gap: 20 }}>
-      <Facts items={[['Triệu chứng ban đầu', visit.initialSymptoms], ['Cân nặng', visit.weightAtVisit ? `${formatNumber(visit.weightAtVisit, 2)} kg` : null], ['Thân nhiệt', visit.temperature ? `${formatNumber(visit.temperature, 1)} °C` : null],
-        ['Ghi chú lâm sàng', visit.clinicalNotes], ['Chẩn đoán', visit.diagnosis], ['Phác đồ điều trị', visit.treatmentPlan], ['Lời dặn của bác sĩ', visit.doctorAdvice]]} />
+      <Facts items={[['Lý do đến khám', visit.reasonForVisit], ['Bệnh sử', record?.anamnesis], ['Kết quả khám lâm sàng', record?.clinicalFindings], ['Chẩn đoán sơ bộ', record?.preliminaryDiagnosis],
+        ['Chẩn đoán xác định', record?.finalDiagnosis], ['Phác đồ điều trị', record?.treatmentPlan], ['Lời dặn của bác sĩ', record?.doctorAdvice], ['Hẹn tái khám', record?.followUpDate ? formatDate(record.followUpDate) : null]]} />
+      {vitals.length > 0 && <div><h3>Sinh hiệu</h3><VitalSignsTable rows={vitals} /></div>}
       {services.length > 0 && <div><h3>Dịch vụ đã thực hiện</h3><Table caption="Dịch vụ" columns={[
         { title: 'Dịch vụ', render: (row) => <><strong>{row.serviceName}</strong><small>{serviceCategoryLabel(row.category)}</small></> },
         { title: 'SL', key: 'quantity' }, { title: 'Thành tiền', align: 'right', render: (row) => formatMoney(row.subtotal) },

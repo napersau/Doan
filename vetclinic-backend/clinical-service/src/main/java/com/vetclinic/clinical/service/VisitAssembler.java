@@ -1,14 +1,17 @@
 package com.vetclinic.clinical.service;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.LabEvaluation;
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.dto.response.AttachmentResponse;
 import com.vetclinic.clinical.dto.response.ImagingResultResponse;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
+import com.vetclinic.clinical.dto.response.MedicalRecordResponse;
 import com.vetclinic.clinical.dto.response.ServiceDetailResponse;
 import com.vetclinic.clinical.dto.response.TicketInfo;
 import com.vetclinic.clinical.dto.response.VisitResponse;
+import com.vetclinic.clinical.dto.response.VitalSignResponse;
 import com.vetclinic.clinical.entity.ImagingAttachment;
 import com.vetclinic.clinical.entity.ImagingResult;
 import com.vetclinic.clinical.entity.LabTestResult;
@@ -19,9 +22,11 @@ import com.vetclinic.clinical.entity.VisitServiceDetail;
 import com.vetclinic.clinical.repository.ImagingAttachmentRepository;
 import com.vetclinic.clinical.repository.ImagingResultRepository;
 import com.vetclinic.clinical.repository.LabTestResultRepository;
+import com.vetclinic.clinical.repository.MedicalRecordRepository;
 import com.vetclinic.clinical.repository.QueueTicketRepository;
 import com.vetclinic.clinical.repository.ServiceInvoiceRepository;
 import com.vetclinic.clinical.repository.VisitServiceDetailRepository;
+import com.vetclinic.clinical.repository.VitalSignRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -49,6 +54,8 @@ public class VisitAssembler {
     private final ServiceInvoiceRepository invoiceRepository;
     private final VisitTimeline timeline;
     private final QueueTicketRepository ticketRepository;
+    private final VitalSignRepository vitalSignRepository;
+    private final MedicalRecordRepository medicalRecordRepository;
 
     /** Dùng cho API danh sách: không kèm dịch vụ và kết quả. */
     public VisitResponse summary(PetVisit visit) {
@@ -57,7 +64,7 @@ public class VisitAssembler {
 
     /** Một truy vấn lịch sử cho cả danh sách (không N+1). */
     public List<VisitResponse> summaries(Collection<PetVisit> visits) {
-        Map<Long, VisitTimeline.Times> times = timeline.ofAll(visits);
+        Map<UUID, VisitTimeline.Times> times = timeline.ofAll(visits);
         return visits.stream()
                 .map(v -> build(v, times.getOrDefault(v.getId(), VisitTimeline.Times.EMPTY), null, null, null))
                 .toList();
@@ -66,13 +73,13 @@ public class VisitAssembler {
     /** Chi tiết đầy đủ: dịch vụ đã chỉ định, kết quả xét nghiệm (có đánh giá LOW / NORMAL / HIGH) và ảnh CĐHA. */
     public VisitResponse detail(PetVisit visit) {
         List<VisitServiceDetail> details = detailRepository.findByVisitIdOrderByIdAsc(visit.getId());
-        List<Long> detailIds = details.stream().map(VisitServiceDetail::getId).toList();
-        Map<Long, ServiceInvoice> invoices = invoicesOf(detailIds);
+        List<UUID> detailIds = details.stream().map(VisitServiceDetail::getId).toList();
+        Map<UUID, ServiceInvoice> invoices = invoicesOf(detailIds);
         List<LabResultResponse> labs = detailIds.isEmpty() ? List.of()
                 : labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(detailIds).stream().map(this::toLab).toList();
         List<ImagingResult> imagingResults = detailIds.isEmpty() ? List.of()
                 : imagingResultRepository.findByVisitServiceDetailIdIn(detailIds);
-        Map<Long, List<ImagingAttachment>> attachments = imagingResults.isEmpty() ? Map.of()
+        Map<UUID, List<ImagingAttachment>> attachments = imagingResults.isEmpty() ? Map.of()
                 : attachmentRepository.findByImagingResultIdIn(imagingResults.stream().map(ImagingResult::getId).toList())
                 .stream().collect(Collectors.groupingBy(ImagingAttachment::getImagingResultId));
         return build(visit, timeline.of(visit),
@@ -82,11 +89,15 @@ public class VisitAssembler {
                 // Phiếu DOCTOR còn hiệu lực (nếu có): giao diện hồ sơ ca hiện số phiếu, Bác sĩ chỉ "Bắt đầu" được khi có phiếu
                 .withTicket(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatusIn(visit.getId(),
                                 QueueType.DOCTOR, TicketStatus.ACTIVE)
-                        .map(TicketInfo::of).orElse(null));
+                        .map(TicketInfo::of).orElse(null))
+                .withClinical(vitalSignRepository.findByVisitIdOrderByRecordedAtAscIdAsc(visit.getId()).stream()
+                                .map(VitalSignResponse::of).toList(),
+                        medicalRecordRepository.findById(visit.getId())
+                                .map(r -> MedicalRecordResponse.of(r, isLocked(visit.getStatus()))).orElse(null));
     }
 
     /** Kết quả xét nghiệm của MỘT chỉ định (kèm nhãn LOW / NORMAL / HIGH tính khi hiển thị). */
-    public List<LabResultResponse> labResultsOf(Long detailId) {
+    public List<LabResultResponse> labResultsOf(UUID detailId) {
         return labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(List.of(detailId)).stream().map(this::toLab).toList();
     }
 
@@ -94,7 +105,7 @@ public class VisitAssembler {
         return toServiceDetail(d, invoiceRepository.findByVisitServiceDetailId(d.getId()).orElse(null));
     }
 
-    private Map<Long, ServiceInvoice> invoicesOf(List<Long> detailIds) {
+    private Map<UUID, ServiceInvoice> invoicesOf(List<UUID> detailIds) {
         return detailIds.isEmpty() ? Map.of()
                 : invoiceRepository.findByVisitServiceDetailIdIn(detailIds).stream()
                 .collect(Collectors.toMap(ServiceInvoice::getVisitServiceDetailId, i -> i));
@@ -129,19 +140,21 @@ public class VisitAssembler {
                 r.getPerformedBy(), r.getPerformedAt(), attachments);
     }
 
-    private VisitResponse build(PetVisit v, VisitTimeline.Times times, List<ServiceDetailResponse> services,
-                                List<LabResultResponse> labs, List<ImagingResultResponse> imaging) {
-        Pet pet = v.getPet();
-        boolean locked = switch (v.getStatus()) {
+    private static boolean isLocked(com.vetclinic.clinical.constant.VisitStatus status) {
+        return switch (status) {
             case WAITING_PAYMENT, COMPLETED, CANCELLED -> true;
             default -> false;
         };
+    }
+
+    private VisitResponse build(PetVisit v, VisitTimeline.Times times, List<ServiceDetailResponse> services,
+                                List<LabResultResponse> labs, List<ImagingResultResponse> imaging) {
+        Pet pet = v.getPet();
         // assignedRoom = null ở đây: số phòng là users.room_number của Bác sĩ, VisitEnricher gắn sau commit (không gọi Feign trong transaction)
         return new VisitResponse(v.getId(), v.getVisitCode(), pet.getId(), pet.getName(), pet.getPetCode(),
-                pet.getSpecies().getName(), pet.getOwnerId(), v.getAppointmentId(), v.getDoctorId(),
-                v.getReceptionistId(), null, v.isEmergency(), v.getStatus(), locked, null,
-                v.getWeightAtVisit(), v.getTemperature(), v.getInitialSymptoms(), v.getClinicalNotes(), v.getDiagnosis(),
-                v.getTreatmentPlan(), v.getDoctorAdvice(), times.cancelReason(), v.getCheckedInAt(), times.startedAt(),
-                times.closedAt(), times.completedAt(), services, labs, imaging);
+                pet.getSpecies().getName(), pet.getOwnerId(), v.getAppointmentId(), v.getDoctorId(), v.getDoctorNameSnapshot(),
+                v.getReceptionistId(), null, v.isEmergency(), v.getStatus(), isLocked(v.getStatus()), null,
+                v.getReasonForVisit(), times.cancelReason(), v.getCheckedInAt(), times.startedAt(),
+                times.closedAt(), times.completedAt(), services, labs, imaging, null, null);
     }
 }

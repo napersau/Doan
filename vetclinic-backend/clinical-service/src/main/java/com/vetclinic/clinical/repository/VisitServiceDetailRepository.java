@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.repository;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
@@ -17,24 +18,24 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface VisitServiceDetailRepository extends JpaRepository<VisitServiceDetail, Long> {
+public interface VisitServiceDetailRepository extends JpaRepository<VisitServiceDetail, UUID> {
 
     /** Khóa dòng chỉ định. KHÔNG fetch join dịch vụ: tránh khóa lây sang bảng danh mục services dùng chung. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from VisitServiceDetail d where d.id = :id")
-    Optional<VisitServiceDetail> findByIdForUpdate(@Param("id") Long id);
+    Optional<VisitServiceDetail> findByIdForUpdate(@Param("id") UUID id);
 
     @EntityGraph(attributePaths = "service")
-    List<VisitServiceDetail> findByVisitIdOrderByIdAsc(Long visitId);
+    List<VisitServiceDetail> findByVisitIdOrderByIdAsc(UUID visitId);
 
     @EntityGraph(attributePaths = "service")
-    List<VisitServiceDetail> findByVisitIdInOrderByIdAsc(Collection<Long> visitIds);
+    List<VisitServiceDetail> findByVisitIdInOrderByIdAsc(Collection<UUID> visitIds);
 
     @EntityGraph(attributePaths = "service")
-    List<VisitServiceDetail> findByVisitIdAndStatusOrderByIdAsc(Long visitId, ServiceDetailStatus status);
+    List<VisitServiceDetail> findByVisitIdAndStatusOrderByIdAsc(UUID visitId, ServiceDetailStatus status);
 
     /** Số chỉ định của đợt khám thuộc loại (tại phòng / cận lâm sàng) và đang ở một trong các trạng thái. Loại suy ra từ {@code service_categories.queue_type}. */
-    default long countByVisitAndKindAndStatuses(Long visitId, ServiceKind kind, Collection<ServiceDetailStatus> statuses) {
+    default long countByVisitAndKindAndStatuses(UUID visitId, ServiceKind kind, Collection<ServiceDetailStatus> statuses) {
         return countByVisitAndInRoomAndStatuses(visitId, kind == ServiceKind.IN_ROOM, statuses);
     }
 
@@ -42,11 +43,11 @@ public interface VisitServiceDetailRepository extends JpaRepository<VisitService
             + "and ((:inRoom = true and d.service.category.queueType is null) "
             + "or (:inRoom = false and d.service.category.queueType in ('LABORATORY', 'IMAGING'))) "
             + "and d.status in :statuses")
-    long countByVisitAndInRoomAndStatuses(@Param("visitId") Long visitId, @Param("inRoom") boolean inRoom,
+    long countByVisitAndInRoomAndStatuses(@Param("visitId") UUID visitId, @Param("inRoom") boolean inRoom,
                                           @Param("statuses") Collection<ServiceDetailStatus> statuses);
 
     @Query("select count(d) > 0 from VisitServiceDetail d where d.visitId = :visitId and d.service.code = :code")
-    boolean existsByVisitAndServiceCode(@Param("visitId") Long visitId, @Param("code") String code);
+    boolean existsByVisitAndServiceCode(@Param("visitId") UUID visitId, @Param("code") String code);
 
     /** Báo cáo vận hành: số đợt khám (check-in trong [start, end)) có ít nhất một chỉ định cận lâm sàng chưa bị hủy. */
     @Query("select count(distinct d.visitId) from VisitServiceDetail d, PetVisit v where v.id = d.visitId "

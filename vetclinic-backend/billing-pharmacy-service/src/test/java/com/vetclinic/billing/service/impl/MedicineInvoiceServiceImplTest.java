@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.vetclinic.billing.testsupport.TestData.vid;
 import static com.vetclinic.billing.testsupport.TestData.CLOCK;
 import static com.vetclinic.billing.testsupport.TestData.DOCTOR;
 import static com.vetclinic.billing.testsupport.TestData.RECEPTIONIST;
@@ -114,7 +115,7 @@ class MedicineInvoiceServiceImplTest {
             }
             return invoice;
         });
-        lenient().when(visitLookup.tryFind(anyLong())).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
+        lenient().when(visitLookup.tryFind(any(java.util.UUID.class))).thenReturn(visit(7L, VisitStatus.WAITING_PAYMENT, DOCTOR));
         service = new MedicineInvoiceServiceImpl(invoiceRepository, prescriptionRepository, medicineRepository,
                 inventoryRepository, visitLookup, new BillingAssembler(), stockAlerts, outboxWriter, entityManager, CLOCK, tm);
     }
@@ -142,7 +143,7 @@ class MedicineInvoiceServiceImplTest {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         when(prescriptionRepository.findById(3L)).thenReturn(Optional.of(prescription));
         lenient().when(prescriptionRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(prescription));
-        when(visitLookup.require(7L)).thenReturn(visit(7L, visitStatus, DOCTOR));
+        when(visitLookup.require(vid(7L))).thenReturn(visit(7L, visitStatus, DOCTOR));
     }
 
     /** Hóa đơn PENDING đang mua cả hai dòng của đơn chuẩn, giá snapshot theo danh mục lúc lập. */
@@ -400,7 +401,7 @@ class MedicineInvoiceServiceImplTest {
         verify(outboxWriter).write(eq("MEDICINE_INVOICE"), eq(5L), events.capture());
         MedicineInvoicePaidEvent paid = (MedicineInvoicePaidEvent) events.getValue();
         assertThat(paid.payableAmount()).isEqualByComparingTo("157500");
-        assertThat(paid.visitId()).isEqualTo(7L);
+        assertThat(paid.visitId()).isEqualTo(com.vetclinic.billing.testsupport.TestData.vid(7L));
         verify(stockAlerts).publishIfLow(prescription.getItems().get(0).getMedicine(), RECEPTIONIST);
     }
 

@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import org.hibernate.annotations.UuidGenerator;
 import java.util.UUID;
 import com.vetclinic.clinical.constant.PaymentStatus;
 import jakarta.persistence.Column;
@@ -38,8 +39,8 @@ import java.time.Instant;
 public class ServiceInvoice {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @UuidGenerator(style = UuidGenerator.Style.VERSION_7)
+    private UUID id;
 
     /** SINV-YYYY-XXXX, sinh từ id sau khi INSERT (không dùng count + 1). */
     @Column(name = "invoice_code", nullable = false, unique = true, length = 50)
@@ -47,7 +48,7 @@ public class ServiceInvoice {
 
     /** Khóa ngoại vật lý tới visit_service_details(id), UNIQUE: quan hệ 1-1. */
     @Column(name = "visit_service_detail_id", nullable = false, unique = true)
-    private Long visitServiceDetailId;
+    private UUID visitServiceDetailId;
 
     @Column(name = "unit_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal unitPrice;

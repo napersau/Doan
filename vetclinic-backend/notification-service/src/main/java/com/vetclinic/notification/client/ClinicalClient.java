@@ -2,6 +2,7 @@ package com.vetclinic.notification.client;
 
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.notification.dto.VisitSummary;
+import java.util.UUID;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,5 +12,5 @@ import org.springframework.web.bind.annotation.PathVariable;
 public interface ClinicalClient {
 
     @GetMapping("/{id}/summary")
-    ApiResponse<VisitSummary> getVisit(@PathVariable("id") Long id);
+    ApiResponse<VisitSummary> getVisit(@PathVariable("id") UUID id);
 }

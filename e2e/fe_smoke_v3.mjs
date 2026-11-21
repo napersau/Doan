@@ -237,7 +237,7 @@ async function main() {
     check('tìm thấy chủ nuôi theo SĐT', await b.waitFor(`[...document.querySelectorAll(".ui-list li")].some(li => li.innerText.includes(${JSON.stringify(owner.name)}))`));
     await b.click('Chọn');
     check('tự chọn thú cưng duy nhất', await b.waitFor(`document.querySelector("select.ui-input") && document.querySelector("select.ui-input").selectedOptions[0].textContent.includes(${JSON.stringify(owner.pet)})`));
-    await b.fill('Triệu chứng ban đầu', 'Bỏ ăn, nôn');
+    await b.fill('Lý do đến khám', 'Bỏ ăn, nôn');
     await b.fill('Bác sĩ phụ trách', STAFF.vet.fullName);
     await b.click('Tiếp nhận', 'button[type=submit]');
     check('tiếp nhận thành công, chờ nộp phí khám (chưa có phiếu)', await b.hasText('Chờ nộp phí khám') && await b.hasText('Nộp phí khám xong sẽ được phát phiếu'), (await b.text()).slice(0, 400));

@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.controller;
 
+import java.util.UUID;
 import com.vetclinic.clinical.dto.response.VisitSummaryResponse;
 import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.common.dto.ApiResponse;
@@ -25,13 +26,13 @@ public class InternalVisitController {
     private final VisitService visitService;
 
     @GetMapping("/{id}/summary")
-    public ResponseEntity<ApiResponse<VisitSummaryResponse>> summary(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<VisitSummaryResponse>> summary(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(visitService.summary(id)));
     }
 
     /** Theo lô, để billing làm giàu danh sách đơn thuốc bằng mã ca khám / tên thú cưng; id không tồn tại bị bỏ qua. */
     @GetMapping("/summaries")
-    public ResponseEntity<ApiResponse<List<VisitSummaryResponse>>> summaries(@RequestParam("ids") List<Long> ids) {
+    public ResponseEntity<ApiResponse<List<VisitSummaryResponse>>> summaries(@RequestParam("ids") List<UUID> ids) {
         return ResponseEntity.ok(ApiResponse.success(visitService.summaries(ids)));
     }
 }

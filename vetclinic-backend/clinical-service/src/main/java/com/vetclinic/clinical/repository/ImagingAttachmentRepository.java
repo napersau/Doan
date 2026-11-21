@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.repository;
 
+import java.util.UUID;
 import com.vetclinic.clinical.entity.ImagingAttachment;
 import java.util.Collection;
 import java.util.List;
@@ -8,5 +9,5 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface ImagingAttachmentRepository extends JpaRepository<ImagingAttachment, Long> {
-    List<ImagingAttachment> findByImagingResultIdIn(Collection<Long> imagingResultIds);
+    List<ImagingAttachment> findByImagingResultIdIn(Collection<UUID> imagingResultIds);
 }

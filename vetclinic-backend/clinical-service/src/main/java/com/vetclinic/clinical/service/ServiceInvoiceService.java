@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service;
 
+import java.util.UUID;
 import com.vetclinic.clinical.dto.response.InvoiceStatementResponse;
 import com.vetclinic.clinical.dto.response.ServiceInvoiceResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
@@ -14,14 +15,14 @@ import java.util.List;
 public interface ServiceInvoiceService {
 
     /** UC-34: bảng kê hóa đơn của một đợt khám, tổng cần thu = tổng hóa đơn PENDING. */
-    InvoiceStatementResponse statement(Long visitId);
+    InvoiceStatementResponse statement(UUID visitId);
 
     /**
      * EX-14: giảm giá trên MỘT hóa đơn, không vượt quá quantity x unit_price x (1 + vat_rate) của chính hóa đơn đó (BILL_1402). Chỉ khi hóa
      * đơn còn PENDING (BILL_1403 / BILL_1408); dịch vụ làm tại phòng thì ca phải đã chốt hoặc còn công nợ (BILL_1409), dịch vụ thu
      * trước thì giảm được ngay trước khi thu.
      */
-    ServiceInvoiceResponse discount(Long invoiceId, BigDecimal discountAmount);
+    ServiceInvoiceResponse discount(UUID invoiceId, BigDecimal discountAmount);
 
     /**
      * UC-35 / T10 / BR-35: thu các hóa đơn đã chọn (được thu một phần). Dịch vụ thu trước (services.requires_prepayment: khám, XN,
@@ -30,7 +31,7 @@ public interface ServiceInvoiceService {
      * đã hoàn, BILL_1408 đã hủy). Cuối giao dịch: không còn hóa đơn PENDING và ca đang WAITING_PAYMENT thì ca -> COMPLETED + lịch sử,
      * rồi phát VisitCompletedEvent. Ca COMPLETED do khách bỏ về: chỉ thu công nợ.
      */
-    InvoiceStatementResponse confirmPayment(Long visitId, List<Long> invoiceIds);
+    InvoiceStatementResponse confirmPayment(UUID visitId, List<UUID> invoiceIds);
 
     /** Ba mục của màn hình Thu ngân (BR-35). */
     enum CashierSection { EXAM_FEE, PARACLINIC, FINAL }

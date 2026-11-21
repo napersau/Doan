@@ -95,7 +95,7 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
 
     @Override
     public MedicineInvoiceResponse create(Long prescriptionId, MedicineInvoiceRequest request) {
-        Long visitId = readTx.execute(s -> prescriptionRepository.findById(prescriptionId)
+        UUID visitId = readTx.execute(s -> prescriptionRepository.findById(prescriptionId)
                 .orElseThrow(() -> new AppException(ErrorCode.PRESCRIPTION_NOT_FOUND)).getVisitId());
         VisitSummaryResponse visit = visitLookup.require(visitId);   // Feign ngoài transaction
         if (visit.status() != VisitStatus.WAITING_PAYMENT && visit.status() != VisitStatus.COMPLETED) {

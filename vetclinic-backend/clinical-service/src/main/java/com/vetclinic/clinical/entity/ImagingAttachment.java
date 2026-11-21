@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -22,7 +23,7 @@ public class ImagingAttachment {
     private Long id;
 
     @Column(name = "imaging_result_id", nullable = false)
-    private Long imagingResultId;
+    private UUID imagingResultId;
 
     /** Đường dẫn tương đối so với thư mục lưu ảnh (vetclinic.storage.imaging-dir), vd. 12/uuid.jpg */
     @Column(name = "file_url", nullable = false, length = 500)

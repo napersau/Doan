@@ -28,6 +28,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST;
@@ -103,7 +104,7 @@ class TicketIssuerTest {
         QueueTicketIssuedEvent issued = (QueueTicketIssuedEvent) event.getValue();
         assertThat(issued.queueType()).isEqualTo("DOCTOR");
         assertThat(issued.ticketNo()).isEqualTo(8);
-        assertThat(issued.visitId()).isEqualTo(100L);
+        assertThat(issued.visitId()).isEqualTo(lid(100L));
     }
 
     @Test
@@ -126,7 +127,7 @@ class TicketIssuerTest {
         issuer.issueForPaidServices(visit(100L, VisitStatus.WAITING_PAYMENT, DOCTOR),
                 List.of(detail(1L, 100L, EXAM, ServiceDetailStatus.COMPLETED)), RECEPTIONIST);
         // Đã có phiếu DOCTOR còn hiệu lực
-        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatusIn(101L, QueueType.DOCTOR, TicketStatus.ACTIVE))
+        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatusIn(lid(101L), QueueType.DOCTOR, TicketStatus.ACTIVE))
                 .thenReturn(Optional.of(ticket(60L, QueueType.DOCTOR, 101L, DOCTOR, 1, 2, TicketStatus.WAITING)));
         issuer.issueForPaidServices(visit(101L, VisitStatus.WAITING, DOCTOR),
                 List.of(detail(2L, 101L, EXAM, ServiceDetailStatus.PENDING)), RECEPTIONIST);
@@ -144,9 +145,9 @@ class TicketIssuerTest {
         when(ticketRepository.findMaxTicketNo(any(), any())).thenReturn(null);
         // phiếu CĐHA phát cho siêu âm, X-quang gộp vào phiếu đang chờ đó
         QueueTicket imaging = ticket(91L, QueueType.IMAGING, 100L, null, 1, 0, TicketStatus.WAITING);
-        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(100L, QueueType.LABORATORY, TicketStatus.WAITING))
+        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(lid(100L), QueueType.LABORATORY, TicketStatus.WAITING))
                 .thenReturn(Optional.empty());
-        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(100L, QueueType.IMAGING, TicketStatus.WAITING))
+        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(lid(100L), QueueType.IMAGING, TicketStatus.WAITING))
                 .thenReturn(Optional.empty(), Optional.of(imaging));
 
         issuer.issueForPaidServices(v, List.of(lab, us, xray), RECEPTIONIST);
@@ -157,7 +158,7 @@ class TicketIssuerTest {
         assertThat(saved.getAllValues()).extracting(QueueTicket::getDoctorId).containsOnlyNulls();
         ArgumentCaptor<QueueTicketItem> items = ArgumentCaptor.forClass(QueueTicketItem.class);
         verify(itemRepository, Mockito.times(3)).save(items.capture());
-        assertThat(items.getAllValues()).extracting(QueueTicketItem::getVisitServiceDetailId).containsExactly(2L, 3L, 4L);
+        assertThat(items.getAllValues()).extracting(QueueTicketItem::getVisitServiceDetailId).containsExactly(lid(2L), lid(3L), lid(4L));
         assertThat(items.getAllValues().get(2).getTicketId()).isEqualTo(91L);   // X-quang vào chung phiếu với siêu âm
     }
 
@@ -165,7 +166,7 @@ class TicketIssuerTest {
     void inRoomServices_andParaclinicalServicesAlreadyTicketedOrNoLongerPending_getNoTicket() {
         PetVisit v = visit(100L, VisitStatus.WAITING_RESULTS, DOCTOR);
         VisitServiceDetail ticketed = detail(2L, 100L, CBC, ServiceDetailStatus.PENDING);
-        when(itemRepository.findByVisitServiceDetailId(2L)).thenReturn(Optional.of(QueueTicketItem.of(70L, 2L)));
+        when(itemRepository.findByVisitServiceDetailId(lid(2L))).thenReturn(Optional.of(QueueTicketItem.of(70L, lid(2L))));
 
         issuer.issueForPaidServices(v, List.of(detail(1L, 100L, VACCINE, ServiceDetailStatus.COMPLETED), ticketed,
                 detail(3L, 100L, US, ServiceDetailStatus.CANCELLED)), RECEPTIONIST);
@@ -188,15 +189,15 @@ class TicketIssuerTest {
 
     @Test
     void startDoctorTicket_requiresAWaitingTicket_CLIN_1314() {
-        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(100L, QueueType.DOCTOR, TicketStatus.WAITING))
+        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(lid(100L), QueueType.DOCTOR, TicketStatus.WAITING))
                 .thenReturn(Optional.empty());
-        assertError(ErrorCode.NO_QUEUE_TICKET, () -> issuer.startDoctorTicket(100L, DOCTOR));
+        assertError(ErrorCode.NO_QUEUE_TICKET, () -> issuer.startDoctorTicket(lid(100L), DOCTOR));
 
         QueueTicket waiting = ticket(60L, QueueType.DOCTOR, 101L, null, 1, 0, TicketStatus.WAITING);
-        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(101L, QueueType.DOCTOR, TicketStatus.WAITING))
+        when(ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(lid(101L), QueueType.DOCTOR, TicketStatus.WAITING))
                 .thenReturn(Optional.of(waiting));
         when(ticketRepository.save(waiting)).thenReturn(waiting);
-        issuer.startDoctorTicket(101L, DOCTOR);
+        issuer.startDoctorTicket(lid(101L), DOCTOR);
         assertThat(waiting.getStatus()).isEqualTo(TicketStatus.IN_SERVICE);
         assertThat(waiting.getDoctorId()).isEqualTo(DOCTOR);
     }
@@ -205,9 +206,9 @@ class TicketIssuerTest {
     void cancelActiveTickets_closesEveryWaitingOrInServiceTicketOfTheVisit() {
         QueueTicket a = ticket(60L, QueueType.DOCTOR, 100L, DOCTOR, 1, 0, TicketStatus.WAITING);
         QueueTicket b = ticket(70L, QueueType.LABORATORY, 100L, null, 1, 0, TicketStatus.IN_SERVICE);
-        when(ticketRepository.findByVisitIdAndStatusIn(100L, TicketStatus.ACTIVE)).thenReturn(List.of(a, b));
+        when(ticketRepository.findByVisitIdAndStatusIn(lid(100L), TicketStatus.ACTIVE)).thenReturn(List.of(a, b));
 
-        issuer.cancelActiveTickets(100L);
+        issuer.cancelActiveTickets(lid(100L));
 
         assertThat(a.getStatus()).isEqualTo(TicketStatus.CANCELLED);
         assertThat(b.getStatus()).isEqualTo(TicketStatus.CANCELLED);
@@ -216,20 +217,20 @@ class TicketIssuerTest {
     @Test
     void refreshRoomTicket_inServiceBecomesDoneWhenNothingIsOpen_waitingBecomesCancelledWhenNothingIsPending() {
         QueueTicket inService = ticket(80L, QueueType.IMAGING, 100L, null, 1, 0, TicketStatus.IN_SERVICE);
-        when(itemRepository.findByVisitServiceDetailId(3L)).thenReturn(Optional.of(QueueTicketItem.of(80L, 3L)));
+        when(itemRepository.findByVisitServiceDetailId(lid(3L))).thenReturn(Optional.of(QueueTicketItem.of(80L, lid(3L))));
         when(ticketRepository.findById(80L)).thenReturn(Optional.of(inService));
-        when(itemRepository.findByTicketIdIn(List.of(80L))).thenReturn(List.of(QueueTicketItem.of(80L, 3L), QueueTicketItem.of(80L, 4L)));
+        when(itemRepository.findByTicketIdIn(List.of(80L))).thenReturn(List.of(QueueTicketItem.of(80L, lid(3L)), QueueTicketItem.of(80L, lid(4L))));
         when(detailRepository.findAllById(anyCollection())).thenReturn(List.of(
                 detail(3L, 100L, US, ServiceDetailStatus.COMPLETED), detail(4L, 100L, XRAY, ServiceDetailStatus.CANCELLED)));
-        issuer.refreshRoomTicketOf(3L);
+        issuer.refreshRoomTicketOf(lid(3L));
         assertThat(inService.getStatus()).isEqualTo(TicketStatus.DONE);
 
         QueueTicket waiting = ticket(81L, QueueType.LABORATORY, 101L, null, 2, 0, TicketStatus.WAITING);
-        when(itemRepository.findByVisitServiceDetailId(5L)).thenReturn(Optional.of(QueueTicketItem.of(81L, 5L)));
+        when(itemRepository.findByVisitServiceDetailId(lid(5L))).thenReturn(Optional.of(QueueTicketItem.of(81L, lid(5L))));
         when(ticketRepository.findById(81L)).thenReturn(Optional.of(waiting));
-        when(itemRepository.findByTicketIdIn(List.of(81L))).thenReturn(List.of(QueueTicketItem.of(81L, 5L)));
-        when(detailRepository.findAllById(List.of(5L))).thenReturn(List.of(detail(5L, 101L, CBC, ServiceDetailStatus.CANCELLED)));
-        issuer.refreshRoomTicketOf(5L);
+        when(itemRepository.findByTicketIdIn(List.of(81L))).thenReturn(List.of(QueueTicketItem.of(81L, lid(5L))));
+        when(detailRepository.findAllById(List.of(lid(5L)))).thenReturn(List.of(detail(5L, 101L, CBC, ServiceDetailStatus.CANCELLED)));
+        issuer.refreshRoomTicketOf(lid(5L));
         assertThat(waiting.getStatus()).isEqualTo(TicketStatus.CANCELLED);   // khách hủy trước khi vào phòng
     }
 }

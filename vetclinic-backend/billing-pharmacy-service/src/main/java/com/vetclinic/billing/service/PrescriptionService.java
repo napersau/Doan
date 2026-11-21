@@ -1,5 +1,6 @@
 package com.vetclinic.billing.service;
 
+import java.util.UUID;
 import com.vetclinic.billing.dto.request.PrescriptionRequest;
 import com.vetclinic.billing.dto.response.PrescriptionResponse;
 import com.vetclinic.billing.dto.response.PrescriptionSummaryResponse;
@@ -26,13 +27,13 @@ public interface PrescriptionService {
     /** Chủ nuôi chỉ xem được đơn của thú cưng mình (UC-39); đơn của người khác trả PRESCRIPTION_NOT_FOUND. */
     PrescriptionResponse getById(Long id);
 
-    PrescriptionResponse getByVisit(Long visitId);
+    PrescriptionResponse getByVisit(UUID visitId);
 
     /** In đơn cho khách mua ngoài: cùng dữ liệu {@link #getById}, không tạo hóa đơn. */
     PrescriptionResponse print(Long id);
 
     /** Cho clinical-service dựng bệnh án trọn đời: đơn của nhiều đợt khám, theo lô. Không kiểm tra người xem. */
-    List<PrescriptionResponse> findByVisits(Collection<Long> visitIds);
+    List<PrescriptionResponse> findByVisits(Collection<UUID> visitIds);
 
-    PageResponse<PrescriptionSummaryResponse> search(Long visitId, int page, int size);
+    PageResponse<PrescriptionSummaryResponse> search(UUID visitId, int page, int size);
 }

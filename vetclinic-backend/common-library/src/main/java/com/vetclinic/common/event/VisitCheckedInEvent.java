@@ -12,7 +12,7 @@ public record VisitCheckedInEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,
-        Long visitId,
+        UUID visitId,
         String visitCode,
         UUID petId,
         UUID appointmentId,   // null nếu khách vãng lai (walk-in)

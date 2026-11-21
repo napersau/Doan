@@ -44,7 +44,7 @@ public class PeopleLookup {
         }
     }
 
-    public Optional<VisitSummary> findVisit(Long visitId) {
+    public Optional<VisitSummary> findVisit(UUID visitId) {
         try {
             ApiResponse<VisitSummary> response = clinicalClient.getVisit(visitId);
             return response == null ? Optional.empty() : Optional.ofNullable(response.getData());

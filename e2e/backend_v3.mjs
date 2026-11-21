@@ -3,7 +3,7 @@
 //   `db/seed_current.sql` mới nạp (lộ trình v4), id tra theo mã ổn định qua e2e/lib/ids.mjs; luồng chuẩn cần Clavamox tồn ≥ 10 và Lu chưa có đợt khám mở)
 // CẢNH BÁO: tạo dữ liệu thật (đợt khám, hóa đơn, lịch hẹn). Chỉ chạy trên môi trường thử nghiệm; muốn chạy lại hãy `docker compose down -v`.
 import { BILL, CLIN, PHARM, brief, call, check, finish, login, run, sleep, sql, step } from './lib/api.mjs';
-import { medicineIdSql, seedIds } from './lib/ids.mjs';
+import { medicineIdSql, seedIds, uuidSql } from './lib/ids.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 let ID;   // id seed tra theo mã ổn định (lib/ids.mjs)
@@ -15,14 +15,14 @@ async function newPet(name, speciesId = ID.species.DOG) {
   if (res.status !== 201) throw new Error(`Không tạo được thú cưng ${name}: ${res.status} ${res.message}`);
   return res.data.id;
 }
-const checkIn = (petId, doctorId, emergency = false) => call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId, doctorId, isEmergency: emergency, initialSymptoms: 'e2e' } });
-const startExam = (token, id) => call('POST', `${CLIN}/pet-visits/${id}/start-exam`, { token, body: { weightAtVisit: 5, temperature: 38.5 } });
+const checkIn = (petId, doctorId, emergency = false) => call('POST', `${CLIN}/pet-visits/check-in`, { token: T.rec, body: { petId, doctorId, isEmergency: emergency, reasonForVisit: 'e2e' } });
+const startExam = (token, id) => call('POST', `${CLIN}/pet-visits/${id}/start-exam`, { token, body: { vitalSigns: { weightKg: 5, temperatureC: 38.5 } } });
 const visitOf = async (id) => (await call('GET', `${CLIN}/pet-visits/${id}`, { token: T.rec })).data;
 const labQueue = async () => (await call('GET', `${CLIN}/lab-queue`, { token: T.lab })).data;
 const imagingQueue = async () => (await call('GET', `${CLIN}/imaging-queue`, { token: T.img })).data;
 const detailOf = (queue, visitId) => queue.find((item) => item.visitId === visitId)?.serviceDetailId;
 const rx = (visitId, medicineId, quantity) => ({ visitId, doctorNotes: 'e2e', items: [{ medicineId, quantity, dosage: '1 viên/lần', frequency: '2 lần/ngày', durationDays: 5 }] });
-const close = (token, id) => call('POST', `${CLIN}/pet-visits/${id}/close-visit`, { token, body: { diagnosis: 'Viêm da', treatmentPlan: 'Dùng thuốc', doctorAdvice: 'Theo dõi' } });
+const close = (token, id) => call('POST', `${CLIN}/pet-visits/${id}/close-visit`, { token, body: { finalDiagnosis: 'Viêm da', treatmentPlan: 'Dùng thuốc', doctorAdvice: 'Theo dõi' } });
 async function labResults(detailId) {
   const form = (await call('GET', `${CLIN}/service-details/${detailId}/lab-form`, { token: T.lab })).data;
   return call('POST', `${CLIN}/lab-results/${detailId}`, { token: T.lab, body: { results: form.map((item) => ({ labTestItemId: item.id, resultValue: 10 })) } });
@@ -101,7 +101,7 @@ async function main() {
   check('chốt ca (T09) → WAITING_PAYMENT', (await close(T.doc2, v1)).data?.status === 'WAITING_PAYMENT');
   const statement = await statementOf(v1);
   check('3 hóa đơn dịch vụ (khám, CBC, X-quang) đã thu trước đủ 530.000đ, không còn khoản chờ', statement.invoices.length === 3 && Number(statement.totalPaid) === 530000 && Number(statement.totalPending) === 0, JSON.stringify(statement).slice(0, 300));
-  check('VIEW v_service_invoice_amounts = 530.000', Number(sql(`SELECT SUM(payable_amount) FROM pet_clinic_clinical_db.v_service_invoice_amounts WHERE visit_id=${v1}`)) === 530000);
+  check('VIEW v_service_invoice_amounts = 530.000', Number(sql(`SELECT SUM(payable_amount) FROM pet_clinic_clinical_db.v_service_invoice_amounts WHERE visit_id=${uuidSql(v1)}`)) === 530000);
   const mi = await call('POST', `${PHARM}/prescriptions/${prescription.data.id}/medicine-invoices`, { token: T.rec, body: { items: [{ prescriptionItemId: prescription.data.items[0].id, quantity: 10 }], discountAmount: 0 } });
   check('hóa đơn thuốc 157.500đ (10 × 15.000 × 1,05)', mi.status === 201 && Number(mi.data.payableAmount) === 157500);
   check('VIEW v_medicine_invoice_amounts = 157.500', Number(sql(`SELECT payable_amount FROM pet_clinic_billing_pharmacy_db.v_medicine_invoice_amounts WHERE invoice_id=${mi.data.id}`)) === 157500);

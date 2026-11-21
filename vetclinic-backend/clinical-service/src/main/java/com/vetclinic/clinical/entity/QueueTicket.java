@@ -58,7 +58,7 @@ public class QueueTicket {
     private int ticketNo;
 
     @Column(name = "visit_id", nullable = false)
-    private Long visitId;
+    private UUID visitId;
 
     /** Chỉ phiếu DOCTOR: Bác sĩ của hàng đợi; null = danh sách chờ phân công. LFK: auth.users */
     @Column(name = "doctor_id")

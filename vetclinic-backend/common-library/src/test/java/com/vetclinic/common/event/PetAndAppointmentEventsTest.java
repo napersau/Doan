@@ -35,7 +35,7 @@ class PetAndAppointmentEventsTest {
 
     @Test
     void visitCheckedInEvent_walkInHasNoAppointmentId() {
-        var event = new VisitCheckedInEvent(UuidV7.generate(), NOW, UuidV7.generate(), 7L, "VIS-2026-00007", UuidV7.generate(), null, false, null);
+        var event = new VisitCheckedInEvent(UuidV7.generate(), NOW, UuidV7.generate(), UuidV7.generate(), "VIS-2026-00007", UuidV7.generate(), null, false, null);
 
         assertThat(mapper.readValue(mapper.writeValueAsString(event), VisitCheckedInEvent.class)).isEqualTo(event);
         assertThat(event.appointmentId()).isNull();

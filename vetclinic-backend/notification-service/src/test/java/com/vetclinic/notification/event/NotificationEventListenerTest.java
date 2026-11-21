@@ -65,6 +65,8 @@ class NotificationEventListenerTest {
 
 
     private static final Instant NOW = Instant.parse("2026-10-30T02:00:00Z");
+    /** Đợt khám thử (khóa UUID). */
+    private static final UUID VISIT_ID = uid(7);
     private static final UUID OWNER = uid(5);
     private static final UUID PET = uid(11);
     private static final UUID APPT = uid(3);
@@ -88,7 +90,7 @@ class NotificationEventListenerTest {
     }
 
     private static VisitSummary visit() {
-        return new VisitSummary(7L, "VIS-2026-7", PET, "Lu", OWNER, DOCTOR);
+        return new VisitSummary(VISIT_ID, "VIS-2026-7", PET, "Lu", OWNER, DOCTOR);
     }
 
     private static AppointmentBookedEvent appointment(String status) {
@@ -227,9 +229,9 @@ class NotificationEventListenerTest {
 
     @Test
     void checkedIn_emergencyAlertsReceptionAndDoctorsAndTellsTheOwner() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
-        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), 7L, "VIS-2026-7", PET, null, true, null));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), VISIT_ID, "VIS-2026-7", PET, null, true, null));
 
         NotificationMessage forReception = captureRole(RoleCode.RECEPTIONIST);
         assertThat(forReception.severity()).isEqualTo(Severity.CRITICAL);
@@ -240,9 +242,9 @@ class NotificationEventListenerTest {
 
     @Test
     void checkedIn_normalVisitOnlyGoesToReception() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
-        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), 7L, "VIS-2026-7", PET, APPT, false, null));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), VISIT_ID, "VIS-2026-7", PET, APPT, false, null));
 
         assertThat(captureRole(RoleCode.RECEPTIONIST).severity()).isEqualTo(Severity.INFO);
         verify(dispatcher, never()).toRole(eq(RoleCode.VETERINARIAN), any());
@@ -250,9 +252,9 @@ class NotificationEventListenerTest {
 
     @Test
     void checkedIn_clinicalDownStillNotifiesReceptionWithoutPetName() {
-        when(people.findVisit(7L)).thenReturn(Optional.empty());
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.empty());
 
-        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), 7L, "VIS-2026-7", PET, null, false, null));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), VISIT_ID, "VIS-2026-7", PET, null, false, null));
 
         assertThat(captureRole(RoleCode.RECEPTIONIST).body()).contains("VIS-2026-7", "thú cưng");
         verify(dispatcher, never()).toUser(any(UUID.class), any());   // không biết chủ nuôi thì không báo chủ nuôi
@@ -260,9 +262,9 @@ class NotificationEventListenerTest {
 
     @Test
     void checkedIn_assignedVisitAlsoRefreshesTheDoctorsOwnQueue() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
-        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), 7L, "VIS-2026-7", PET, null, false, DOCTOR));
+        listener.onVisitCheckedIn(new VisitCheckedInEvent(UUID.randomUUID(), NOW, uid(9), VISIT_ID, "VIS-2026-7", PET, null, false, DOCTOR));
 
         assertThat(captureRole(RoleCode.RECEPTIONIST).body()).contains("đã vào hàng đợi của bác sĩ");
         verify(dispatcher).toUser(eq(DOCTOR), any());   // hàng đợi riêng của bác sĩ
@@ -308,13 +310,13 @@ class NotificationEventListenerTest {
     // ================================================================== visit.patient_called
 
     private static PatientCalledEvent called(String action, String station, UUID doctorId, String room) {
-        return new PatientCalledEvent(UUID.randomUUID(), NOW, DOCTOR, action, station, 7L, "VIS-2026-7", PET, doctorId,
+        return new PatientCalledEvent(UUID.randomUUID(), NOW, DOCTOR, action, station, VISIT_ID, "VIS-2026-7", PET, doctorId,
                 60L, 12, room);
     }
 
     @Test
     void patientCalled_doctorRoomInvitesTheOwnerWithRoomAndNumber_andRefreshesTheDoctor() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
         listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101"));
 
@@ -330,7 +332,7 @@ class NotificationEventListenerTest {
 
     @Test
     void patientCalled_labAndImagingGoToTheRightTechnicianRole() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
         listener.onPatientCalled(called("CALLED", "LAB", null, "P201"));
         listener.onPatientCalled(called("CALLED", "IMAGING", null, "P202"));
@@ -343,7 +345,7 @@ class NotificationEventListenerTest {
 
     @Test
     void patientCalled_clinicalDownStillRefreshesStaffButCannotReachTheOwner() {
-        when(people.findVisit(7L)).thenReturn(Optional.empty());
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.empty());
 
         listener.onPatientCalled(called("CALLED", "DOCTOR_ROOM", DOCTOR, null));
 
@@ -353,7 +355,7 @@ class NotificationEventListenerTest {
 
     @Test
     void patientCalled_redeliveryDoesNotCallTwice() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
         var event = called("CALLED", "DOCTOR_ROOM", DOCTOR, "P101");
 
         listener.onPatientCalled(event);
@@ -365,13 +367,13 @@ class NotificationEventListenerTest {
     // ================================================================== queue.ticket_issued
 
     private static QueueTicketIssuedEvent issued(String type, UUID doctorId, int priority) {
-        return new QueueTicketIssuedEvent(UUID.randomUUID(), NOW, uid(5), 60L, type, 8, 7L, "VIS-2026-7",
+        return new QueueTicketIssuedEvent(UUID.randomUUID(), NOW, uid(5), 60L, type, 8, VISIT_ID, "VIS-2026-7",
                 PET, doctorId, priority);
     }
 
     @Test
     void ticketIssued_doctorQueue_givesTheOwnerTheNumber_andRefreshesTheDoctorAndReception() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
         listener.onTicketIssued(issued("DOCTOR", DOCTOR, 0));
 
@@ -385,7 +387,7 @@ class NotificationEventListenerTest {
 
     @Test
     void ticketIssued_roomQueues_refreshTheRightTechnicians_andAnEmergencyIsCritical() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
         listener.onTicketIssued(issued("LABORATORY", null, 2));
         listener.onTicketIssued(issued("IMAGING", null, 0));
@@ -400,7 +402,7 @@ class NotificationEventListenerTest {
 
     @Test
     void ticketIssued_redeliveryDoesNotNotifyTwice() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
         var event = issued("DOCTOR", null, 0);
 
         listener.onTicketIssued(event);
@@ -413,25 +415,25 @@ class NotificationEventListenerTest {
 
     @Test
     void resultsReady_flagsTheRightDoctorAndTellsTheOwnerToComeBack() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
         when(people.findUser(DOCTOR)).thenReturn(Optional.of(new UserSummary(DOCTOR, "BS Lan", null, "P01")));
 
-        listener.onResultsReady(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), NOW, null, 7L, "VIS-2026-7", DOCTOR, PET));
+        listener.onResultsReady(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), NOW, null, VISIT_ID, "VIS-2026-7", DOCTOR, PET));
 
         ArgumentCaptor<NotificationMessage> captor = ArgumentCaptor.forClass(NotificationMessage.class);
         verify(dispatcher).toUser(eq(DOCTOR), captor.capture());
         assertThat(captor.getValue().type()).isEqualTo(NotificationType.RESULTS_READY);
         assertThat(captor.getValue().body()).contains("VIS-2026-7", "Lu", "đầu hàng đợi");
-        assertThat(captor.getValue().data()).containsEntry("visitId", 7L).containsEntry("doctorId", DOCTOR);
+        assertThat(captor.getValue().data()).containsEntry("visitId", VISIT_ID).containsEntry("doctorId", DOCTOR);
         assertThat(captureUser(OWNER).body()).contains("Lu", "phòng khám P01", "bác sĩ gọi số");
     }
 
     @Test
     void resultsReady_stillNotifiesTheDoctorWhenOtherServicesAreDown() {
-        when(people.findVisit(7L)).thenReturn(Optional.empty());
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.empty());
         when(people.findUser(DOCTOR)).thenReturn(Optional.empty());
 
-        listener.onResultsReady(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), NOW, null, 7L, "VIS-2026-7", DOCTOR, PET));
+        listener.onResultsReady(new ParaclinicalResultsReadyEvent(UUID.randomUUID(), NOW, null, VISIT_ID, "VIS-2026-7", DOCTOR, PET));
 
         assertThat(captureUser(DOCTOR).body()).contains("VIS-2026-7", "thú cưng");
         verify(dispatcher, never()).toUser(eq(OWNER), any());
@@ -441,10 +443,10 @@ class NotificationEventListenerTest {
 
     @Test
     void visitCompleted_notifiesReceptionAndOwnerAndEmailsTheElectronicReceipt() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
-        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, uid(9), 7L, "VIS-2026-7", PET, false));
+        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, uid(9), VISIT_ID, "VIS-2026-7", PET, false));
 
         NotificationMessage forReception = captureRole(RoleCode.RECEPTIONIST);
         assertThat(forReception.severity()).isEqualTo(Severity.INFO);
@@ -455,9 +457,9 @@ class NotificationEventListenerTest {
 
     @Test
     void visitCompleted_abandonedIsADebtWarningForReceptionAndNoReceiptEmail() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
 
-        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, uid(9), 7L, "VIS-2026-7", PET, true));
+        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, uid(9), VISIT_ID, "VIS-2026-7", PET, true));
 
         NotificationMessage forReception = captureRole(RoleCode.RECEPTIONIST);
         assertThat(forReception.severity()).isEqualTo(Severity.WARNING);
@@ -468,9 +470,9 @@ class NotificationEventListenerTest {
 
     @Test
     void visitCompleted_unknownOwnerSkipsTheEmailButStillNotifiesReception() {
-        when(people.findVisit(7L)).thenReturn(Optional.empty());
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.empty());
 
-        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, uid(9), 7L, "VIS-2026-7", PET, false));
+        listener.onVisitCompleted(new VisitCompletedEvent(UUID.randomUUID(), NOW, uid(9), VISIT_ID, "VIS-2026-7", PET, false));
 
         verify(dispatcher).toRole(eq(RoleCode.RECEPTIONIST), any());
         verifyNoInteractions(emailService);
@@ -481,10 +483,10 @@ class NotificationEventListenerTest {
 
     @Test
     void medicineInvoicePaid_tellsTheOwnerAndEmailsTheReceiptWithAmount() {
-        when(people.findVisit(7L)).thenReturn(Optional.of(visit()));
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.of(visit()));
         when(people.requireUser(OWNER)).thenReturn(new UserSummary(OWNER, "Nguyễn Văn A", "a@example.com", null));
 
-        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), 4L, "MINV-2026-0004", 3L, 7L,
+        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), 4L, "MINV-2026-0004", 3L, VISIT_ID,
                 new BigDecimal("157500.00")));
 
         NotificationMessage forOwner = captureUser(OWNER);
@@ -499,9 +501,9 @@ class NotificationEventListenerTest {
 
     @Test
     void medicineInvoicePaid_unknownOwnerSendsNothing() {
-        when(people.findVisit(7L)).thenReturn(Optional.empty());
+        when(people.findVisit(VISIT_ID)).thenReturn(Optional.empty());
 
-        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), 4L, "MINV-2026-0004", 3L, 7L,
+        listener.onMedicineInvoicePaid(new MedicineInvoicePaidEvent(UUID.randomUUID(), NOW, uid(9), 4L, "MINV-2026-0004", 3L, VISIT_ID,
                 new BigDecimal("157500.00")));
 
         verifyNoInteractions(dispatcher, emailService);

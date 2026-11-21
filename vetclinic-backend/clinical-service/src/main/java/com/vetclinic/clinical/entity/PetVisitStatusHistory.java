@@ -25,7 +25,7 @@ public class PetVisitStatusHistory {
     private Long id;
 
     @Column(name = "visit_id", nullable = false)
-    private Long visitId;
+    private UUID visitId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "from_status")

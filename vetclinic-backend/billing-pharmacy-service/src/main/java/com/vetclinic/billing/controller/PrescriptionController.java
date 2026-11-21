@@ -1,5 +1,6 @@
 package com.vetclinic.billing.controller;
 
+import java.util.UUID;
 import com.vetclinic.billing.dto.request.PrescriptionRequest;
 import com.vetclinic.billing.dto.response.PrescriptionResponse;
 import com.vetclinic.billing.dto.response.PrescriptionSummaryResponse;
@@ -40,7 +41,7 @@ public class PrescriptionController {
     @GetMapping
     @PreAuthorize("hasAnyRole('RECEPTIONIST','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<PrescriptionSummaryResponse>>> search(
-            @RequestParam(required = false) Long visitId,
+            @RequestParam(required = false) UUID visitId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(ApiResponse.success(prescriptionService.search(visitId, page, size)));
@@ -55,7 +56,7 @@ public class PrescriptionController {
 
     @GetMapping("/by-visit/{visitId}")
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','ADMIN')")
-    public ResponseEntity<ApiResponse<PrescriptionResponse>> getByVisit(@PathVariable Long visitId) {
+    public ResponseEntity<ApiResponse<PrescriptionResponse>> getByVisit(@PathVariable UUID visitId) {
         return ResponseEntity.ok(ApiResponse.success(prescriptionService.getByVisit(visitId)));
     }
 

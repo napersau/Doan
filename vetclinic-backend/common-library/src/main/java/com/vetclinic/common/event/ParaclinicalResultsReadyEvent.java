@@ -12,7 +12,7 @@ public record ParaclinicalResultsReadyEvent(
         UUID eventId,
         Instant occurredAt,
         UUID actorUserId,        // luôn null: hệ thống tự chuyển trạng thái
-        Long visitId,
+        UUID visitId,
         String visitCode,
         UUID doctorId,
         UUID petId

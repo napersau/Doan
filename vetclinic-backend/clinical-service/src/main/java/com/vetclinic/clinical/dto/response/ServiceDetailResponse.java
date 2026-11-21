@@ -13,8 +13,8 @@ import java.util.UUID;
  * Số phải trả sau VAT và giảm giá nằm ở hóa đơn (bảng kê hóa đơn dịch vụ).
  */
 public record ServiceDetailResponse(
-        Long id,
-        Long visitId,
+        UUID id,
+        UUID visitId,
         UUID serviceId,
         String serviceCode,
         String serviceName,
@@ -27,7 +27,7 @@ public record ServiceDetailResponse(
         String notes,
         Instant createdAt,
         BigDecimal vatRate,
-        Long invoiceId,
+        UUID invoiceId,
         String invoiceCode,
         PaymentStatus paymentStatus
 ) {

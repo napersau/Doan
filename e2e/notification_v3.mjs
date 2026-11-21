@@ -41,7 +41,7 @@ async function main() {
   await expectType('gọi số → chủ nuôi nhận PATIENT_CALLED (CALLED)', T.owner, 'PATIENT_CALLED', { contains: '"CALLED"' });
   await call('POST', `${CLIN}/queue-tickets/${ticketId}/call`, { token: T.doc });
   await expectType('gọi lại một phiếu theo id → chủ nuôi nhận PATIENT_CALLED (CALLED)', T.owner, 'PATIENT_CALLED', { contains: '"CALLED"' });
-  await call('POST', `${CLIN}/pet-visits/${visit}/start-exam`, { token: T.doc, body: { weightAtVisit: 4, temperature: 38.5 } });
+  await call('POST', `${CLIN}/pet-visits/${visit}/start-exam`, { token: T.doc, body: { vitalSigns: { weightKg: 4, temperatureC: 38.5 } } });
   await call('POST', `${CLIN}/pet-visits/${visit}/paraclinical-orders`, { token: T.doc, body: { serviceIds: [ID.service.LAB_CBC] } });
   const clsInv = (await call('GET', `${CLIN}/pet-visits/${visit}/service-invoices`, { token: T.rec })).data.invoices.filter((i) => i.category === 'LABORATORY').map((i) => i.id);
   await call('POST', `${CLIN}/pet-visits/${visit}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: clsInv } });
@@ -55,7 +55,7 @@ async function main() {
   await expectType('chủ nuôi nhận RESULTS_READY', T.owner, 'RESULTS_READY');
   await call('POST', `${CLIN}/queue-tickets/call-next?queueType=DOCTOR`, { token: T.doc }); await call('POST', `${CLIN}/pet-visits/${visit}/start-phase2`, { token: T.doc });
   const rx = (await call('POST', `${PHARM}/prescriptions`, { token: T.doc, body: { visitId: visit, items: [{ medicineId: AMOX, quantity: 10, dosage: '1', frequency: '2', durationDays: 5 }] } })).data;
-  await call('POST', `${CLIN}/pet-visits/${visit}/close-visit`, { token: T.doc, body: { diagnosis: 'Viêm da' } });
+  await call('POST', `${CLIN}/pet-visits/${visit}/close-visit`, { token: T.doc, body: { finalDiagnosis: 'Viêm da' } });
   const stock = (await call('GET', `${PHARM}/medicines/${AMOX}`, { token: T.admin })).data;
   // đưa tồn về ngưỡng + 10 để lần bán này làm chạm ngưỡng cảnh báo
   await call('POST', `${PHARM}/inventory/adjust`, { token: T.admin, body: { medicineId: AMOX, delta: -(stock.stockQuantity - stock.minStockAlert - 5), reason: 'e2e đưa tồn gần ngưỡng' } });

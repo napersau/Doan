@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.List;
 import java.util.Set;
 
+import static com.vetclinic.clinical.testsupport.TestData.lid;
 import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.OTHER_DOCTOR;
@@ -68,7 +69,8 @@ class DoctorQueueServiceImplTest {
     void setUp() {
         VisitAssembler assembler = new VisitAssembler(mock(VisitServiceDetailRepository.class), mock(LabTestResultRepository.class),
                 mock(ImagingResultRepository.class), mock(ImagingAttachmentRepository.class), mock(ServiceInvoiceRepository.class),
-                new VisitTimeline(mock(PetVisitStatusHistoryRepository.class)), ticketRepository);
+                new VisitTimeline(mock(PetVisitStatusHistoryRepository.class)), ticketRepository,
+                mock(com.vetclinic.clinical.repository.VitalSignRepository.class), mock(com.vetclinic.clinical.repository.MedicalRecordRepository.class));
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         lenient().when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new DoctorQueueServiceImpl(visitRepository, ticketRepository, authClient, assembler, tm);
@@ -107,15 +109,15 @@ class DoctorQueueServiceImplTest {
 
         QueueBoardResponse board = service.board();
 
-        assertThat(board.awaitingPayment()).extracting(VisitResponse::id).containsExactly(5L);
+        assertThat(board.awaitingPayment()).extracting(VisitResponse::id).containsExactly(lid(5L));
         assertThat(board.awaitingPayment().get(0).ticket()).isNull();
-        assertThat(board.unassigned()).extracting(VisitResponse::id).containsExactly(1L);
+        assertThat(board.unassigned()).extracting(VisitResponse::id).containsExactly(lid(1L));
         assertThat(board.unassigned().get(0).ticket().ticketNo()).isEqualTo(1);
         DoctorQueueResponse first = board.doctors().get(0);
         assertThat(first.doctorId()).isEqualTo(DOCTOR);
         assertThat(first.status()).isEqualTo(DoctorStatus.BUSY);
         assertThat(first.waitingCount()).isEqualTo(2);
-        assertThat(first.visits()).extracting(VisitResponse::id).containsExactly(3L, 4L);
+        assertThat(first.visits()).extracting(VisitResponse::id).containsExactly(lid(3L), lid(4L));
         assertThat(first.visits()).extracting(v -> v.ticket().ticketNo()).containsExactly(3, 2);
         assertThat(first.visits()).extracting(VisitResponse::assignedRoom).containsOnly("P101");
         DoctorQueueResponse second = board.doctors().get(1);
@@ -153,7 +155,7 @@ class DoctorQueueServiceImplTest {
         List<VisitResponse> queue = service.myQueue();
 
         // cấp cứu (2) -> có kết quả (1) -> thường (0), dù số phiếu không theo thứ tự đó
-        assertThat(queue).extracting(VisitResponse::id).containsExactly(9L, 3L, 4L);
+        assertThat(queue).extracting(VisitResponse::id).containsExactly(lid(9L), lid(3L), lid(4L));
         assertThat(queue).extracting(v -> v.ticket().priority()).containsExactly(2, 1, 0);
     }
 }

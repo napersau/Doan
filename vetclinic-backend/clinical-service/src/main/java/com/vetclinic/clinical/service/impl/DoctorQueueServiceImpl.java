@@ -73,13 +73,13 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
 
             // Mục "chờ thu phí khám": ca vừa tiếp đón chưa có phiếu DOCTOR (chưa nộp phí); không hiện ở hàng đợi Bác sĩ
             List<PetVisit> waitingVisits = visitRepository.findByStatusOrderByIdAsc(VisitStatus.WAITING);
-            Set<Long> withTicket = waitingVisits.isEmpty() ? Set.of()
+            Set<UUID> withTicket = waitingVisits.isEmpty() ? Set.of()
                     : ticketRepository.findByVisitIdInAndQueueTypeAndStatusIn(
                             waitingVisits.stream().map(PetVisit::getId).toList(), QueueType.DOCTOR, TicketStatus.ACTIVE)
                     .stream().map(QueueTicket::getVisitId).collect(Collectors.toSet());
             List<PetVisit> awaitingPayment = waitingVisits.stream().filter(v -> !withTicket.contains(v.getId())).toList();
 
-            Map<Long, VisitResponse> byVisit = visitsOf(unassigned, assigned, awaitingPayment);
+            Map<UUID, VisitResponse> byVisit = visitsOf(unassigned, assigned, awaitingPayment);
             // groupingBy giữ nguyên thứ tự phiếu bên trong mỗi Bác sĩ
             Map<UUID, List<QueueTicket>> byDoctor = assigned.stream().collect(Collectors.groupingBy(QueueTicket::getDoctorId));
 
@@ -115,8 +115,8 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
 
     // ================================================================== helper
 
-    private Map<Long, VisitResponse> visitsOf(List<QueueTicket> a, List<QueueTicket> b, List<PetVisit> extra) {
-        Set<Long> ids = new LinkedHashSet<>();
+    private Map<UUID, VisitResponse> visitsOf(List<QueueTicket> a, List<QueueTicket> b, List<PetVisit> extra) {
+        Set<UUID> ids = new LinkedHashSet<>();
         a.forEach(t -> ids.add(t.getVisitId()));
         b.forEach(t -> ids.add(t.getVisitId()));
         List<PetVisit> visits = new ArrayList<>(ids.isEmpty() ? List.of() : visitRepository.findWithPetByIdIn(ids));
@@ -125,7 +125,7 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
     }
 
     /** Mỗi phiếu thành một dòng hàng đợi: ca khám kèm số phiếu, mức ưu tiên, giờ gọi gần nhất (giữ thứ tự phiếu). */
-    private static List<VisitResponse> withTickets(List<QueueTicket> tickets, Map<Long, VisitResponse> byVisit) {
+    private static List<VisitResponse> withTickets(List<QueueTicket> tickets, Map<UUID, VisitResponse> byVisit) {
         return tickets.stream()
                 .filter(t -> byVisit.containsKey(t.getVisitId()))
                 .map(t -> byVisit.get(t.getVisitId()).withTicket(TicketInfo.of(t)))
