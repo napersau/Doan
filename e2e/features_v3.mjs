@@ -286,7 +286,7 @@ async function main() {
   check('ca cấp cứu có phiếu ngay (vào danh sách chờ phân công dù chưa nộp phí)', board0.unassigned.some((v) => v.id === vb.id && v.ticket?.priority === 2));
   await payExam(va.id);
   const board = (await call('GET', `${CLIN}/pet-visits/queue`, { token: T.rec })).data;
-  check('nộp phí khám → có phiếu, vào danh sách chờ phân công; có gợi ý bác sĩ', board.unassigned.some((v) => v.id === va.id && v.ticket?.ticketNo > 0) && board.suggestedDoctorId > 0);
+  check('nộp phí khám → có phiếu, vào danh sách chờ phân công; có gợi ý bác sĩ', board.unassigned.some((v) => v.id === va.id && v.ticket?.ticketNo > 0) && Boolean(board.suggestedDoctorId));   // id là UUID (chuỗi): không so sánh với số
   check('lễ tân xếp ca cho bác sĩ bất kỳ, kể cả đang khám ca khác (Q2)', (await call('POST', `${CLIN}/pet-visits/${va.id}/assign-doctor`, { token: T.rec, body: { doctorId: DOC3 } })).data?.doctorId === DOC3);
   const ticketBefore = (await myQueue(T.doc3)).find((v) => v.id === va.id)?.ticket;
   await call('POST', `${CLIN}/pet-visits/${va.id}/assign-doctor`, { token: T.rec, body: { doctorId: DOC4 } });

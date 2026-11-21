@@ -57,6 +57,7 @@ public class User {
     @Builder.Default
     private UserStatus status = UserStatus.ACTIVE;
 
+    /** Mốc đăng nhập gần nhất; ghi bằng {@code UserRepository.touchLastLogin} (không qua entity), xem lý do ở đó. */
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 

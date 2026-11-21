@@ -10,9 +10,11 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -47,4 +49,14 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     Page<User> findAll(Specification<User> spec, Pageable pageable);
 
     boolean existsByUsername(String username);
+
+    /**
+     * Ghi mốc đăng nhập bằng một câu UPDATE chạy NGAY ĐẦU giao dịch đăng nhập. Nếu để entity dirty và ghi lúc commit thì Hibernate chèn
+     * {@code refresh_tokens} trước (khóa chia sẻ trên dòng users qua khóa ngoại) rồi mới UPDATE users (cần khóa độc quyền): hai lần đăng
+     * nhập đồng thời của cùng một tài khoản khóa chéo nhau → deadlock → 409 {@code SYS_1005}. UPDATE trước thì các giao dịch xếp hàng
+     * tuần tự trên dòng users. Không đổi {@code version} (đây không phải thay đổi nghiệp vụ).
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("update User u set u.lastLoginAt = :at where u.id = :id")
+    int touchLastLogin(@Param("id") UUID id, @Param("at") Instant at);
 }

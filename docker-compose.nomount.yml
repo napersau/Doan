@@ -1,0 +1,16 @@
+# Override cho máy mà Docker Desktop (Windows) không bind-mount được thư mục máy chủ:
+#   docker compose -f docker-compose.yml -f docker-compose.nomount.yml up -d --build
+# - MySQL: dựng image có sẵn db/schema_current.sql + db/seed_current.sql (thay cho 2 bind-mount ./db/...)
+# - clinical-service: bỏ bind-mount ảnh CĐHA mẫu ./docs/demo-images (dữ liệu demo v4 không có bản ghi ảnh mẫu)
+# Sửa db/*.sql thì phải: docker compose -f docker-compose.yml -f docker-compose.nomount.yml down -v rồi up --build lại.
+services:
+  mysql-server:
+    image: vetclinic-mysql-seeded:local
+    build:
+      context: ./db
+      dockerfile: Dockerfile.mysql
+    volumes: !override
+      - mysql-data:/var/lib/mysql
+  clinical-service:
+    volumes: !override
+      - imaging-data:/app/uploads/imaging

@@ -36,6 +36,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -84,7 +85,8 @@ class AuthServiceImplTest {
         assertThat(response.user().role()).isEqualTo(RoleCode.ADMIN);
         assertThat(response.user().roles()).containsExactly(RoleCode.ADMIN);
         assertThat(response.user().id()).isEqualTo(USER_ID);
-        assertThat(user.getLastLoginAt()).isNotNull();
+        // Mốc đăng nhập ghi bằng UPDATE ngay đầu giao dịch (tránh deadlock khi đăng nhập đồng thời), không qua entity
+        verify(userRepository).touchLastLogin(eq(USER_ID), any(java.time.Instant.class));
 
         ArgumentCaptor<RefreshToken> saved = ArgumentCaptor.forClass(RefreshToken.class);
         verify(refreshTokenRepository).save(saved.capture());

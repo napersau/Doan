@@ -1,0 +1,5 @@
+# MySQL kèm sẵn script khởi tạo (lược đồ + dữ liệu demo), dùng với docker-compose.nomount.yml khi Docker Desktop (Windows) bị lỗi
+# bind-mount thư mục máy chủ ("error while creating mount source path ... file exists"). Script chỉ chạy khi volume dữ liệu còn trống.
+FROM mysql:8.0
+COPY schema_current.sql /docker-entrypoint-initdb.d/01-schema_init.sql
+COPY seed_current.sql /docker-entrypoint-initdb.d/02-seed_demo_data.sql

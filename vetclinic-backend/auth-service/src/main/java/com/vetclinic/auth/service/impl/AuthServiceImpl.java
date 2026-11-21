@@ -76,7 +76,7 @@ public class AuthServiceImpl implements AuthService {
         AccountRules.assertUsable(user);
         loginAttemptService.reset(username);
 
-        user.setLastLoginAt(Instant.now());
+        userRepository.touchLastLogin(user.getId(), Instant.now());   // đầu giao dịch: tránh deadlock khi đăng nhập đồng thời
         String refreshToken = issueRefreshToken(user);
         log.info("Đăng nhập thành công: userId={}, roles={}", user.getId(), UserMapper.rolesOf(user));
         return new AuthResponse(

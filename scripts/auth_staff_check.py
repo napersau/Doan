@@ -83,6 +83,12 @@ rec_token = res["data"]["accessToken"]
 phone = "097" + SUFFIX
 room = "T" + SUFFIX[-4:]
 
+# --- đăng nhập đồng thời cùng một tài khoản (hai thiết bị): không được xung đột khóa lạc quan
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(max_workers=8) as pool:
+    results = list(pool.map(lambda _: login("admin")[0], range(8)))
+check("8 lần đăng nhập đồng thời của admin đều 200 (last_login_at không bump @Version)", results == [200] * 8, results)
+
 # --- tạo nhân sự
 st, res = call("POST", "/api/v1/staff", admin, staff_body(phone, ["VETERINARIAN"], room))
 check("Bác sĩ thiếu hồ sơ chuyên môn -> 400 AUTH_1108", st == 400 and res.get("errorCode") == "AUTH_1108", (st, res))
