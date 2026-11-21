@@ -31,6 +31,11 @@ spring:
           batch_size: 50
         order_inserts: true
         order_updates: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 1s     # lỗi / quá hạn -> CLIN_1318 (QUEUE_UNAVAILABLE); MySQL vẫn là nguồn sự thật nên giao dịch tiền không phụ thuộc Redis
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -70,6 +75,9 @@ management:
     health:
       probes:
         enabled: true
+  health:
+    redis:
+      enabled: false   # Redis chết không được làm container clinical "unhealthy" (EX-18: vẫn thu tiền được); lỗi báo CLIN_1318 lúc dùng
 
 vetclinic:
   clinic:

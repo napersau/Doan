@@ -83,6 +83,21 @@ services:
       <<: *healthcheck-timing
     networks: [vetclinic-net]
 
+  # Hàng đợi phiếu xếp hàng (Quy chuẩn v4.0 mục 9.3): chỉ clinical-service nối, không publish port ra máy host.
+  # AOF everysec: mất tối đa ~1 giây phiếu khi Redis sập; mất hẳn dữ liệu thì QueueRebuildJob dựng lại từ MySQL (bước 6.3).
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [vetclinic-net]
+
   mailpit:
     image: axllent/mailpit:v1.21
     restart: unless-stopped
@@ -176,9 +191,14 @@ services:
       # Thư mục gốc của kho tệp (file_key dạng imaging/yyyy/MM/<uuid>.jpg nằm dưới đây); khóa ký URL tạm: STORAGE_SECRET, mặc định dùng JWT_SECRET
       STORAGE_ROOT: /app/uploads
       STORAGE_SECRET: ${STORAGE_SECRET:-${JWT_SECRET}}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     volumes:
       - imaging-data:/app/uploads
-    depends_on: *depends-on-infra
+    depends_on:
+      <<: *depends-on-infra
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health"]
       <<: *healthcheck-timing
@@ -241,6 +261,7 @@ volumes:
   mysql-data:
   rabbitmq-data:
   imaging-data:
+  redis-data:
 
 networks:
   vetclinic-net:
