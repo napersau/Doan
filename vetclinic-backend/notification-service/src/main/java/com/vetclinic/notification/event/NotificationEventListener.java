@@ -8,6 +8,7 @@ import com.vetclinic.common.event.MedicineLowStockEvent;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.event.PatientCalledEvent;
 import com.vetclinic.common.event.QueueTicketIssuedEvent;
+import com.vetclinic.common.event.UserStatusChangedEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.security.RoleCode;
@@ -36,7 +37,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Biến 10 sự kiện nghiệp vụ trên RabbitMQ thành thông báo realtime (WebSocket) và email.
+ * Biến 11 sự kiện nghiệp vụ trên RabbitMQ thành thông báo realtime (WebSocket) và email.
  * Mỗi (sự kiện, kênh) chỉ chạy thành công một lần (ProcessedEvents), nên giao lại sự kiện hoặc thử lại sau khi một bước
  * lỗi không làm người dùng nhận trùng. Lỗi thật (SMTP, auth-service sập khi cần email) thì ném để RabbitMQ thử lại 3 lần
  * rồi đưa vào DLQ. Phần làm giàu nội dung (tên thú cưng, số phòng) lỗi thì bỏ qua, thông báo vẫn đi với nội dung rút gọn.
@@ -409,6 +410,31 @@ public class NotificationEventListener {
                         + ", ngưỡng cảnh báo " + event.minStockAlert() + ". Cần nhập thêm.",
                 data("medicineId", event.medicineId(), "medicineCode", event.medicineCode(),
                         "stockQuantity", event.stockQuantity(), "minStockAlert", event.minStockAlert()))));
+    }
+
+    // ================================================================== user.status_changed
+
+    /**
+     * Bác sĩ bị khóa / ngừng sử dụng thì Lễ tân phải phân công lại các phiếu đang chờ của bác sĩ đó; kích hoạt lại thì chỉ báo tin.
+     * Tài khoản không phải Bác sĩ không ảnh hưởng hàng đợi nên không báo.
+     */
+    @RabbitListener(queues = NotificationRabbitConfig.USER_STATUS_CHANGED_QUEUE)
+    public void onUserStatusChanged(UserStatusChangedEvent event) {
+        log.info("Nhận UserStatusChangedEvent: {} {} -> {}", event.userId(), event.fromStatus(), event.toStatus());
+        if (event.roles() == null || !event.roles().contains(RoleCode.VETERINARIAN.name())) {
+            return;
+        }
+        boolean reactivated = "ACTIVE".equals(event.toStatus());
+        String name = isBlank(event.fullName()) ? "Bác sĩ" : "Bác sĩ " + event.fullName();
+        String title = reactivated ? "Bác sĩ hoạt động trở lại" : "Bác sĩ không còn nhận ca";
+        String body = reactivated
+                ? name + " đã được kích hoạt lại và có thể nhận ca."
+                : name + " đã bị " + ("INACTIVE".equals(event.toStatus()) ? "ngừng hoạt động" : "khóa")
+                        + ". Hãy phân công lại các ca đang chờ của bác sĩ này.";
+        processed.runOnce("push:" + event.eventId(), () -> dispatcher.toRole(RoleCode.RECEPTIONIST, message(
+                NotificationType.USER_STATUS_CHANGED, reactivated ? Severity.INFO : Severity.WARNING, title, body,
+                data("userId", event.userId(), "fullName", event.fullName(),
+                        "fromStatus", event.fromStatus(), "toStatus", event.toStatus()))));
     }
 
     // ================================================================== helper

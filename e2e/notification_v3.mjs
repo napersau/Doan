@@ -90,6 +90,14 @@ async function main() {
   check('POST /notifications/send-email đã bỏ (404/405)', [404, 405].includes((await call('POST', `${NOTI}/send-email`, { token: T.admin, body: { to: 'a@b.c', subject: 'x', content: 'y' } })).status));
   check('không token → 401', (await call('GET', NOTI)).status === 401);
 
+  step('Tài khoản: Bác sĩ bị khóa → Lễ tân được báo phân công lại (UserStatusChangedEvent qua outbox)');
+  const docPhone = `096${String(Date.now()).slice(-7)}`;
+  const newDoc = await call('POST', '/api/v1/staff', { token: T.admin, body: { roleCodes: ['VETERINARIAN'], fullName: `BS Noti ${docPhone}`, phoneNumber: docPhone, password: 'Doctor@123', roomNumber: `N${docPhone.slice(-4)}`,
+    vetProfile: { licenseNumber: `NT-${docPhone}`, licenseIssuedDate: '2020-01-01', licenseIssuedBy: 'Cục Thú y', academicDegree: 'Bác sĩ thú y' } } });
+  check('tạo Bác sĩ thử để khóa', newDoc.status === 201, JSON.stringify(newDoc.data));
+  await call('POST', `/api/v1/users/${newDoc.data.id}/lock`, { token: T.admin });   // để Bác sĩ thử ở trạng thái khóa: không đổi sức chứa đặt lịch
+  await expectType('khóa Bác sĩ → lễ tân nhận USER_STATUS_CHANGED', T.rec, 'USER_STATUS_CHANGED', { contains: newDoc.data.id });
+
   step('Email (Mailpit, nếu truy cập được)');
   const mail = await fetch(`${MAILPIT}/api/v1/messages`).then((r) => r.json()).catch(() => null);
   if (!mail) console.log(`  (bỏ qua: không truy cập được Mailpit tại ${MAILPIT}; mở bằng docker-compose.dev.yml để kiểm tra email)`);

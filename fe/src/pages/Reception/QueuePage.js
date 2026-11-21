@@ -72,7 +72,7 @@ export default function QueuePage() {
   const board = useAsync(loadBoard, []);
   const [dialog, setDialog] = useState(null);
   const action = useAction();
-  useNotificationEvents(() => board.refresh(), ['VISIT_CHECKED_IN', 'TICKET_ISSUED', 'PATIENT_CALLED', 'RESULTS_READY', 'VISIT_COMPLETED']);
+  useNotificationEvents(() => board.refresh(), ['VISIT_CHECKED_IN', 'TICKET_ISSUED', 'PATIENT_CALLED', 'RESULTS_READY', 'VISIT_COMPLETED', 'USER_STATUS_CHANGED']);
   usePolling(board.refresh, 30000);
   const done = (text) => { setDialog(null); action.setNotice({ type: 'success', text }); board.refresh(); };
   const run = (fn, text) => action.run(fn, text).then((result) => { if (result) board.refresh(); });

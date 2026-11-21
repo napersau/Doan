@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Configuration;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Queue của notification-service: &lt;service&gt;.&lt;routing-key&gt;, bền vững, mỗi queue có DLQ; nghe 10 sự kiện (Kiến trúc §5.2, thêm queue.ticket_issued 17/11/2026). */
+/** Queue của notification-service: &lt;service&gt;.&lt;routing-key&gt;, bền vững, mỗi queue có DLQ; nghe 11 sự kiện (Kiến trúc §5.2, thêm queue.ticket_issued 17/11/2026 và user.status_changed ở v4.0). */
 @Configuration
 public class NotificationRabbitConfig {
 
@@ -31,6 +31,7 @@ public class NotificationRabbitConfig {
     public static final String MEDICINE_INVOICE_PAID_QUEUE = SERVICE_NAME + "." + EventRouting.PHARMACY_MEDICINE_INVOICE_PAID;
     public static final String LOW_STOCK_QUEUE = SERVICE_NAME + "." + EventRouting.PHARMACY_LOW_STOCK;
     public static final String TICKET_ISSUED_QUEUE = SERVICE_NAME + "." + EventRouting.QUEUE_TICKET_ISSUED;
+    public static final String USER_STATUS_CHANGED_QUEUE = SERVICE_NAME + "." + EventRouting.USER_STATUS_CHANGED;
 
     @Bean
     public Declarables notificationQueues(TopicExchange clinicEventsExchange, DirectExchange clinicEventsDeadLetterExchange) {
@@ -46,6 +47,7 @@ public class NotificationRabbitConfig {
                 {MEDICINE_INVOICE_PAID_QUEUE, EventRouting.PHARMACY_MEDICINE_INVOICE_PAID},
                 {LOW_STOCK_QUEUE, EventRouting.PHARMACY_LOW_STOCK},
                 {TICKET_ISSUED_QUEUE, EventRouting.QUEUE_TICKET_ISSUED},
+                {USER_STATUS_CHANGED_QUEUE, EventRouting.USER_STATUS_CHANGED},
         };
         for (String[] entry : queues) {
             String queueName = entry[0];

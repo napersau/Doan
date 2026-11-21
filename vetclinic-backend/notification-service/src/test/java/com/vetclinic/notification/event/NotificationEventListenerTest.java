@@ -8,6 +8,7 @@ import com.vetclinic.common.event.MedicineLowStockEvent;
 import com.vetclinic.common.event.ParaclinicalResultsReadyEvent;
 import com.vetclinic.common.event.PatientCalledEvent;
 import com.vetclinic.common.event.QueueTicketIssuedEvent;
+import com.vetclinic.common.event.UserStatusChangedEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.common.exception.AppException;
@@ -515,5 +516,56 @@ class NotificationEventListenerTest {
         assertThat(alert.severity()).isEqualTo(Severity.CRITICAL);
         assertThat(alert.body()).contains("Clavamox 250mg", "MED_AMOX", "chỉ còn 8", "ngưỡng cảnh báo 20");
         assertThat(alert.data()).containsEntry("medicineCode", "MED_AMOX").containsEntry("stockQuantity", 8);
+    }
+
+    // ================================================================== user.status_changed
+
+    private static UserStatusChangedEvent statusChanged(String from, String to, String... roles) {
+        return new UserStatusChangedEvent(UUID.randomUUID(), NOW, uid(1), DOCTOR, "Phạm Văn Mai", from, to, List.of(roles));
+    }
+
+    @Test
+    void lockedDoctor_warnsReceptionistsToReassignTheirWaitingCases() {
+        listener.onUserStatusChanged(statusChanged("ACTIVE", "LOCKED", "VETERINARIAN"));
+
+        NotificationMessage alert = captureRole(RoleCode.RECEPTIONIST);
+        assertThat(alert.type()).isEqualTo(NotificationType.USER_STATUS_CHANGED);
+        assertThat(alert.severity()).isEqualTo(Severity.WARNING);
+        assertThat(alert.body()).contains("Bác sĩ Phạm Văn Mai", "bị khóa", "phân công lại");
+        assertThat(alert.data()).containsEntry("toStatus", "LOCKED").containsEntry("userId", DOCTOR);
+        verify(dispatcher, never()).toRole(eq(RoleCode.ADMIN), any());
+    }
+
+    @Test
+    void deactivatedDoctor_isReportedAsStoppedWorking() {
+        listener.onUserStatusChanged(statusChanged("LOCKED", "INACTIVE", "VETERINARIAN", "ADMIN"));
+
+        assertThat(captureRole(RoleCode.RECEPTIONIST).body()).contains("ngừng hoạt động");
+    }
+
+    @Test
+    void reactivatedDoctor_isOnlyInformation() {
+        listener.onUserStatusChanged(statusChanged("LOCKED", "ACTIVE", "VETERINARIAN"));
+
+        NotificationMessage info = captureRole(RoleCode.RECEPTIONIST);
+        assertThat(info.severity()).isEqualTo(Severity.INFO);
+        assertThat(info.body()).contains("kích hoạt lại");
+    }
+
+    @Test
+    void nonDoctorAccounts_doNotAffectTheQueuesSoNobodyIsNotified() {
+        listener.onUserStatusChanged(statusChanged("ACTIVE", "LOCKED", "RECEPTIONIST"));
+
+        verifyNoInteractions(dispatcher);
+    }
+
+    @Test
+    void redeliveredStatusEvent_notifiesOnlyOnce() {
+        UserStatusChangedEvent event = statusChanged("ACTIVE", "LOCKED", "VETERINARIAN");
+
+        listener.onUserStatusChanged(event);
+        listener.onUserStatusChanged(event);
+
+        verify(dispatcher, times(1)).toRole(eq(RoleCode.RECEPTIONIST), any());
     }
 }
