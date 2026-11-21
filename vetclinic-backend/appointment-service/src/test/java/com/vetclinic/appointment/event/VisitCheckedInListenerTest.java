@@ -17,6 +17,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -26,6 +27,7 @@ import static org.mockito.Mockito.when;
 class VisitCheckedInListenerTest {
 
     private static final Instant NOW = Instant.parse("2026-11-20T03:00:00Z");
+    private static final UUID ACTOR = UUID.fromString("019a9442-d810-7000-8000-000000000005");
 
     private final AppointmentService appointmentService = mock(AppointmentService.class);
     private final ProcessedEventRepository processedRepository = mock(ProcessedEventRepository.class);
@@ -33,7 +35,7 @@ class VisitCheckedInListenerTest {
             new IdempotentConsumer(processedRepository, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     private static VisitCheckedInEvent event(UUID eventId, Long appointmentId) {
-        return new VisitCheckedInEvent(eventId, NOW, 5L, 42L, "VIS-2026-00042", 1L, appointmentId, false, 3L);
+        return new VisitCheckedInEvent(eventId, NOW, ACTOR, 42L, "VIS-2026-00042", 1L, appointmentId, false, UuidV7.generate());
     }
 
     @Test
@@ -42,7 +44,7 @@ class VisitCheckedInListenerTest {
 
         listener.onVisitCheckedIn(event(eventId, 9L));
 
-        verify(appointmentService).markCheckedIn(9L, 5L, "VIS-2026-00042");
+        verify(appointmentService).markCheckedIn(9L, ACTOR, "VIS-2026-00042");
         verify(processedRepository).saveAndFlush(any(ProcessedEvent.class));
     }
 
@@ -68,7 +70,7 @@ class VisitCheckedInListenerTest {
     @Test
     void aFailingTransitionIsNotRecorded_soRabbitMqRetryRunsItAgain() {
         UUID eventId = UuidV7.generate();
-        org.mockito.Mockito.doThrow(new IllegalStateException("db down")).when(appointmentService).markCheckedIn(9L, 5L, "VIS-2026-00042");
+        doThrow(new IllegalStateException("db down")).when(appointmentService).markCheckedIn(9L, ACTOR, "VIS-2026-00042");
 
         try {
             listener.onVisitCheckedIn(event(eventId, 9L));
@@ -77,6 +79,6 @@ class VisitCheckedInListenerTest {
         }
 
         verify(processedRepository, never()).saveAndFlush(any());
-        verify(appointmentService, times(1)).markCheckedIn(9L, 5L, "VIS-2026-00042");
+        verify(appointmentService, times(1)).markCheckedIn(9L, ACTOR, "VIS-2026-00042");
     }
 }

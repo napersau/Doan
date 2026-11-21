@@ -19,3 +19,9 @@ export const STAFF_ROLES = ['VETERINARIAN', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'I
 export const ROOM_ROLES = ['VETERINARIAN', 'LAB_TECHNICIAN', 'IMAGING_TECHNICIAN'];
 
 export const getRoleHome = (role) => ROLES[role]?.home || '/';
+
+/** Mọi vai trò của người dùng: `roles` (JWT v4.0 / API v4.0), lùi về `[role]` nếu dữ liệu cũ chỉ có `role`. */
+export const rolesOf = (user) => (Array.isArray(user?.roles) && user.roles.length ? user.roles : (user?.role ? [user.role] : []));
+
+/** Có ít nhất một trong các vai trò được phép (giao của hai tập khác rỗng). */
+export const hasAnyRole = (user, allowed) => rolesOf(user).some((role) => allowed.includes(role));

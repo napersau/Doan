@@ -33,6 +33,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.util.UUID;
 import java.util.List;
 import java.util.Optional;
 
@@ -93,9 +94,9 @@ class QueueTicketServiceImplTest {
         SecurityContextHolder.clearContext();
     }
 
-    private void stubRoom(long userId, RoleCode role, String room) {
+    private void stubRoom(UUID userId, RoleCode role, String room) {
         lenient().when(authClient.getUser(userId)).thenReturn(ApiResponse.success(
-                new UserSummaryResponse(userId, "User " + userId, "0900000000", role, room, "ACTIVE")));
+                new UserSummaryResponse(userId, "User " + userId, "0900000000", role, List.of(role), room, "ACTIVE")));
     }
 
     private PatientCalledEvent publishedCall() {

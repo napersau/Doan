@@ -20,6 +20,7 @@ import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.SecurityUtils;
+import java.util.UUID;
 import java.util.LinkedHashSet;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -63,12 +64,12 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
             throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
         }
         List<UserSummaryResponse> doctors = response.getData();
-        Set<Long> doctorIds = doctors.stream().map(UserSummaryResponse::id).collect(Collectors.toSet());
+        Set<UUID> doctorIds = doctors.stream().map(UserSummaryResponse::id).collect(Collectors.toSet());
 
         return readTx.execute(s -> {
             List<QueueTicket> unassigned = ticketRepository.findDoctorQueue(null);
             List<QueueTicket> assigned = doctorIds.isEmpty() ? List.of() : ticketRepository.findDoctorQueues(doctorIds);
-            Set<Long> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS));
+            Set<UUID> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS));
 
             // Mục "chờ thu phí khám": ca vừa tiếp đón chưa có phiếu DOCTOR (chưa nộp phí); không hiện ở hàng đợi Bác sĩ
             List<PetVisit> waitingVisits = visitRepository.findByStatusOrderByIdAsc(VisitStatus.WAITING);
@@ -80,7 +81,7 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
 
             Map<Long, VisitResponse> byVisit = visitsOf(unassigned, assigned, awaitingPayment);
             // groupingBy giữ nguyên thứ tự phiếu bên trong mỗi Bác sĩ
-            Map<Long, List<QueueTicket>> byDoctor = assigned.stream().collect(Collectors.groupingBy(QueueTicket::getDoctorId));
+            Map<UUID, List<QueueTicket>> byDoctor = assigned.stream().collect(Collectors.groupingBy(QueueTicket::getDoctorId));
 
             List<DoctorQueueResponse> queues = doctors.stream().map(d -> {
                 List<VisitResponse> visits = withTickets(byDoctor.getOrDefault(d.id(), List.of()), byVisit).stream()
@@ -95,7 +96,7 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
     }
 
     /** Gợi ý Bác sĩ ÍT PHIẾU CHỜ NHẤT; hòa thì ưu tiên Bác sĩ đang rảnh, rồi theo id. Chỉ là gợi ý, Lễ tân quyết định. */
-    static Long suggest(List<DoctorQueueResponse> queues) {
+    static UUID suggest(List<DoctorQueueResponse> queues) {
         return queues.stream()
                 .min(Comparator.comparingInt(DoctorQueueResponse::waitingCount)
                         .thenComparingInt(q -> q.status() == DoctorStatus.BUSY ? 1 : 0)
@@ -105,7 +106,7 @@ public class DoctorQueueServiceImpl implements DoctorQueueService {
 
     @Override
     public List<VisitResponse> myQueue() {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         return readTx.execute(s -> {
             List<QueueTicket> tickets = ticketRepository.findDoctorQueue(doctorId);
             return withTickets(tickets, visitsOf(tickets, List.of(), List.of()));

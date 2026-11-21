@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.UUID;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -66,7 +67,7 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
 
     @Override
     public PageResponse<MedicalHistoryEntry> history(Long petId, int page, int size) {
-        Long actorId = SecurityUtils.getCurrentUserId();
+        UUID actorId = SecurityUtils.getCurrentUserId();
         RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
         boolean owner = role == RoleCode.PET_OWNER;
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
@@ -86,7 +87,7 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
 
         List<Long> visitIds = visits.getContent().stream().map(VisitResponse::id).toList();
         Map<Long, PrescriptionSummary> prescriptions = prescriptionsOf(visitIds);
-        Map<Long, String> doctorNames = doctorNamesOf(visits.getContent().stream().map(VisitResponse::doctorId)
+        Map<UUID, String> doctorNames = doctorNamesOf(visits.getContent().stream().map(VisitResponse::doctorId)
                 .filter(Objects::nonNull).collect(Collectors.toSet()));
 
         return PageResponse.of(visits.getContent(), visits.getNumber(), visits.getSize(), visits.getTotalElements(),
@@ -108,7 +109,7 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
         }
     }
 
-    private Map<Long, String> doctorNamesOf(Set<Long> doctorIds) {
+    private Map<UUID, String> doctorNamesOf(Set<UUID> doctorIds) {
         if (doctorIds.isEmpty()) {
             return Map.of();
         }

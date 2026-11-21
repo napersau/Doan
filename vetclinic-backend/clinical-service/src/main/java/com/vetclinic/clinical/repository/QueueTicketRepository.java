@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.UUID;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -26,13 +27,13 @@ public interface QueueTicketRepository extends JpaRepository<QueueTicket, Long> 
             + "and t.status = com.vetclinic.clinical.constant.TicketStatus.WAITING "
             + "and ((:doctorId is null and t.doctorId is null) or t.doctorId = :doctorId) "
             + "order by t.priority desc, t.issuedAt asc, t.id asc")
-    List<QueueTicket> findDoctorQueue(@Param("doctorId") Long doctorId);
+    List<QueueTicket> findDoctorQueue(@Param("doctorId") UUID doctorId);
 
     /** Phiếu DOCTOR đang chờ của nhiều Bác sĩ (bảng điều phối); nhóm theo doctorId ở tầng ứng dụng, giữ thứ tự. */
     @Query("select t from QueueTicket t where t.queueType = com.vetclinic.clinical.constant.QueueType.DOCTOR "
             + "and t.status = com.vetclinic.clinical.constant.TicketStatus.WAITING and t.doctorId in :doctorIds "
             + "order by t.priority desc, t.issuedAt asc, t.id asc")
-    List<QueueTicket> findDoctorQueues(@Param("doctorIds") Collection<Long> doctorIds);
+    List<QueueTicket> findDoctorQueues(@Param("doctorIds") Collection<UUID> doctorIds);
 
     /** Hàng đợi phòng Xét nghiệm / CĐHA: phiếu ở các trạng thái cho trước (chờ gọi, đang làm). */
     @Query("select t from QueueTicket t where t.queueType = :type and t.status in :statuses "

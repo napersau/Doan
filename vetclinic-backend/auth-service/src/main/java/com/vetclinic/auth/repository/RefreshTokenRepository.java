@@ -9,12 +9,15 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
 
-    @Query("select rt from RefreshToken rt join fetch rt.user u join fetch u.role where rt.token = :token")
-    Optional<RefreshToken> findByTokenWithUser(@Param("token") String token);
+    /** Tra theo giá trị BĂM SHA-256 của token (CSDL không lưu token gốc). */
+    @Query("select rt from RefreshToken rt join fetch rt.user u join fetch u.roles "
+            + "left join fetch u.profile left join fetch u.staffProfile where rt.tokenHash = :hash")
+    Optional<RefreshToken> findByTokenHashWithUser(@Param("hash") String hash);
 
     /**
      * Thu hồi nguyên tử: chỉ một request thắng khi hai request cùng dùng một token.
@@ -25,13 +28,13 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     int revokeIfActive(@Param("id") Long id);
 
     @Modifying
-    @Query("update RefreshToken rt set rt.revoked = true where rt.token = :token and rt.revoked = false")
-    int revokeByToken(@Param("token") String token);
+    @Query("update RefreshToken rt set rt.revoked = true where rt.tokenHash = :hash and rt.revoked = false")
+    int revokeByTokenHash(@Param("hash") String hash);
 
     /** Force logout mọi thiết bị: phát hiện đánh cắp token, đổi mật khẩu, khóa tài khoản. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update RefreshToken rt set rt.revoked = true where rt.user.id = :userId and rt.revoked = false")
-    int revokeAllUserTokens(@Param("userId") Long userId);
+    int revokeAllUserTokens(@Param("userId") UUID userId);
 
     @Modifying
     @Query("delete from RefreshToken rt where rt.expiryDate < :cutoff")

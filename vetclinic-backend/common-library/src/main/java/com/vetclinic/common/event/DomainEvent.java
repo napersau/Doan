@@ -14,7 +14,7 @@ public interface DomainEvent extends BaseEvent {
 
     Instant occurredAt();
 
-    Long actorUserId();
+    UUID actorUserId();
 
     String routingKey();
 }

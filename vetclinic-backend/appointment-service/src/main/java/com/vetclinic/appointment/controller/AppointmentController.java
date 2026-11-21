@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.UUID;
 import java.util.List;
 
 @RestController
@@ -65,7 +66,7 @@ public class AppointmentController {
     @GetMapping
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<AppointmentResponse>>> search(
-            @RequestParam(required = false) Long ownerId,
+            @RequestParam(required = false) UUID ownerId,
             @RequestParam(required = false) Long petId,
             @RequestParam(required = false) String code,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,

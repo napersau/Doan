@@ -12,10 +12,10 @@ import java.util.UUID;
 public record AppointmentBookedEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,
+        UUID actorUserId,
         Long appointmentId,
         String appointmentCode,
-        Long ownerId,            // lấy từ pets.owner_id qua clinical-service (appointments không còn cột owner_id)
+        UUID ownerId,            // lấy từ pets.owner_id qua clinical-service (appointments không còn cột owner_id)
         Long petId,
         LocalDate appointmentDate,
         LocalTime startTime,

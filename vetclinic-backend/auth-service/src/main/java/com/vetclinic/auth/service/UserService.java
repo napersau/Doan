@@ -12,6 +12,7 @@ import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.security.RoleCode;
 
 import java.util.List;
+import java.util.UUID;
 
 public interface UserService {
 
@@ -31,31 +32,34 @@ public interface UserService {
 
     PageResponse<UserResponse> search(RoleCode role, UserStatus status, String keyword, int page, int size);
 
-    UserResponse getById(Long id);
+    UserResponse getById(UUID id);
 
-    UserResponse update(Long id, UpdateUserRequest request);
+    UserResponse update(UUID id, UpdateUserRequest request);
 
     /**
      * Admin đổi vai trò giữa các vai trò nhân sự (không tự đổi vai trò của mình, không đổi từ/sang PET_OWNER). Thu hồi mọi
      * Refresh Token để phiên sau mang vai trò mới; số phòng bị xóa nếu vai trò mới không có phòng cố định.
      */
-    UserResponse changeRole(Long id, RoleCode role);
+    UserResponse changeRole(UUID id, RoleCode role);
 
     /**
      * Đặt lại mật khẩu (quên mật khẩu): Admin cho mọi tài khoản trừ chính mình, Lễ tân chỉ cho chủ nuôi. Thu hồi mọi Refresh
      * Token. Người dùng tự đổi mật khẩu của mình bằng change-password.
      */
-    void resetPassword(Long id, String newPassword);
+    void resetPassword(UUID id, String newPassword);
 
     /** Khóa / ngừng hoạt động sẽ thu hồi mọi Refresh Token của tài khoản. */
-    UserResponse changeStatus(Long id, UserStatus status);
+    UserResponse changeStatus(UUID id, UserStatus status);
 
     List<UserSummaryResponse> getActiveDoctors();
 
-    // --- Dùng cho các service khác qua /internal ---
-    UserSummaryResponse getSummary(Long id);
+    /** Bác sĩ (có vai trò VETERINARIAN) theo trạng thái tài khoản, xếp theo họ tên. */
+    List<UserSummaryResponse> getDoctors(UserStatus status);
 
-    List<UserSummaryResponse> getSummaries(List<Long> ids);
+    // --- Dùng cho các service khác qua /internal ---
+    UserSummaryResponse getSummary(UUID id);
+
+    List<UserSummaryResponse> getSummaries(List<UUID> ids);
 
     long countActiveDoctors();
 }

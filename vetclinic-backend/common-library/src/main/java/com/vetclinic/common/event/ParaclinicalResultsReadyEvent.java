@@ -11,10 +11,10 @@ import java.util.UUID;
 public record ParaclinicalResultsReadyEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,        // luôn null: hệ thống tự chuyển trạng thái
+        UUID actorUserId,        // luôn null: hệ thống tự chuyển trạng thái
         Long visitId,
         String visitCode,
-        Long doctorId,
+        UUID doctorId,
         Long petId
 ) implements DomainEvent {
 

@@ -114,7 +114,7 @@ public class VisitServiceImpl implements VisitService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    private record Actor(Long id, RoleCode role) {
+    private record Actor(UUID id, RoleCode role) {
     }
 
     // ================================================================== tiếp nhận (UC-19) và hàng đợi (UC-20)
@@ -131,7 +131,7 @@ public class VisitServiceImpl implements VisitService {
         Long appointmentId = request.appointmentId();
         String symptoms = blankToNull(request.initialSymptoms());
         // Bác sĩ chọn ngay khi tiếp nhận (tùy chọn): kiểm tra qua Feign NGOÀI transaction
-        Long doctorId = request.doctorId() == null ? null : fetchActiveDoctor(request.doctorId()).id();
+        UUID doctorId = request.doctorId() == null ? null : fetchActiveDoctor(request.doctorId()).id();
 
         if (appointmentId != null) {
             if (visitRepository.existsByAppointmentId(appointmentId)) {
@@ -176,8 +176,8 @@ public class VisitServiceImpl implements VisitService {
         });
     }
 
-    private VisitResponse createVisit(Long receptionistId, Long petId, Long appointmentId, String symptoms,
-                                      boolean emergency, Long doctorId) {
+    private VisitResponse createVisit(UUID receptionistId, Long petId, Long appointmentId, String symptoms,
+                                      boolean emergency, UUID doctorId) {
         Pet pet = petRepository.findWithSpeciesById(petId)
                 .orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
         if (visitRepository.existsByPetIdAndStatusIn(petId, VisitStatus.ACTIVE)) {
@@ -225,7 +225,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<VisitResponse> search(VisitStatus status, LocalDate date,
-            Long doctorId, Long petId, String keyword, int page, int size) {
+            UUID doctorId, Long petId, String keyword, int page, int size) {
         Specification<PetVisit> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
@@ -321,7 +321,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional
     public VisitResponse startExam(Long id, StartExamRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
         support.assertStatus(visit, VisitStatus.WAITING,
@@ -354,7 +354,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional
     public VisitResponse updateClinicalInfo(Long id, ClinicalInfoRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
         support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ cập nhật được thông tin lâm sàng khi ca đang khám (IN_PROGRESS)");
@@ -378,7 +378,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional
     public VisitResponse orderParaclinical(Long id, ParaclinicalOrderRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         List<Long> serviceIds = request.serviceIds().stream().distinct().toList();
         List<ClinicService> services = loadActiveServices(serviceIds);
         if (services.stream().anyMatch(s -> !s.getCategory().isParaclinical())) {
@@ -424,7 +424,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional
     public VisitResponse orderInRoomServices(Long id, OrderServicesRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         List<Long> serviceIds = request.services().stream().map(ServiceOrderItem::serviceId).distinct().toList();
         Map<Long, ClinicService> found = loadActiveServices(serviceIds).stream()
                 .collect(Collectors.toMap(ClinicService::getId, Function.identity()));
@@ -457,7 +457,7 @@ public class VisitServiceImpl implements VisitService {
      * Tạo dòng chỉ định + HÓA ĐƠN RIÊNG của nó trong cùng giao dịch (BR-19, FR-32). Đơn giá / VAT được snapshot vào hóa đơn
      * (BR-25), visit_service_details không chứa giá. Dịch vụ XN / CĐHA vào hàng đợi phòng khi thu tiền xong (queue_ticket_items).
      */
-    private VisitServiceDetail createDetail(Long visitId, ClinicService service, int quantity, String notes, Long actorId,
+    private VisitServiceDetail createDetail(Long visitId, ClinicService service, int quantity, String notes, UUID actorId,
                                             ServiceDetailStatus status) {
         VisitServiceDetail detail = detailRepository.saveAndFlush(VisitServiceDetail.builder()
                 .visitId(visitId)
@@ -476,7 +476,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional
     public VisitResponse startPhase2(Long id) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
         support.assertStatus(visit, VisitStatus.RESULTS_READY,
@@ -494,7 +494,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional
     public VisitResponse closeVisit(Long id, CloseVisitRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         String diagnosis = blankToNull(request.diagnosis());
         // EX-12: chặn chốt ca khi chưa có chẩn đoán xác định
         if (diagnosis == null) {
@@ -532,7 +532,7 @@ public class VisitServiceImpl implements VisitService {
     @Override
     @Transactional
     public VisitResponse cancelExam(Long id, ReasonRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         PetVisit visit = support.lock(id);
         support.assertAssignedTo(visit, doctorId);
         support.assertStatus(visit, VisitStatus.IN_PROGRESS, "Chỉ hủy ca / chuyển viện được khi ca đang khám (IN_PROGRESS)");
@@ -558,7 +558,7 @@ public class VisitServiceImpl implements VisitService {
      * -> CANCELLED, đã thu -> giữ PAID (khách tự bỏ, không hoàn). {@code includeExam = false} thì chỉ hủy dịch vụ cận lâm sàng
      * (khách bỏ về: dịch vụ khám và dịch vụ tại phòng đã làm giữ nguyên, hóa đơn chưa thu làm công nợ).
      */
-    private void cancelOpenDetails(Long visitId, Long actorId, String reason, boolean includeExam) {
+    private void cancelOpenDetails(Long visitId, UUID actorId, String reason, boolean includeExam) {
         for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
             if (!ServiceDetailStatus.OPEN.contains(detail.getStatus())) {
                 continue;
@@ -587,7 +587,7 @@ public class VisitServiceImpl implements VisitService {
             support.assertAssignedTo(visit, actor.id());
         }
         support.assertStatus(visit, VisitStatus.WAITING_PAYMENT, "Chỉ mở lại được ca đang chờ thanh toán (WAITING_PAYMENT)");
-        Long doctorId = visit.getDoctorId();
+        UUID doctorId = visit.getDoctorId();
         // Bác sĩ phụ trách đang khám ca khác thì chưa mở lại được (BR-12)
         if (doctorId == null || visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)) {
             throw new AppException(ErrorCode.DOCTOR_NOT_AVAILABLE, "Bác sĩ phụ trách đang bận ca khác, hãy mở lại khi bác sĩ rảnh");
@@ -676,13 +676,13 @@ public class VisitServiceImpl implements VisitService {
 
     // ================================================================== helper
 
-    private UserSummaryResponse fetchActiveDoctor(Long doctorId) {
+    private UserSummaryResponse fetchActiveDoctor(UUID doctorId) {
         ApiResponse<UserSummaryResponse> response = authClient.getUser(doctorId);
         UserSummaryResponse doctor = response == null ? null : response.getData();
         if (doctor == null) {
             throw new AppException(ErrorCode.USER_NOT_FOUND);
         }
-        if (doctor.role() != RoleCode.VETERINARIAN || !"ACTIVE".equals(doctor.status())) {
+        if (!doctor.roles().contains(RoleCode.VETERINARIAN) || !"ACTIVE".equals(doctor.status())) {
             throw new AppException(ErrorCode.DOCTOR_INACTIVE);
         }
         return doctor;

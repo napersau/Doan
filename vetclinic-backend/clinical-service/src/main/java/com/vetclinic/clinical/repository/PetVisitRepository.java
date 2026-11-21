@@ -14,6 +14,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.UUID;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -54,7 +55,7 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
     @EntityGraph(attributePaths = {"pet", "pet.species"})
     @Query("select v from PetVisit v where v.doctorId = :doctorId and v.status in :statuses "
             + "order by case when v.emergency = true then 0 else 1 end asc, v.checkedInAt asc, v.id asc")
-    List<PetVisit> findDoctorVisits(@Param("doctorId") Long doctorId, @Param("statuses") Collection<VisitStatus> statuses);
+    List<PetVisit> findDoctorVisits(@Param("doctorId") UUID doctorId, @Param("statuses") Collection<VisitStatus> statuses);
 
     /**
      * Cân nặng gần nhất của mỗi thú cưng = weight_at_visit của đợt khám gần nhất có cân (pets không còn cột weight).
@@ -89,11 +90,11 @@ public interface PetVisitRepository extends JpaRepository<PetVisit, Long>, JpaSp
 
     boolean existsByAppointmentId(Long appointmentId);
 
-    boolean existsByDoctorIdAndStatus(Long doctorId, VisitStatus status);
+    boolean existsByDoctorIdAndStatus(UUID doctorId, VisitStatus status);
 
     // ---- Trạng thái Bác sĩ (tính động): chỉ cần biết bác sĩ nào đang ở tình trạng nào
     @Query("select distinct v.doctorId from PetVisit v where v.doctorId is not null and v.status in :statuses")
-    Set<Long> findDoctorIdsWithStatusIn(@Param("statuses") Collection<VisitStatus> statuses);
+    Set<UUID> findDoctorIdsWithStatusIn(@Param("statuses") Collection<VisitStatus> statuses);
 
     /** Ca theo trạng thái, cũ nhất trước (màn hình Thu ngân). */
     @EntityGraph(attributePaths = {"pet", "pet.species"})

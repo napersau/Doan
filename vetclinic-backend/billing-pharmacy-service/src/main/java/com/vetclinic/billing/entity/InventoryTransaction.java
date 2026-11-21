@@ -1,5 +1,6 @@
 package com.vetclinic.billing.entity;
 
+import java.util.UUID;
 import com.vetclinic.billing.constant.InventoryTransactionType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -45,7 +46,7 @@ public class InventoryTransaction {
     private String notes;
 
     @Column(name = "created_by", nullable = false)
-    private Long createdBy;
+    private UUID createdBy;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

@@ -68,11 +68,14 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.UUID;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
+import static com.vetclinic.clinical.testsupport.TestData.OWNER;
 import static com.vetclinic.clinical.testsupport.TestData.OTHER_DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
@@ -96,7 +99,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class VisitServiceImplTest {
 
-    private static final long ADMIN_ID = 1L;
+    private static final UUID ADMIN_ID = uid(1);
     private static final ClinicService EXAM_SVC = service(1L, "EXAM_GEN", ServiceCategory.EXAMINATION, "100000.00");
 
     @Mock
@@ -216,7 +219,7 @@ class VisitServiceImplTest {
     private PetVisit checkInWithSlot(LocalTime start, LocalTime end) {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
         when(appointmentClient.getAppointment(7L)).thenReturn(ApiResponse.success(new AppointmentSummaryResponse(7L,
-                "APT-20261030-00007", 11L, 5L, LocalDate.of(2026, 10, 30), start, end, "Khám", "CONFIRMED")));
+                "APT-20261030-00007", 11L, OWNER, LocalDate.of(2026, 10, 30), start, end, "Khám", "CONFIRMED")));
         when(petRepository.findWithSpeciesById(11L)).thenReturn(Optional.of(pet(11L, dog())));
         stubSaveVisit();
 
@@ -408,20 +411,20 @@ class VisitServiceImplTest {
     @Test
     void checkIn_withAnInvalidDoctor_isRefusedBeforeAnythingIsSaved() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        stubDoctor(30L, RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
+        stubDoctor(uid(30), RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
 
-        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.checkIn(new CheckInRequest(11L, null, null, false, 30L)));
+        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.checkIn(new CheckInRequest(11L, null, null, false, uid(30))));
         verify(visitRepository, never()).saveAndFlush(any());
     }
 
     @Test
     void assignDoctor_requiresAnActiveVeterinarian() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        stubDoctor(30L, RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
-        stubDoctor(31L, RoleCode.VETERINARIAN, "LOCKED", "P03");
+        stubDoctor(uid(30), RoleCode.LAB_TECHNICIAN, "ACTIVE", null);
+        stubDoctor(uid(31), RoleCode.VETERINARIAN, "LOCKED", "P03");
 
-        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.assignDoctor(100L, new AssignDoctorRequest(30L)));
-        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.assignDoctor(100L, new AssignDoctorRequest(31L)));
+        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.assignDoctor(100L, new AssignDoctorRequest(uid(30))));
+        assertError(ErrorCode.DOCTOR_INACTIVE, () -> service.assignDoctor(100L, new AssignDoctorRequest(uid(31))));
         verify(lockService, never()).runLocked(anyCollection(), any());
     }
 
@@ -990,13 +993,13 @@ class VisitServiceImplTest {
         assertThat(pageable.getValue().getSort().getOrderFor("id").isDescending()).isTrue();
     }
 
-    private void stubDoctor(long id, RoleCode role, String status, String room) {
+    private void stubDoctor(UUID id, RoleCode role, String status, String room) {
         when(authClient.getUser(id)).thenReturn(ApiResponse.success(
-                new UserSummaryResponse(id, "BS " + id, "0911111111", role, room, status)));
+                new UserSummaryResponse(id, "BS " + id, "0911111111", role, List.of(role), room, status)));
     }
 
     private static AppointmentSummaryResponse appointment(String status, LocalDate date, Long petId) {
-        return new AppointmentSummaryResponse(7L, "APT-20261030-00007", petId, 5L, date, null, null, "Khám tổng quát", status);
+        return new AppointmentSummaryResponse(7L, "APT-20261030-00007", petId, OWNER, date, null, null, "Khám tổng quát", status);
     }
 
     private PetVisitStatusHistory lastHistory() {

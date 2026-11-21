@@ -1,9 +1,11 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
+
 /** Cho appointment-service kiểm tra thú cưng tồn tại và đúng chủ nuôi. */
 public record PetSummaryResponse(
         Long id,
-        Long ownerId,
+        UUID ownerId,
         String name
 ) {
 }

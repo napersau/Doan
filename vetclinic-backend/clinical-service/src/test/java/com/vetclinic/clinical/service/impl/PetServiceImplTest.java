@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -60,22 +61,22 @@ class PetServiceImplTest {
 
     @Test
     void getSummariesByOwner_returnsOnlyThatOwnersPets() {
-        when(petRepository.findByOwnerId(8L)).thenReturn(List.of(
-                Pet.builder().id(1L).ownerId(8L).name("Lu").build(),
-                Pet.builder().id(2L).ownerId(8L).name("Milo").build()));
+        when(petRepository.findByOwnerId(uid(8))).thenReturn(List.of(
+                Pet.builder().id(1L).ownerId(uid(8)).name("Lu").build(),
+                Pet.builder().id(2L).ownerId(uid(8)).name("Milo").build()));
 
-        List<PetSummaryResponse> result = service().getSummariesByOwner(8L);
+        List<PetSummaryResponse> result = service().getSummariesByOwner(uid(8));
 
         assertThat(result).extracting(PetSummaryResponse::id).containsExactly(1L, 2L);
-        assertThat(result).extracting(PetSummaryResponse::ownerId).containsOnly(8L);
+        assertThat(result).extracting(PetSummaryResponse::ownerId).containsOnly(uid(8));
         assertThat(result).extracting(PetSummaryResponse::name).containsExactly("Lu", "Milo");
     }
 
     @Test
     void getSummariesByOwner_ownerWithoutPets_returnsEmptyList() {
-        when(petRepository.findByOwnerId(9L)).thenReturn(List.of());
+        when(petRepository.findByOwnerId(uid(9))).thenReturn(List.of());
 
-        assertThat(service().getSummariesByOwner(9L)).isEmpty();
+        assertThat(service().getSummariesByOwner(uid(9))).isEmpty();
     }
 
     @Test

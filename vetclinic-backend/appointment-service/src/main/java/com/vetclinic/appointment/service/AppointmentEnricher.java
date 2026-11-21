@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -50,14 +51,14 @@ public class AppointmentEnricher {
             return appointments;
         }
         Map<Long, PetSummaryResponse> pets = pets(appointments.stream().map(AppointmentResponse::petId).collect(Collectors.toSet()));
-        Map<Long, UserSummaryResponse> owners = owners(pets.values().stream()
+        Map<UUID, UserSummaryResponse> owners = owners(pets.values().stream()
                 .map(PetSummaryResponse::ownerId).filter(Objects::nonNull).collect(Collectors.toSet()));
         Map<Long, List<AppointmentStatusHistory>> histories = histories(
                 appointments.stream().map(AppointmentResponse::id).collect(Collectors.toSet()));
 
         return appointments.stream().map(a -> {
             PetSummaryResponse pet = pets.get(a.petId());
-            Long ownerId = pet == null ? null : pet.ownerId();
+            UUID ownerId = pet == null ? null : pet.ownerId();
             UserSummaryResponse owner = ownerId == null ? null : owners.get(ownerId);
             AppointmentResponse result = a.withOwnerId(ownerId)
                     .withNames(pet == null ? null : pet.name(), owner == null ? null : owner.fullName(),
@@ -113,7 +114,7 @@ public class AppointmentEnricher {
         }
     }
 
-    private Map<Long, UserSummaryResponse> owners(Set<Long> ids) {
+    private Map<UUID, UserSummaryResponse> owners(Set<UUID> ids) {
         if (ids.isEmpty()) {
             return Map.of();
         }

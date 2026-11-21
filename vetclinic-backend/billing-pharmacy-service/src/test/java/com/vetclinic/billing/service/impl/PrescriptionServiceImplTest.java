@@ -29,6 +29,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.billing.testsupport.TestData.uid;
 import static com.vetclinic.billing.testsupport.TestData.DOCTOR;
 import static com.vetclinic.billing.testsupport.TestData.OTHER_DOCTOR;
 import static com.vetclinic.billing.testsupport.TestData.OWNER;
@@ -257,7 +258,7 @@ class PrescriptionServiceImplTest {
         loginAs(OWNER, RoleCode.PET_OWNER);
         assertThat(service.getById(3L).petName()).isEqualTo("Lu");
 
-        loginAs(OWNER + 1, RoleCode.PET_OWNER);
+        loginAs(uid(6), RoleCode.PET_OWNER);
         assertError(ErrorCode.PRESCRIPTION_NOT_FOUND, () -> service.getById(3L));
     }
 

@@ -26,6 +26,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -34,14 +35,19 @@ public final class TestData {
     /** 2026-10-30 09:00 giờ Việt Nam. */
     public static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-30T02:00:00Z"), ZoneId.of("Asia/Ho_Chi_Minh"));
 
-    public static final long OWNER = 5L;
-    public static final long RECEPTIONIST = 9L;
-    public static final long DOCTOR = 21L;
-    public static final long OTHER_DOCTOR = 22L;
-    public static final long LAB_TECH = 31L;
-    public static final long IMAGING_TECH = 41L;
+    public static final UUID OWNER = uid(5);
+    public static final UUID RECEPTIONIST = uid(9);
+    public static final UUID DOCTOR = uid(21);
+    public static final UUID OTHER_DOCTOR = uid(22);
+    public static final UUID LAB_TECH = uid(31);
+    public static final UUID IMAGING_TECH = uid(41);
 
     private TestData() {
+    }
+
+    /** UUID demo cố định, cùng dạng với dữ liệu seed (019a9442-d810-7000-8000-0000000000NN). */
+    public static UUID uid(long n) {
+        return UUID.fromString(String.format("019a9442-d810-7000-8000-%012d", n));
     }
 
     public static Species dog() {
@@ -57,7 +63,7 @@ public final class TestData {
                 .gender(PetGender.MALE).build();
     }
 
-    public static PetVisit visit(long id, VisitStatus status, Long doctorId) {
+    public static PetVisit visit(long id, VisitStatus status, UUID doctorId) {
         return PetVisit.builder().id(id).visitCode("VIS-2026-" + id).pet(pet(11L, dog())).doctorId(doctorId)
                 .receptionistId(RECEPTIONIST).status(status)
                 .checkedInAt(Instant.parse("2026-10-30T01:00:00Z"))
@@ -80,16 +86,16 @@ public final class TestData {
 
     /** Phiếu xếp hàng phát lúc 09:00 + id giây (thứ tự phát = thứ tự id). */
     public static QueueTicket ticket(long id, QueueType type,
-                                                                   long visitId, Long doctorId, int ticketNo, int priority,
+                                                                   long visitId, UUID doctorId, int ticketNo, int priority,
                                                                    TicketStatus status) {
         return QueueTicket.builder().id(id).queueType(type)
                 .serviceDate(LocalDate.of(2026, 10, 30)).ticketNo(ticketNo).visitId(visitId).doctorId(doctorId)
                 .priority(priority).status(status).issuedAt(Instant.parse("2026-10-30T02:00:00Z").plusSeconds(id)).build();
     }
 
-    public static void loginAs(long userId, RoleCode role) {
+    public static void loginAs(UUID userId, RoleCode role) {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
-                String.valueOf(userId), null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
+                userId.toString(), null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
     }
 
     public static void assertError(ErrorCode expected, ThrowableAssert.ThrowingCallable call) {

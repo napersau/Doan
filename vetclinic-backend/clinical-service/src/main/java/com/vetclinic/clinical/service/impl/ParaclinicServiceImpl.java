@@ -43,6 +43,7 @@ import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import com.vetclinic.common.security.RoleCode;
 import com.vetclinic.common.security.SecurityUtils;
+import java.util.UUID;
 import java.util.HashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -243,7 +244,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ServiceDetailResponse sampleCollected(Long detailId) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
         if (c.detail().getService().getCategory() != ServiceCategory.LABORATORY) {
@@ -263,7 +264,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ServiceDetailResponse perform(Long detailId) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), true);
         if (!c.detail().getService().getCategory().isInRoom()) {
@@ -280,7 +281,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ServiceDetailResponse cancel(Long detailId, String reason, String reasonType) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), true);
         ServiceCategory category = c.detail().getService().getCategory();
@@ -359,7 +360,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ServiceDetailResponse submitLabResults(Long detailId, LabResultRequest request) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
         if (c.detail().getService().getCategory() != ServiceCategory.LABORATORY) {
@@ -428,7 +429,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     public ServiceDetailResponse submitImagingResult(Long detailId, String description, String conclusion,
                                                      List<MultipartFile> files) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         if (SecurityUtils.getCurrentRole().orElse(null) != RoleCode.IMAGING_TECHNICIAN) {
             throw new AppException(ErrorCode.ACCESS_DENIED);
         }
@@ -458,7 +459,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         }
     }
 
-    private ServiceDetailResponse saveImaging(Long actor, Long detailId, String description, String conclusion,
+    private ServiceDetailResponse saveImaging(UUID actor, Long detailId, String description, String conclusion,
                                               List<ImagingStorage.StoredFile> stored) {
         Ctx c = lockForAction(detailId);
         assertOperator(c.detail(), false);
@@ -484,7 +485,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     @Override
     @Transactional(readOnly = true)
     public AttachmentDownload downloadAttachment(Long attachmentId) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
         ImagingAttachment attachment = attachmentRepository.findById(attachmentId)
                 .orElseThrow(() -> new AppException(ErrorCode.RESOURCE_NOT_FOUND));
@@ -524,7 +525,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         }
     }
 
-    private void setStatus(VisitServiceDetail detail, ServiceDetailStatus to, String action, Long actor, String reason) {
+    private void setStatus(VisitServiceDetail detail, ServiceDetailStatus to, String action, UUID actor, String reason) {
         ServiceDetailStatus from = detail.getStatus();
         detail.setStatus(to);
         detailRepository.save(detail);

@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.UUID;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,6 +37,11 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AppointmentEnricherAndReportTest {
+
+    /** UUID demo cố định, cùng dạng với dữ liệu seed (019a9442-d810-7000-8000-0000000000NN). */
+    private static UUID uid(long n) {
+        return UUID.fromString(String.format("019a9442-d810-7000-8000-%012d", n));
+    }
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-30T02:00:00Z"), ZoneId.of("Asia/Ho_Chi_Minh"));
 
@@ -49,7 +55,7 @@ class AppointmentEnricherAndReportTest {
     private AppointmentStatusHistoryRepository historyRepository;
 
     private static AppointmentResponse appointment(long id, long petId, long ownerId) {
-        return new AppointmentResponse(id, "APT-" + id, petId, ownerId, LocalDate.of(2026, 10, 31), LocalTime.of(9, 0),
+        return new AppointmentResponse(id, "APT-" + id, petId, uid(ownerId), LocalDate.of(2026, 10, 31), LocalTime.of(9, 0),
                 LocalTime.of(9, 30), "Khám", BookingChannel.ONLINE, AppointmentStatus.PENDING, null, null, null, null, null,
                 Instant.EPOCH, Instant.EPOCH, null, null, null);
     }
@@ -59,10 +65,10 @@ class AppointmentEnricherAndReportTest {
     @Test
     void enrichAll_attachesPetAndOwnerNamesWithOneBatchCallEach() {
         when(petClient.getPets(any())).thenReturn(ApiResponse.success(List.of(
-                new PetSummaryResponse(11L, 5L, "Lu"), new PetSummaryResponse(12L, 6L, "Mun"))));
+                new PetSummaryResponse(11L, uid(5), "Lu"), new PetSummaryResponse(12L, uid(6), "Mun"))));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(
-                new UserSummaryResponse(5L, "Nguyễn Văn A", "0944444441", RoleCode.PET_OWNER, "ACTIVE"),
-                new UserSummaryResponse(6L, "Trần Thị B", "0944444442", RoleCode.PET_OWNER, "ACTIVE"))));
+                new UserSummaryResponse(uid(5), "Nguyễn Văn A", "0944444441", RoleCode.PET_OWNER, List.of(RoleCode.PET_OWNER), "ACTIVE"),
+                new UserSummaryResponse(uid(6), "Trần Thị B", "0944444442", RoleCode.PET_OWNER, List.of(RoleCode.PET_OWNER), "ACTIVE"))));
         AppointmentEnricher enricher = new AppointmentEnricher(authClient, petClient, historyRepository);
 
         List<AppointmentResponse> result = enricher.enrichAll(List.of(appointment(1, 11, 5), appointment(2, 12, 6), appointment(3, 11, 5)));
@@ -106,40 +112,40 @@ class AppointmentEnricherAndReportTest {
                 Instant.parse("2026-10-30T01:00:00Z"), null, null, null, null);
     }
 
-    private static AppointmentStatusHistory history(long id, AppointmentStatus from, AppointmentStatus to, Long by, String notes, String at) {
+    private static AppointmentStatusHistory history(long id, AppointmentStatus from, AppointmentStatus to, UUID by, String notes, String at) {
         return AppointmentStatusHistory.builder().id(id).appointmentId(1L).fromStatus(from).toStatus(to)
                 .changedByUserId(by).notes(notes).createdAt(Instant.parse(at)).build();
     }
 
     @Test
     void enrichAll_derivesOwnerFromThePet_notFromTheAppointment() {
-        when(petClient.getPets(any())).thenReturn(ApiResponse.success(List.of(new PetSummaryResponse(11L, 5L, "Lu"))));
+        when(petClient.getPets(any())).thenReturn(ApiResponse.success(List.of(new PetSummaryResponse(11L, uid(5), "Lu"))));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(
-                new UserSummaryResponse(5L, "Nguyễn Văn A", "0944444441", RoleCode.PET_OWNER, "ACTIVE"))));
+                new UserSummaryResponse(uid(5), "Nguyễn Văn A", "0944444441", RoleCode.PET_OWNER, List.of(RoleCode.PET_OWNER), "ACTIVE"))));
         AppointmentEnricher enricher = new AppointmentEnricher(authClient, petClient, historyRepository);
 
         AppointmentResponse result = enricher.enrich(withoutOwner(1, 11, AppointmentStatus.PENDING));
 
-        assertThat(result.ownerId()).isEqualTo(5L);
+        assertThat(result.ownerId()).isEqualTo(uid(5));
         assertThat(result.ownerName()).isEqualTo("Nguyễn Văn A");
     }
 
     @Test
     void enrichAll_derivesConfirmAndCancelAuditFromTheStatusHistory() {
-        when(petClient.getPets(any())).thenReturn(ApiResponse.success(List.of(new PetSummaryResponse(11L, 5L, "Lu"))));
+        when(petClient.getPets(any())).thenReturn(ApiResponse.success(List.of(new PetSummaryResponse(11L, uid(5), "Lu"))));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of()));
         when(historyRepository.findByAppointmentIdInOrderByIdAsc(any())).thenReturn(List.of(
-                history(1, null, AppointmentStatus.PENDING, 5L, "Chủ nuôi gửi yêu cầu", "2026-10-30T01:00:00Z"),
-                history(2, AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED, 9L, "Lễ tân xác nhận", "2026-10-30T01:10:00Z"),
-                history(3, AppointmentStatus.CONFIRMED, AppointmentStatus.CANCELLED, 5L, "Bận việc đột xuất", "2026-10-30T01:20:00Z")));
+                history(1, null, AppointmentStatus.PENDING, uid(5), "Chủ nuôi gửi yêu cầu", "2026-10-30T01:00:00Z"),
+                history(2, AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED, uid(9), "Lễ tân xác nhận", "2026-10-30T01:10:00Z"),
+                history(3, AppointmentStatus.CONFIRMED, AppointmentStatus.CANCELLED, uid(5), "Bận việc đột xuất", "2026-10-30T01:20:00Z")));
         AppointmentEnricher enricher = new AppointmentEnricher(authClient, petClient, historyRepository);
 
         AppointmentResponse result = enricher.enrich(withoutOwner(1, 11, AppointmentStatus.CANCELLED));
 
-        assertThat(result.confirmedBy()).isEqualTo(9L);
+        assertThat(result.confirmedBy()).isEqualTo(uid(9));
         assertThat(result.confirmedAt()).isEqualTo(Instant.parse("2026-10-30T01:10:00Z"));
         assertThat(result.cancelReason()).isEqualTo("Bận việc đột xuất");
-        assertThat(result.cancelledBy()).isEqualTo(5L);
+        assertThat(result.cancelledBy()).isEqualTo(uid(5));
         assertThat(result.cancelledAt()).isEqualTo(Instant.parse("2026-10-30T01:20:00Z"));
         assertThat(result.updatedAt()).isEqualTo(Instant.parse("2026-10-30T01:20:00Z"));   // lần đổi cuối cùng
     }
@@ -148,12 +154,12 @@ class AppointmentEnricherAndReportTest {
     void enrichAll_receptionistCreatedAppointment_countsTheCreationAsTheConfirmation() {
         when(petClient.getPets(any())).thenReturn(ApiResponse.success(List.of()));
         when(historyRepository.findByAppointmentIdInOrderByIdAsc(any())).thenReturn(List.of(
-                history(1, null, AppointmentStatus.CONFIRMED, 7L, "Lễ tân tạo lịch hẹn", "2026-10-30T01:00:00Z")));
+                history(1, null, AppointmentStatus.CONFIRMED, uid(7), "Lễ tân tạo lịch hẹn", "2026-10-30T01:00:00Z")));
         AppointmentEnricher enricher = new AppointmentEnricher(authClient, petClient, historyRepository);
 
         AppointmentResponse result = enricher.enrich(withoutOwner(1, 11, AppointmentStatus.CONFIRMED));
 
-        assertThat(result.confirmedBy()).isEqualTo(7L);
+        assertThat(result.confirmedBy()).isEqualTo(uid(7));
         assertThat(result.cancelReason()).isNull();
         assertThat(result.cancelledBy()).isNull();
     }

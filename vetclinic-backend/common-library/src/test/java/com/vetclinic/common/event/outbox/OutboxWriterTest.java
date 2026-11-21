@@ -28,7 +28,7 @@ class OutboxWriterTest {
     @Test
     void writesAPendingRowThatCarriesTheEventIdRoutingKeyAndJsonPayload() {
         when(repository.save(any(OutboxEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-        VisitCompletedEvent event = new VisitCompletedEvent(UuidV7.generate(), NOW, 5L, 42L, "VIS-2026-00042", 11L, false);
+        VisitCompletedEvent event = new VisitCompletedEvent(UuidV7.generate(), NOW, UuidV7.generate(), 42L, "VIS-2026-00042", 11L, false);
 
         OutboxEvent row = writer.write("VISIT", 42L, event);
 

@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import java.util.List;
 
 /**
@@ -9,7 +10,7 @@ import java.util.List;
 public record QueueBoardResponse(
         List<VisitResponse> unassigned,
         List<DoctorQueueResponse> doctors,
-        Long suggestedDoctorId,
+        UUID suggestedDoctorId,
         List<VisitResponse> awaitingPayment   // ca vừa tiếp đón, chưa nộp phí khám nên chưa có phiếu (chưa hiện ở hàng đợi Bác sĩ)
 ) {
 }

@@ -12,7 +12,7 @@
 -- MÔ HÌNH KIẾN TRÚC: MICROSERVICES (DATABASE-PER-SERVICE PATTERN)
 -- ==============================================================================
 -- 4 Cơ sở dữ liệu logic:
--- 1. pet_clinic_auth_db             : auth-service (:8081)             - 3 bảng
+-- 1. pet_clinic_auth_db             : auth-service (:8081)             - 9 bảng (v4.0, bước 2.1)
 -- 2. pet_clinic_appointment_db      : appointment-service (:8082)      - 2 bảng
 -- 3. pet_clinic_clinical_db         : clinical-service (:8083)         - 16 bảng
 -- 4. pet_clinic_billing_pharmacy_db : billing-pharmacy-service (:8084) - 6 bảng
@@ -55,6 +55,9 @@
 -- thiếu dòng này tiếng Việt trong seed bị mã hóa 2 lần.
 SET NAMES utf8mb4;
 
+-- UUIDv7 cố định cho dữ liệu mẫu (giống docs/schema_init.sql v4.0). Chỉ khai báo biến đang được dùng; thêm dần ở các bước sau.
+SET @u_admin = UUID_TO_BIN('019a9442-d800-7729-87cc-fbb1ceda8817');
+
 
 -- ==============================================================================
 -- PHẦN 1: PET_CLINIC_AUTH_DB (AUTH-SERVICE :8081)
@@ -62,37 +65,113 @@ SET NAMES utf8mb4;
 CREATE DATABASE IF NOT EXISTS pet_clinic_auth_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE pet_clinic_auth_db;
 
--- 1. ROLES (VAI TRÒ NGƯỜI DÙNG)
+-- 1. ROLES (DANH MỤC VAI TRÒ - THAY ENUM)
+-- Thêm vai trò mới chỉ cần INSERT, không ALTER TABLE. is_system = TRUE: vai trò lõi, không cho xóa.
 CREATE TABLE IF NOT EXISTS roles (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    code ENUM('ADMIN', 'VETERINARIAN', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'IMAGING_TECHNICIAN', 'PET_OWNER') NOT NULL UNIQUE,
+    id SMALLINT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
     name VARCHAR(100) NOT NULL,
-    description VARCHAR(255) NULL
+    description VARCHAR(255) NULL,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- 2. USERS (TÀI KHOẢN: NHÂN SỰ & KHÁCH HÀNG)
+-- 2. USERS (TÀI KHOẢN ĐĂNG NHẬP - CHỈ THÔNG TIN XÁC THỰC)
+-- status: ACTIVE | LOCKED | INACTIVE. Không xóa cứng tài khoản (xóa mềm = INACTIVE).
 CREATE TABLE IF NOT EXISTS users (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    role_id BIGINT NOT NULL,
+    id BINARY(16) PRIMARY KEY, -- UUIDv7
     username VARCHAR(100) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(150) NOT NULL,
-    phone_number VARCHAR(20) NOT NULL UNIQUE,
-    email VARCHAR(150) NULL,
-    address VARCHAR(255) NULL,
-    room_number VARCHAR(20) NULL, -- Phòng làm việc cố định của Bác sĩ / KTV
-    status ENUM('ACTIVE', 'INACTIVE', 'LOCKED') NOT NULL DEFAULT 'ACTIVE',
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    last_login_at TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
+    version BIGINT NOT NULL DEFAULT 0
 );
-CREATE INDEX idx_users_role_status ON users(role_id, status);
+CREATE INDEX idx_users_status ON users(status);
 
--- 3. REFRESH_TOKENS (PHIÊN ĐĂNG NHẬP & XOAY VÒNG TOKEN)
+-- 3. USER_ROLES (TÀI KHOẢN - VAI TRÒ, NHIỀU - NHIỀU)
+-- Ví dụ một Bác sĩ kiêm Quản trị viên. JWT mang danh sách vai trò.
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id BINARY(16) NOT NULL,
+    role_id SMALLINT NOT NULL,
+    assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, role_id),
+    CONSTRAINT fk_ur_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_ur_role FOREIGN KEY (role_id) REFERENCES roles(id)
+);
+CREATE INDEX idx_ur_role ON user_roles(role_id);
+
+-- 4. USER_PROFILES (THÔNG TIN CÁ NHÂN CHUNG CỦA MỌI NGƯỜI DÙNG, 1-1 VỚI USERS)
+-- gender: MALE | FEMALE | OTHER. avatar_key: đường dẫn tương đối tệp ảnh đại diện.
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id BINARY(16) PRIMARY KEY,
+    full_name VARCHAR(150) NOT NULL,
+    phone_number VARCHAR(20) NOT NULL UNIQUE,
+    email VARCHAR(150) NULL UNIQUE,
+    gender VARCHAR(10) NULL,
+    date_of_birth DATE NULL,
+    address VARCHAR(255) NULL,
+    avatar_key VARCHAR(255) NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_up_user FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- 5. STAFF_PROFILES (HỒ SƠ NHÂN SỰ - CHỈ NHÂN VIÊN PHÒNG KHÁM, 1-1 VỚI USERS)
+-- employment_type: FULL_TIME | PART_TIME. room_number: phòng làm việc cố định (Bác sĩ / KTV).
+CREATE TABLE IF NOT EXISTS staff_profiles (
+    user_id BINARY(16) PRIMARY KEY,
+    employee_code VARCHAR(20) NOT NULL UNIQUE,
+    citizen_id VARCHAR(20) NULL UNIQUE, -- Số CCCD
+    position_title VARCHAR(100) NOT NULL, -- Chức danh: Bác sĩ thú y, Lễ tân, KTV xét nghiệm...
+    department VARCHAR(100) NULL, -- Bộ phận: Khám bệnh, Xét nghiệm, CĐHA, Tiếp đón...
+    room_number VARCHAR(20) NULL,
+    employment_type VARCHAR(20) NOT NULL DEFAULT 'FULL_TIME',
+    hire_date DATE NOT NULL,
+    termination_date DATE NULL,
+    emergency_contact_name VARCHAR(150) NULL,
+    emergency_contact_phone VARCHAR(20) NULL,
+    notes TEXT NULL,
+    CONSTRAINT fk_sp_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT chk_sp_dates CHECK (termination_date IS NULL OR termination_date >= hire_date)
+);
+CREATE INDEX idx_sp_room ON staff_profiles(room_number);
+
+-- 6. VETERINARIAN_PROFILES (HỒ SƠ CHUYÊN MÔN THÚ Y, 1-1 VỚI STAFF_PROFILES)
+-- Bắt buộc với vai trò VETERINARIAN; tùy chọn với Bác sĩ / KTV Xét nghiệm, CĐHA có chứng chỉ.
+CREATE TABLE IF NOT EXISTS veterinarian_profiles (
+    user_id BINARY(16) PRIMARY KEY,
+    license_number VARCHAR(50) NOT NULL UNIQUE, -- Số chứng chỉ hành nghề thú y
+    license_issued_date DATE NOT NULL,
+    license_issued_by VARCHAR(150) NOT NULL, -- Cơ quan cấp (Chi cục Chăn nuôi và Thú y...)
+    license_expiry_date DATE NULL,
+    academic_degree VARCHAR(50) NOT NULL, -- Bác sĩ thú y / Thạc sĩ / Tiến sĩ
+    specialty VARCHAR(150) NULL, -- Nội khoa, Ngoại khoa, Da liễu, Chẩn đoán hình ảnh...
+    graduated_from VARCHAR(150) NULL,
+    career_start_year SMALLINT NULL, -- Số năm kinh nghiệm = năm hiện tại - career_start_year
+    biography TEXT NULL, -- Giới thiệu hiển thị cho khách khi đặt lịch
+    CONSTRAINT fk_vp_staff FOREIGN KEY (user_id) REFERENCES staff_profiles(user_id),
+    CONSTRAINT chk_vp_license CHECK (license_expiry_date IS NULL OR license_expiry_date > license_issued_date)
+);
+
+-- 7. PET_OWNER_PROFILES (HỒ SƠ KHÁCH HÀNG / CHỦ NUÔI, 1-1 VỚI USERS)
+-- registered_channel: ONLINE | AT_CLINIC. preferred_contact: PHONE | EMAIL | APP.
+CREATE TABLE IF NOT EXISTS pet_owner_profiles (
+    user_id BINARY(16) PRIMARY KEY,
+    customer_code VARCHAR(20) NOT NULL UNIQUE,
+    registered_channel VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
+    preferred_contact VARCHAR(20) NOT NULL DEFAULT 'PHONE',
+    notes TEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pop_user FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- 8. REFRESH_TOKENS (PHIÊN ĐĂNG NHẬP & XOAY VÒNG TOKEN)
+-- Chỉ lưu giá trị băm SHA-256 của token (lộ CSDL không dùng lại được token). BIGINT: dữ liệu nhiều, đơn giản.
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    token VARCHAR(255) NOT NULL UNIQUE,
+    user_id BINARY(16) NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
     expiry_date TIMESTAMP NOT NULL,
     revoked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -100,14 +179,15 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
 
--- 4. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 9): hạ tầng sẵn sàng cho các sự kiện UserProfileUpdatedEvent /
--- UserStatusChangedEvent của Phase 2; auth-service CHƯA phát sự kiện nào ở thời điểm này nên bảng còn trống.
--- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
+-- 9. OUTBOX_EVENTS (TRANSACTIONAL OUTBOX) - cấu trúc giống nhau ở mọi CSDL phát sự kiện
+-- Ghi trong CÙNG giao dịch với thay đổi nghiệp vụ; OutboxRelay đọc PENDING, gửi RabbitMQ,
+-- đánh dấu PUBLISHED (at-least-once). status: PENDING | PUBLISHED | FAILED.
+-- auth phát: UserProfileUpdatedEvent, UserStatusChangedEvent.
 CREATE TABLE IF NOT EXISTS outbox_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    event_id BINARY(16) NOT NULL UNIQUE,
-    aggregate_type VARCHAR(50) NOT NULL,
-    aggregate_id VARCHAR(36) NOT NULL,
+    event_id BINARY(16) NOT NULL UNIQUE, -- UUIDv7, consumer dùng để chống xử lý trùng
+    aggregate_type VARCHAR(50) NOT NULL, -- USER, PET, VISIT, SERVICE_INVOICE...
+    aggregate_id VARCHAR(36) NOT NULL, -- D2 (LO_TRINH_SUA_CODE_V4.md): tạm VARCHAR(36), đổi về BINARY(16) ở bước 8.1
     event_type VARCHAR(100) NOT NULL,
     routing_key VARCHAR(100) NOT NULL,
     payload JSON NOT NULL,
@@ -120,17 +200,23 @@ CREATE TABLE IF NOT EXISTS outbox_events (
 );
 CREATE INDEX idx_outbox_pending ON outbox_events(status, next_attempt_at, id);
 
-INSERT INTO roles (code, name, description) VALUES
-('ADMIN', 'Quản trị viên', 'Toàn quyền cấu hình hệ thống, quản lý danh mục và xem báo cáo'),
-('VETERINARIAN', 'Bác sĩ thú y khám chính', 'Khám lâm sàng, chỉ định xét nghiệm, chẩn đoán xác định và kê đơn'),
-('RECEPTIONIST', 'Lễ tân / Thu ngân', 'Tiếp đón, phân công bác sĩ, thu ngân và bán thuốc'),
-('LAB_TECHNICIAN', 'Bác sĩ / KTV Xét nghiệm', 'Tiếp nhận mẫu bệnh phẩm, phân tích và nhập chỉ số kết quả'),
-('IMAGING_TECHNICIAN', 'Bác sĩ / KTV Chẩn đoán hình ảnh', 'Siêu âm, chụp X-quang, tải tệp ảnh và kết luận hình thái học'),
-('PET_OWNER', 'Chủ thú cưng', 'Đặt lịch trực tuyến, theo dõi hồ sơ bệnh án và đơn thuốc');
+-- Seed auth-service
+INSERT INTO roles (code, name, description, is_system) VALUES
+('ADMIN', 'Quản trị viên', 'Toàn quyền cấu hình hệ thống, quản lý danh mục, bảng giá và xem báo cáo', TRUE),
+('VETERINARIAN', 'Bác sĩ thú y khám chính', 'Khám lâm sàng, chỉ định cận lâm sàng, chẩn đoán xác định và kê đơn', TRUE),
+('RECEPTIONIST', 'Lễ tân / Thu ngân', 'Tiếp đón, phân công bác sĩ, thu ngân và bán thuốc', TRUE),
+('LAB_TECHNICIAN', 'Bác sĩ / KTV Xét nghiệm', 'Tiếp nhận mẫu bệnh phẩm, phân tích và nhập chỉ số kết quả', TRUE),
+('IMAGING_TECHNICIAN', 'Bác sĩ / KTV Chẩn đoán hình ảnh', 'Siêu âm, chụp X-quang, tải tệp ảnh và kết luận hình thái học', TRUE),
+('PET_OWNER', 'Chủ thú cưng', 'Đặt lịch trực tuyến, theo dõi hồ sơ bệnh án và đơn thuốc', TRUE);
 
 -- Tài khoản Admin mặc định (mật khẩu: Admin@123, BCrypt strength 12 - đã kiểm tra bằng bcrypt.checkpw ngày 12/11)
-INSERT INTO users (role_id, username, password_hash, full_name, phone_number, email, status) VALUES
-(1, 'admin', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Quản trị viên hệ thống', '0901234567', 'admin@vetclinic.com', 'ACTIVE');
+INSERT INTO users (id, username, password_hash, status) VALUES
+(@u_admin, 'admin', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE');
+INSERT INTO user_roles (user_id, role_id) SELECT @u_admin, id FROM roles WHERE code = 'ADMIN';
+INSERT INTO user_profiles (user_id, full_name, phone_number, email) VALUES
+(@u_admin, 'Quản trị viên hệ thống', '0901234567', 'admin@vetclinic.com');
+INSERT INTO staff_profiles (user_id, employee_code, position_title, department, hire_date) VALUES
+(@u_admin, 'NV0001', 'Quản trị hệ thống', 'Ban quản lý', '2026-01-01');
 
 
 -- ==============================================================================
@@ -163,7 +249,7 @@ CREATE TABLE IF NOT EXISTS appointment_status_histories (
     appointment_id BIGINT NOT NULL,
     from_status ENUM('PENDING', 'CONFIRMED', 'CHECKED_IN', 'CANCELLED', 'NO_SHOW') NULL,
     to_status ENUM('PENDING', 'CONFIRMED', 'CHECKED_IN', 'CANCELLED', 'NO_SHOW') NOT NULL,
-    changed_by_user_id BIGINT NULL, -- LFK: auth.users (NULL = hệ thống tự quét NO_SHOW)
+    changed_by_user_id BINARY(16) NULL, -- LFK: auth.users (NULL = hệ thống tự quét NO_SHOW)
     notes TEXT NULL, -- Lý do hủy / từ chối / ghi chú
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_ash_appointment FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE
@@ -219,7 +305,7 @@ CREATE TABLE IF NOT EXISTS species (
 -- Đã bỏ: weight (cân nặng hiện tại = weight_at_visit của đợt khám gần nhất).
 CREATE TABLE IF NOT EXISTS pets (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    owner_id BIGINT NOT NULL, -- LFK: auth.users
+    owner_id BINARY(16) NOT NULL, -- LFK: auth.users
     species_id BIGINT NOT NULL,
     pet_code VARCHAR(50) NOT NULL UNIQUE,
     name VARCHAR(100) NOT NULL,
@@ -291,8 +377,8 @@ CREATE TABLE IF NOT EXISTS pet_visits (
     visit_code VARCHAR(50) NOT NULL UNIQUE,
     pet_id BIGINT NOT NULL,
     appointment_id BIGINT NULL UNIQUE, -- LFK: appointment.appointments (NULL = khách vãng lai)
-    doctor_id BIGINT NULL, -- LFK: auth.users (bác sĩ được phân công)
-    receptionist_id BIGINT NOT NULL, -- LFK: auth.users (lễ tân tiếp đón)
+    doctor_id BINARY(16) NULL, -- LFK: auth.users (bác sĩ được phân công)
+    receptionist_id BINARY(16) NOT NULL, -- LFK: auth.users (lễ tân tiếp đón)
     is_emergency BOOLEAN NOT NULL DEFAULT FALSE,
     weight_at_visit DECIMAL(5, 2) NULL, -- Bác sĩ cân tại phòng khám
     temperature DECIMAL(4, 1) NULL, -- Bác sĩ đo tại phòng khám
@@ -317,7 +403,7 @@ CREATE TABLE IF NOT EXISTS pet_visit_status_histories (
     visit_id BIGINT NOT NULL,
     from_status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NULL,
     to_status ENUM('WAITING', 'IN_PROGRESS', 'WAITING_RESULTS', 'RESULTS_READY', 'WAITING_PAYMENT', 'COMPLETED', 'CANCELLED') NOT NULL,
-    changed_by_user_id BIGINT NULL, -- LFK: auth.users (NULL = hệ thống tự chuyển)
+    changed_by_user_id BINARY(16) NULL, -- LFK: auth.users (NULL = hệ thống tự chuyển)
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_pvsh_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id) ON DELETE CASCADE
@@ -349,7 +435,7 @@ CREATE TABLE IF NOT EXISTS visit_service_detail_histories (
     from_status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NULL,
     to_status ENUM('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL,
     action VARCHAR(50) NOT NULL, -- ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED
-    changed_by_user_id BIGINT NOT NULL, -- LFK: auth.users
+    changed_by_user_id BINARY(16) NOT NULL, -- LFK: auth.users
     reason TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_vsdh_vsd FOREIGN KEY (visit_service_detail_id) REFERENCES visit_service_details(id) ON DELETE CASCADE
@@ -367,7 +453,7 @@ CREATE TABLE IF NOT EXISTS lab_test_results (
     result_value DECIMAL(8, 2) NOT NULL,
     min_value_snapshot DECIMAL(8, 2) NOT NULL,
     max_value_snapshot DECIMAL(8, 2) NOT NULL,
-    performed_by BIGINT NOT NULL, -- LFK: auth.users (LAB_TECHNICIAN)
+    performed_by BINARY(16) NOT NULL, -- LFK: auth.users (LAB_TECHNICIAN)
     notes TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_ltr_vsd FOREIGN KEY (visit_service_detail_id) REFERENCES visit_service_details(id),
@@ -382,7 +468,7 @@ CREATE TABLE IF NOT EXISTS imaging_results (
     visit_service_detail_id BIGINT NOT NULL UNIQUE,
     description TEXT NOT NULL,
     conclusion TEXT NOT NULL,
-    performed_by BIGINT NOT NULL, -- LFK: auth.users (IMAGING_TECHNICIAN)
+    performed_by BINARY(16) NOT NULL, -- LFK: auth.users (IMAGING_TECHNICIAN)
     performed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_ir_vsd FOREIGN KEY (visit_service_detail_id) REFERENCES visit_service_details(id)
 );
@@ -415,7 +501,7 @@ CREATE TABLE IF NOT EXISTS service_invoices (
     vat_rate DECIMAL(4, 2) NOT NULL DEFAULT 0.00, -- Snapshot thuế suất lúc chỉ định
     discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     payment_status ENUM('PENDING', 'PAID', 'CANCELLED', 'REFUNDED') NOT NULL DEFAULT 'PENDING',
-    cashier_id BIGINT NULL, -- LFK: auth.users (gán khi thu tiền)
+    cashier_id BINARY(16) NULL, -- LFK: auth.users (gán khi thu tiền)
     paid_at TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version BIGINT NOT NULL DEFAULT 0,
@@ -438,11 +524,11 @@ CREATE TABLE IF NOT EXISTS queue_tickets (
     service_date DATE NOT NULL,
     ticket_no INT NOT NULL,
     visit_id BIGINT NOT NULL,
-    doctor_id BIGINT NULL, -- LFK: auth.users (chỉ phiếu DOCTOR; NULL = danh sách chờ phân công)
+    doctor_id BINARY(16) NULL, -- LFK: auth.users (chỉ phiếu DOCTOR; NULL = danh sách chờ phân công)
     priority TINYINT NOT NULL DEFAULT 0, -- 2 = cấp cứu, 1 = quay lại với kết quả CLS, 0 = thường
     status ENUM('WAITING', 'IN_SERVICE', 'DONE', 'CANCELLED') NOT NULL DEFAULT 'WAITING',
     issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    issued_by BIGINT NULL, -- LFK: auth.users (thu ngân phát phiếu; NULL = hệ thống tự phát)
+    issued_by BINARY(16) NULL, -- LFK: auth.users (thu ngân phát phiếu; NULL = hệ thống tự phát)
     last_called_at TIMESTAMP NULL,
     version BIGINT NOT NULL DEFAULT 0,
     CONSTRAINT fk_qt_visit FOREIGN KEY (visit_id) REFERENCES pet_visits(id),
@@ -608,7 +694,7 @@ CREATE TABLE IF NOT EXISTS medicine_invoices (
     prescription_id BIGINT NOT NULL UNIQUE,
     discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     payment_status ENUM('PENDING', 'PAID', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
-    cashier_id BIGINT NULL, -- LFK: auth.users (gán khi thu tiền)
+    cashier_id BINARY(16) NULL, -- LFK: auth.users (gán khi thu tiền)
     paid_at TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version BIGINT NOT NULL DEFAULT 0,
@@ -645,7 +731,7 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
     quantity INT NOT NULL, -- Có dấu: + nhập / - xuất
     medicine_invoice_id BIGINT NULL, -- Bắt buộc khi EXPORT_SALE
     notes VARCHAR(255) NULL,
-    created_by BIGINT NOT NULL, -- LFK: auth.users
+    created_by BINARY(16) NOT NULL, -- LFK: auth.users
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_it_medicine FOREIGN KEY (medicine_id) REFERENCES medicines(id),
     CONSTRAINT fk_it_invoice FOREIGN KEY (medicine_invoice_id) REFERENCES medicine_invoices(id),
@@ -700,10 +786,10 @@ INSERT INTO medicines (code, name, active_ingredient, dosage_form, unit, sale_pr
 
 -- Nhập kho ban đầu được ghi nhật ký để thỏa bất biến: stock_quantity = SUM(quantity)
 INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, notes, created_by) VALUES
-(1, 'IMPORT', 200, 'Tồn kho đầu kỳ', 1),
-(2, 'IMPORT', 50, 'Tồn kho đầu kỳ', 1),
-(3, 'IMPORT', 40, 'Tồn kho đầu kỳ', 1),
-(4, 'IMPORT', 100, 'Tồn kho đầu kỳ', 1);
+(1, 'IMPORT', 200, 'Tồn kho đầu kỳ', @u_admin),
+(2, 'IMPORT', 50, 'Tồn kho đầu kỳ', @u_admin),
+(3, 'IMPORT', 40, 'Tồn kho đầu kỳ', @u_admin),
+(4, 'IMPORT', 100, 'Tồn kho đầu kỳ', @u_admin);
 
 -- ==============================================================================
 -- TRUY VẤN DOANH THU MẪU (không cần thuộc tính tổng tiền)

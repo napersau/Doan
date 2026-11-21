@@ -7,6 +7,7 @@ import com.vetclinic.clinical.dto.response.PetSummaryResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.common.dto.PageResponse;
 
+import java.util.UUID;
 import java.util.Collection;
 import java.util.List;
 
@@ -20,7 +21,7 @@ public interface PetService {
     PetResponse getById(Long id);
 
     /** Chủ nuôi chỉ thấy thú cưng của mình. Lọc theo chủ nuôi và từ khóa (tên, mã hồ sơ). */
-    PageResponse<PetResponse> search(Long ownerId, String keyword, int page, int size);
+    PageResponse<PetResponse> search(UUID ownerId, String keyword, int page, int size);
 
     /** UC-38: dòng thời gian các đợt khám của thú cưng, mới nhất trước. */
     List<VisitResponse> getVisits(Long petId);
@@ -35,5 +36,5 @@ public interface PetService {
      * Các thú cưng của một chủ nuôi. appointment-service dùng để lọc "lịch hẹn của tôi" bằng {@code pet_id IN (...)} vì bảng
      * appointments không còn cột owner_id (lược đồ v3.0). Chủ nuôi không có thú cưng thì trả danh sách rỗng.
      */
-    List<PetSummaryResponse> getSummariesByOwner(Long ownerId);
+    List<PetSummaryResponse> getSummariesByOwner(UUID ownerId);
 }

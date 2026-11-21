@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.PaymentStatus;
 import com.vetclinic.clinical.constant.ServiceCategory;
 
@@ -22,7 +23,7 @@ public record ServiceInvoiceResponse(
         BigDecimal vatAmount,
         BigDecimal payableAmount,
         PaymentStatus paymentStatus,
-        Long cashierId,
+        UUID cashierId,
         Instant paidAt,
         boolean requiresPrepayment   // TRUE: thu được ngay (khám, XN, CĐHA) và thu xong thì phát phiếu; FALSE: thu khi chốt ca
 ) {

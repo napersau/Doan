@@ -7,6 +7,7 @@ import com.vetclinic.appointment.dto.response.AppointmentHistoryResponse;
 import com.vetclinic.appointment.dto.response.AppointmentResponse;
 import com.vetclinic.common.dto.PageResponse;
 
+import java.util.UUID;
 import java.util.List;
 
 public interface AppointmentService {
@@ -44,7 +45,7 @@ public interface AppointmentService {
     boolean expirePendingBySystem(Long id);
 
     /** Consumer của VisitCheckedInEvent. CONFIRMED -> CHECKED_IN. Idempotent. */
-    void markCheckedIn(Long appointmentId, Long actorUserId, String visitCode);
+    void markCheckedIn(Long appointmentId, UUID actorUserId, String visitCode);
 
     /** Cho clinical-service tra cứu lịch hẹn trước khi check-in (không kiểm tra chủ sở hữu). */
     AppointmentResponse getForInternal(Long id);

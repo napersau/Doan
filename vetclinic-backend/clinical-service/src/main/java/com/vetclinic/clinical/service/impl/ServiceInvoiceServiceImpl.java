@@ -164,7 +164,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
      */
     @Override
     public InvoiceStatementResponse confirmPayment(Long visitId, List<Long> invoiceIds) {
-        Long cashierId = SecurityUtils.getCurrentUserId();
+        UUID cashierId = SecurityUtils.getCurrentUserId();
         for (int attempt = 1; ; attempt++) {
             try {
                 return tx.execute(s -> doConfirmPayment(visitId, invoiceIds, cashierId));
@@ -191,7 +191,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
         return message != null && message.contains("uq_qt_number");
     }
 
-    private InvoiceStatementResponse doConfirmPayment(Long visitId, List<Long> invoiceIds, Long cashierId) {
+    private InvoiceStatementResponse doConfirmPayment(Long visitId, List<Long> invoiceIds, UUID cashierId) {
         PetVisit visit = support.lock(visitId);   // khóa dòng ca: hai thu ngân cùng bấm thì người đến sau thấy hóa đơn đã PAID (BILL_1403)
         if (visit.getStatus() == VisitStatus.CANCELLED) {
             throw new AppException(ErrorCode.VISIT_NOT_READY_FOR_PAYMENT, "Đợt khám đã hủy, không còn khoản nào để thu");

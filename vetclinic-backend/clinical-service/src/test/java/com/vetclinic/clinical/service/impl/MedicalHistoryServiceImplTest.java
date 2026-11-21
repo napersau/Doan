@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.OWNER;
 import static com.vetclinic.clinical.testsupport.TestData.RECEPTIONIST;
@@ -102,7 +103,7 @@ class MedicalHistoryServiceImplTest {
         stubVisits(7L, 8L);
         when(billingClient.getPrescriptions(List.of(7L, 8L))).thenReturn(ApiResponse.success(List.of(prescription(8L))));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(
-                new UserSummaryResponse(DOCTOR, "BS Lan", "0911111111", RoleCode.VETERINARIAN, "P01", "ACTIVE"))));
+                new UserSummaryResponse(DOCTOR, "BS Lan", "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), "P01", "ACTIVE"))));
 
         PageResponse<MedicalHistoryEntry> page = service.history(11L, 0, 10);
 
@@ -129,7 +130,7 @@ class MedicalHistoryServiceImplTest {
 
     @Test
     void owner_ofAnotherPetGetsNotFound() {
-        loginAs(OWNER + 1, RoleCode.PET_OWNER);
+        loginAs(uid(6), RoleCode.PET_OWNER);
 
         assertError(ErrorCode.PET_NOT_FOUND, () -> service.history(11L, 0, 10));
         verify(visitRepository, never()).findByPetIdAndStatus(any(), any(), any(Pageable.class));

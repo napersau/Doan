@@ -19,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 import java.util.Set;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
@@ -39,24 +40,24 @@ class DoctorStatusServiceImplTest {
 
     @Test
     void statusOf_isBusyWhenExaminingAPatient() {
-        when(visitRepository.existsByDoctorIdAndStatus(1L, VisitStatus.IN_PROGRESS)).thenReturn(true);
+        when(visitRepository.existsByDoctorIdAndStatus(uid(1), VisitStatus.IN_PROGRESS)).thenReturn(true);
 
-        assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.BUSY);
+        assertThat(service.statusOf(uid(1))).isEqualTo(DoctorStatus.BUSY);
     }
 
     @Test
     void statusOf_isNotBusyJustBecauseAPatientWasAssigned_FR22() {
         // v3.0: ca WAITING đã gán KHÔNG làm Bác sĩ BUSY (chỉ "có ca IN_PROGRESS" mới BUSY); Lễ tân vẫn xếp thêm bất cứ lúc nào
-        when(visitRepository.existsByDoctorIdAndStatus(1L, VisitStatus.IN_PROGRESS)).thenReturn(false);
+        when(visitRepository.existsByDoctorIdAndStatus(uid(1), VisitStatus.IN_PROGRESS)).thenReturn(false);
 
-        assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.AVAILABLE);
-        verify(visitRepository, never()).existsByDoctorIdAndStatus(1L, VisitStatus.WAITING);
+        assertThat(service.statusOf(uid(1))).isEqualTo(DoctorStatus.AVAILABLE);
+        verify(visitRepository, never()).existsByDoctorIdAndStatus(uid(1), VisitStatus.WAITING);
     }
 
     @Test
     void statusOf_isAvailableWhenNothingIsPending_evenIfResultsAreWaiting() {
         // v3.0 không còn "Khóa ưu tiên": ca RESULTS_READY nằm đầu hàng đợi của bác sĩ nhưng không làm đổi trạng thái bác sĩ
-        assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.AVAILABLE);
+        assertThat(service.statusOf(uid(1))).isEqualTo(DoctorStatus.AVAILABLE);
     }
 
     @Test
@@ -66,18 +67,18 @@ class DoctorStatusServiceImplTest {
 
     @Test
     void statusOf_isBusyWhileExaminingAPatient() {
-        when(visitRepository.existsByDoctorIdAndStatus(1L, VisitStatus.IN_PROGRESS)).thenReturn(true);
+        when(visitRepository.existsByDoctorIdAndStatus(uid(1), VisitStatus.IN_PROGRESS)).thenReturn(true);
 
-        assertThat(service.statusOf(1L)).isEqualTo(DoctorStatus.BUSY);
+        assertThat(service.statusOf(uid(1))).isEqualTo(DoctorStatus.BUSY);
     }
 
     @Test
     void board_combinesActiveDoctorsFromAuthWithTheirComputedStatus() {
         when(authClient.getActiveDoctors()).thenReturn(ApiResponse.success(List.of(
                 doctor(1L, "BS A", "P01"), doctor(2L, "BS B", "P02"), doctor(3L, "BS C", "P03"))));
-        when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS))).thenReturn(Set.of(1L));
+        when(visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS))).thenReturn(Set.of(uid(1)));
         when(ticketRepository.countWaitingByDoctor())   // số phiếu DOCTOR đang chờ
-               .thenReturn(List.of(new Object[]{1L, 2L}, new Object[]{2L, 3L}));
+               .thenReturn(List.of(new Object[]{uid(1), 2L}, new Object[]{uid(2), 3L}));
 
         List<DoctorStatusResponse> board = service.board();
 
@@ -95,6 +96,6 @@ class DoctorStatusServiceImplTest {
     }
 
     private static UserSummaryResponse doctor(long id, String name, String room) {
-        return new UserSummaryResponse(id, name, "0911111111", RoleCode.VETERINARIAN, room, "ACTIVE");
+        return new UserSummaryResponse(uid(id), name, "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), room, "ACTIVE");
     }
 }

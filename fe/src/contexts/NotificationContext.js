@@ -3,6 +3,7 @@ import { notificationsApi } from '../api/endpoints';
 import { connectNotifications } from '../api/stomp';
 import { useAuth } from './AuthContext';
 import { sameId } from '../lib/ids';
+import { rolesOf } from '../constants/accessPolicy';
 
 const NotificationContext = createContext(null);
 const MAX_ITEMS = 100;
@@ -21,7 +22,7 @@ export function NotificationProvider({ children }) {
   const itemsRef = useRef([]);
   itemsRef.current = items;
   const userId = user?.id;
-  const role = user?.role;
+  const rolesKey = rolesOf(user).join(',');   // chuỗi ổn định để effect không chạy lại khi mảng đổi tham chiếu
 
   const push = useCallback((incoming, live) => {
     setItems((current) => {
@@ -39,9 +40,9 @@ export function NotificationProvider({ children }) {
     if (!userId) { setConnection('idle'); return undefined; }
     let alive = true;
     notificationsApi.list(50).then((list) => { if (alive) (list || []).forEach((item) => push(item, false)); }).catch(() => {});
-    const close = connectNotifications({ role, onMessage: (message) => push(message, true), onState: setConnection });
+    const close = connectNotifications({ roles: rolesKey ? rolesKey.split(',') : [], onMessage: (message) => push(message, true), onState: setConnection });
     return () => { alive = false; close(); };
-  }, [userId, role, push]);
+  }, [userId, rolesKey, push]);
 
   useEffect(() => {
     if (!toast) return undefined;

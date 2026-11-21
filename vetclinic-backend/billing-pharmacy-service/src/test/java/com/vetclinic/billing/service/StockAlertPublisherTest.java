@@ -1,5 +1,6 @@
 package com.vetclinic.billing.service;
 
+import java.util.UUID;
 import com.vetclinic.billing.entity.Medicine;
 import com.vetclinic.common.event.DomainEvent;
 import com.vetclinic.common.event.MedicineLowStockEvent;
@@ -21,7 +22,7 @@ import static org.mockito.Mockito.verify;
 class StockAlertPublisherTest {
 
     private static final Instant NOW = Instant.parse("2026-11-20T03:00:00Z");
-    private static final Long ADMIN = 1L;
+    private static final UUID ADMIN = UUID.fromString("019a9442-d800-7729-87cc-fbb1ceda8817");
 
     private final OutboxWriter outboxWriter = mock(OutboxWriter.class);
     private final StockAlertPublisher publisher = new StockAlertPublisher(outboxWriter, Clock.fixed(NOW, ZoneOffset.UTC));

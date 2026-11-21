@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -32,7 +33,7 @@ public class ImagingResult {
     private String conclusion;
 
     @Column(name = "performed_by", nullable = false)
-    private Long performedBy;
+    private UUID performedBy;
 
     @CreationTimestamp
     @Column(name = "performed_at", nullable = false, updatable = false)

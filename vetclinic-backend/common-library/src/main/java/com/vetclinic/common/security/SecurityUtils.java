@@ -6,7 +6,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.util.EnumSet;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 public final class SecurityUtils {
@@ -14,29 +17,45 @@ public final class SecurityUtils {
     private SecurityUtils() {
     }
 
-    public static Long getCurrentUserId() {
+    /** Id (UUID) của người dùng đang đăng nhập; chưa đăng nhập hoặc id sai định dạng thì ném {@code SYS_1002}. */
+    public static UUID getCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || authentication.getPrincipal() == null) {
             throw new AppException(ErrorCode.UNAUTHORIZED);
         }
         try {
-            return Long.parseLong(authentication.getPrincipal().toString());
-        } catch (NumberFormatException e) {
+            return UUID.fromString(authentication.getPrincipal().toString());
+        } catch (IllegalArgumentException e) {
             throw new AppException(ErrorCode.UNAUTHORIZED);
         }
     }
 
-    public static Optional<RoleCode> getCurrentRole() {
+    /** Mọi vai trò của người dùng đang đăng nhập (một người có thể có nhiều vai trò, ví dụ Bác sĩ kiêm Quản trị viên). */
+    public static Set<RoleCode> getCurrentRoles() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Set<RoleCode> roles = EnumSet.noneOf(RoleCode.class);
         if (authentication == null) {
-            return Optional.empty();
+            return roles;
         }
-        return authentication.getAuthorities().stream()
+        authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .filter(a -> a.startsWith(SecurityConstants.ROLE_PREFIX))
                 .map(a -> a.substring(SecurityConstants.ROLE_PREFIX.length()))
                 .flatMap(SecurityUtils::toRoleCode)
-                .findFirst();
+                .forEach(roles::add);
+        return roles;
+    }
+
+    /**
+     * Vai trò "chính" để các nơi còn phân nhánh theo một vai trò: vai trò đứng đầu theo thứ tự khai báo của {@link RoleCode}
+     * (ADMIN, VETERINARIAN, RECEPTIONIST, ...). Nơi cần kiểm tra quyền chính xác dùng {@link #getCurrentRoles()}.
+     */
+    public static Optional<RoleCode> getCurrentRole() {
+        return getCurrentRoles().stream().findFirst();
+    }
+
+    public static boolean hasRole(RoleCode role) {
+        return getCurrentRoles().contains(role);
     }
 
     private static Stream<RoleCode> toRoleCode(String code) {

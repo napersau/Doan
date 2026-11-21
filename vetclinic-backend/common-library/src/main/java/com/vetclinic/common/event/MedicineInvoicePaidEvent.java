@@ -11,7 +11,7 @@ import java.util.UUID;
 public record MedicineInvoicePaidEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,        // thu ngân
+        UUID actorUserId,        // thu ngân
         Long invoiceId,
         String invoiceCode,
         Long prescriptionId,

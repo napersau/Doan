@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 import java.util.Locale;
 
 @Service
@@ -72,7 +73,7 @@ public class MedicineServiceImpl implements MedicineService {
     @Override
     @Transactional
     public MedicineResponse create(MedicineRequest request) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         String code = request.code().trim().toUpperCase(Locale.ROOT);
         if (medicineRepository.existsByCodeIgnoreCase(code)) {
             throw new AppException(ErrorCode.MEDICINE_CODE_ALREADY_EXISTS);
@@ -126,7 +127,7 @@ public class MedicineServiceImpl implements MedicineService {
     @Override
     @Transactional
     public MedicineResponse importStock(InventoryImportRequest request) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         Medicine medicine = find(request.medicineId());
         applyDelta(medicine, request.quantity());
         log(medicine.getId(), InventoryTransactionType.IMPORT, request.quantity(), blankToNull(request.notes()), actor);
@@ -136,7 +137,7 @@ public class MedicineServiceImpl implements MedicineService {
     @Override
     @Transactional
     public MedicineResponse adjustStock(InventoryAdjustRequest request) {
-        Long actor = SecurityUtils.getCurrentUserId();
+        UUID actor = SecurityUtils.getCurrentUserId();
         if (request.delta() == 0) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Số lượng điều chỉnh phải khác 0");
         }
@@ -178,7 +179,7 @@ public class MedicineServiceImpl implements MedicineService {
     }
 
     /** quantity có dấu (+ nhập / - xuất): bất biến stock_quantity = SUM(quantity). */
-    private void log(Long medicineId, InventoryTransactionType type, int quantity, String notes, Long actor) {
+    private void log(Long medicineId, InventoryTransactionType type, int quantity, String notes, UUID actor) {
         inventoryRepository.save(InventoryTransaction.builder().medicineId(medicineId).transactionType(type)
                 .quantity(quantity).notes(notes).createdBy(actor).build());
     }

@@ -96,10 +96,10 @@ public class AppointmentServiceImpl implements AppointmentService {
     /** aggregate_type của các dòng outbox do service này ghi. */
     private static final String AGGREGATE = "APPOINTMENT";
 
-    private record Actor(Long id, RoleCode role) {
+    private record Actor(UUID id, RoleCode role) {
     }
 
-    private record Booking(Long ownerId, BookingChannel channel, AppointmentStatus status) {
+    private record Booking(UUID ownerId, BookingChannel channel, AppointmentStatus status) {
     }
 
     // ================================================================== tạo lịch hẹn (UC-14, UC-16)
@@ -203,7 +203,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     public PageResponse<AppointmentResponse> search(AppointmentFilter filter) {
         Actor actor = currentActor();
         // Chủ nuôi chỉ thấy lịch hẹn của chính mình, bất kể tham số gửi lên
-        Long ownerId = actor.role() == RoleCode.PET_OWNER ? actor.id() : filter.ownerId();
+        UUID ownerId = actor.role() == RoleCode.PET_OWNER ? actor.id() : filter.ownerId();
 
         // appointments không còn owner_id: "lịch của một chủ nuôi" = lịch của các thú cưng của họ
         List<Long> petIds = ownerId == null ? null : petIdsOfOwner(ownerId);
@@ -225,7 +225,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     public AppointmentResponse getById(Long id) {
         Actor actor = currentActor();
         Appointment appointment = findById(id);
-        Long ownerId = resolveOwner(actor, appointment.getPetId());   // chủ nuôi chỉ xem được lịch của mình
+        UUID ownerId = resolveOwner(actor, appointment.getPetId());   // chủ nuôi chỉ xem được lịch của mình
         return toResponse(appointment).withOwnerId(ownerId);
     }
 
@@ -253,11 +253,11 @@ public class AppointmentServiceImpl implements AppointmentService {
     public AppointmentResponse confirm(Long id) {
         Actor actor = currentActor();
         requireRole(actor, RoleCode.RECEPTIONIST);
-        Long ownerId = resolveOwner(actor, findById(id).getPetId());
+        UUID ownerId = resolveOwner(actor, findById(id).getPetId());
         return transactionTemplate.execute(tx -> applyConfirm(actor, id, ownerId));
     }
 
-    private AppointmentResponse applyConfirm(Actor actor, Long id, Long ownerId) {
+    private AppointmentResponse applyConfirm(Actor actor, Long id, UUID ownerId) {
         Appointment appointment = lockForUpdate(id);
         if (appointment.getStatus() != AppointmentStatus.PENDING) {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
@@ -274,11 +274,11 @@ public class AppointmentServiceImpl implements AppointmentService {
         if (actor.role() != RoleCode.PET_OWNER && actor.role() != RoleCode.RECEPTIONIST) {
             throw new AppException(ErrorCode.ACCESS_DENIED);
         }
-        Long ownerId = resolveOwner(actor, findById(id).getPetId());
+        UUID ownerId = resolveOwner(actor, findById(id).getPetId());
         return transactionTemplate.execute(tx -> applyCancel(actor, id, request, ownerId));
     }
 
-    private AppointmentResponse applyCancel(Actor actor, Long id, CancelAppointmentRequest request, Long ownerId) {
+    private AppointmentResponse applyCancel(Actor actor, Long id, CancelAppointmentRequest request, UUID ownerId) {
         Appointment appointment = lockForUpdate(id);
         if (!AppointmentStatus.MODIFIABLE.contains(appointment.getStatus())) {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
@@ -307,7 +307,7 @@ public class AppointmentServiceImpl implements AppointmentService {
 
         // Đọc nhanh (không khóa) để biết thú cưng và kiểm tra quyền; điều kiện thật được kiểm tra lại trong transaction
         Appointment current = findById(id);
-        Long ownerId = resolveOwner(actor, current.getPetId());
+        UUID ownerId = resolveOwner(actor, current.getPetId());
         slotPolicy.assertBookable(newDate, newStart);
 
         int capacity = slotPolicy.activeDoctorCapacity();
@@ -323,7 +323,7 @@ public class AppointmentServiceImpl implements AppointmentService {
         return toResponse(saved).withOwnerId(ownerId);
     }
 
-    private Appointment applyReschedule(Actor actor, Long id, RescheduleAppointmentRequest request, int capacity, Long ownerId) {
+    private Appointment applyReschedule(Actor actor, Long id, RescheduleAppointmentRequest request, int capacity, UUID ownerId) {
         LocalDate newDate = request.newDate();
         LocalTime newStart = request.newStartTime();
 
@@ -370,11 +370,11 @@ public class AppointmentServiceImpl implements AppointmentService {
     public AppointmentResponse markNoShow(Long id) {
         Actor actor = currentActor();
         requireRole(actor, RoleCode.RECEPTIONIST);
-        Long ownerId = resolveOwner(actor, findById(id).getPetId());
+        UUID ownerId = resolveOwner(actor, findById(id).getPetId());
         return transactionTemplate.execute(tx -> applyNoShow(actor, id, ownerId));
     }
 
-    private AppointmentResponse applyNoShow(Actor actor, Long id, Long ownerId) {
+    private AppointmentResponse applyNoShow(Actor actor, Long id, UUID ownerId) {
         Appointment appointment = lockForUpdate(id);
         if (appointment.getStatus() != AppointmentStatus.CONFIRMED) {
             throw new AppException(ErrorCode.INVALID_APPOINTMENT_STATUS,
@@ -395,11 +395,11 @@ public class AppointmentServiceImpl implements AppointmentService {
         if (peek == null || peek.getStatus() != AppointmentStatus.CONFIRMED || !isNoShowDue(peek)) {
             return false;
         }
-        Long ownerId = lookupOwnerOfPet(peek.getPetId());
+        UUID ownerId = lookupOwnerOfPet(peek.getPetId());
         return Boolean.TRUE.equals(transactionTemplate.execute(tx -> applyNoShowBySystem(id, ownerId)));
     }
 
-    private boolean applyNoShowBySystem(Long id, Long ownerId) {
+    private boolean applyNoShowBySystem(Long id, UUID ownerId) {
         Appointment appointment = appointmentRepository.findByIdForUpdate(id).orElse(null);
         // Idempotent: khách vừa check-in hoặc lịch vừa bị hủy trong lúc tiến trình quét đang chạy thì bỏ qua
         if (appointment == null || appointment.getStatus() != AppointmentStatus.CONFIRMED || !isNoShowDue(appointment)) {
@@ -417,11 +417,11 @@ public class AppointmentServiceImpl implements AppointmentService {
         if (peek == null || peek.getStatus() != AppointmentStatus.PENDING || !isPendingExpired(peek)) {
             return false;
         }
-        Long ownerId = lookupOwnerOfPet(peek.getPetId());
+        UUID ownerId = lookupOwnerOfPet(peek.getPetId());
         return Boolean.TRUE.equals(transactionTemplate.execute(tx -> applyExpirePending(id, ownerId)));
     }
 
-    private boolean applyExpirePending(Long id, Long ownerId) {
+    private boolean applyExpirePending(Long id, UUID ownerId) {
         Appointment appointment = appointmentRepository.findByIdForUpdate(id).orElse(null);
         // Idempotent: lễ tân vừa duyệt hoặc chủ nuôi vừa hủy trong lúc tiến trình quét chạy thì bỏ qua
         if (appointment == null || appointment.getStatus() != AppointmentStatus.PENDING || !isPendingExpired(appointment)) {
@@ -435,7 +435,7 @@ public class AppointmentServiceImpl implements AppointmentService {
 
     @Override
     @Transactional
-    public void markCheckedIn(Long appointmentId, Long actorUserId, String visitCode) {
+    public void markCheckedIn(Long appointmentId, UUID actorUserId, String visitCode) {
         // Không tìm thấy là lỗi vĩnh viễn: ném lỗi để message sau khi hết retry được đẩy sang DLQ cho người xem xét
         Appointment appointment = lockForUpdate(appointmentId);
         switch (appointment.getStatus()) {
@@ -493,8 +493,8 @@ public class AppointmentServiceImpl implements AppointmentService {
      * @param reason  lý do gửi kèm thông báo cho chủ nuôi; có thể null
      * @param ownerId chủ nuôi của lịch hẹn nếu đã tra được (null thì không báo tin được)
      */
-    private void transition(Appointment appointment, AppointmentStatus to, Long actorId, String note,
-                            String reason, Long ownerId) {
+    private void transition(Appointment appointment, AppointmentStatus to, UUID actorId, String note,
+                            String reason, UUID ownerId) {
         AppointmentStatus from = appointment.getStatus();
         appointment.setStatus(to);
         appointmentRepository.save(appointment);
@@ -510,7 +510,7 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
     }
 
-    private void publishNoShow(Appointment appointment, Long ownerId, Long actorId) {
+    private void publishNoShow(Appointment appointment, UUID ownerId, UUID actorId) {
         if (ownerId == null) {
             return;   // đã cảnh báo trong notifyOwner
         }
@@ -523,7 +523,7 @@ public class AppointmentServiceImpl implements AppointmentService {
      * Ghi sự kiện báo chủ nuôi vào outbox (cùng giao dịch); OutboxRelay gửi sang RabbitMQ sau khi commit.
      * Không tra được chủ nuôi (clinical-service tạm sập) thì bỏ qua thông báo chứ không làm hỏng nghiệp vụ (CLAUDE.md §10 #3).
      */
-    private void notifyOwner(Appointment appointment, Long ownerId, Long actorId, boolean rescheduled, String reason) {
+    private void notifyOwner(Appointment appointment, UUID ownerId, UUID actorId, boolean rescheduled, String reason) {
         if (ownerId == null) {
             log.warn("Không tra được chủ nuôi của lịch hẹn {} (thú cưng {}), bỏ qua thông báo", appointment.getId(), appointment.getPetId());
             return;
@@ -543,18 +543,18 @@ public class AppointmentServiceImpl implements AppointmentService {
      *   <li>Nhân viên: tra được thì trả ownerId để báo tin; không tra được thì null (chỉ mất thông báo).</li>
      * </ul>
      */
-    private Long resolveOwner(Actor actor, Long petId) {
+    private UUID resolveOwner(Actor actor, Long petId) {
         if (actor.role() != RoleCode.PET_OWNER) {
             return lookupOwnerOfPet(petId);
         }
-        Long owner = requireOwnerOfPet(petId);
+        UUID owner = requireOwnerOfPet(petId);
         if (!owner.equals(actor.id())) {
             throw new AppException(ErrorCode.APPOINTMENT_NOT_FOUND);
         }
         return owner;
     }
 
-    private Long lookupOwnerOfPet(Long petId) {
+    private UUID lookupOwnerOfPet(Long petId) {
         try {
             ApiResponse<PetSummaryResponse> response = petClient.getPet(petId);
             return response == null || response.getData() == null ? null : response.getData().ownerId();
@@ -564,7 +564,7 @@ public class AppointmentServiceImpl implements AppointmentService {
         }
     }
 
-    private Long requireOwnerOfPet(Long petId) {
+    private UUID requireOwnerOfPet(Long petId) {
         ApiResponse<PetSummaryResponse> response;
         try {
             response = petClient.getPet(petId);
@@ -584,7 +584,7 @@ public class AppointmentServiceImpl implements AppointmentService {
      * Các thú cưng của một chủ nuôi. Không tra được thì trả danh sách RỖNG (đóng cửa): tuyệt đối không bỏ điều kiện lọc,
      * nếu không chủ nuôi sẽ thấy lịch của người khác.
      */
-    private List<Long> petIdsOfOwner(Long ownerId) {
+    private List<Long> petIdsOfOwner(UUID ownerId) {
         try {
             ApiResponse<List<PetSummaryResponse>> response = petClient.getPetsByOwner(ownerId);
             List<PetSummaryResponse> pets = response == null || response.getData() == null ? List.of() : response.getData();
@@ -596,7 +596,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     }
 
     private void recordHistory(Long appointmentId, AppointmentStatus from, AppointmentStatus to,
-                               Long actorId, String note) {
+                               UUID actorId, String note) {
         historyRepository.save(AppointmentStatusHistory.builder()
                 .appointmentId(appointmentId)
                 .fromStatus(from)
@@ -628,13 +628,13 @@ public class AppointmentServiceImpl implements AppointmentService {
     }
 
     /** Lễ tân đặt hộ phải chọn đúng một tài khoản chủ thú cưng còn hoạt động. */
-    private void assertActivePetOwner(Long ownerId) {
+    private void assertActivePetOwner(UUID ownerId) {
         ApiResponse<UserSummaryResponse> response = authClient.getUser(ownerId);
         UserSummaryResponse owner = response == null ? null : response.getData();
         if (owner == null) {
             throw new AppException(ErrorCode.USER_NOT_FOUND);
         }
-        if (owner.role() != RoleCode.PET_OWNER) {
+        if (!owner.roles().contains(RoleCode.PET_OWNER)) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Người dùng được chọn không phải chủ thú cưng");
         }
         if (!"ACTIVE".equals(owner.status())) {
@@ -643,7 +643,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     }
 
     /** Thú cưng phải tồn tại và thuộc đúng chủ nuôi. Bật bằng vetclinic.booking.verify-pet. */
-    private void verifyPet(Long petId, Long ownerId) {
+    private void verifyPet(Long petId, UUID ownerId) {
         if (!properties.verifyPet()) {
             return;
         }

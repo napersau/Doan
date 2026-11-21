@@ -1,4 +1,6 @@
 package com.vetclinic.appointment.dto.response;
 
-public record PetSummaryResponse(Long id, Long ownerId, String name) {
+import java.util.UUID;
+
+public record PetSummaryResponse(Long id, UUID ownerId, String name) {
 }

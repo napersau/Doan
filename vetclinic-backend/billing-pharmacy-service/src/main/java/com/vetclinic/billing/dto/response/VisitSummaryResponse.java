@@ -1,5 +1,6 @@
 package com.vetclinic.billing.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.billing.constant.VisitStatus;
 
 /** Bản rút gọn đợt khám do clinical-service trả về qua endpoint nội bộ. */
@@ -9,7 +10,7 @@ public record VisitSummaryResponse(
         VisitStatus status,
         Long petId,
         String petName,
-        Long ownerId,
-        Long doctorId
+        UUID ownerId,
+        UUID doctorId
 ) {
 }

@@ -10,6 +10,7 @@ import com.vetclinic.auth.mapper.UserMapper;
 import com.vetclinic.auth.repository.RefreshTokenRepository;
 import com.vetclinic.auth.repository.UserRepository;
 import com.vetclinic.auth.security.JwtTokenProvider;
+import com.vetclinic.auth.security.TokenHasher;
 import com.vetclinic.auth.security.LoginAttemptService;
 import com.vetclinic.auth.service.AccountRules;
 import com.vetclinic.auth.service.AuthService;
@@ -75,11 +76,12 @@ public class AuthServiceImpl implements AuthService {
         AccountRules.assertUsable(user);
         loginAttemptService.reset(username);
 
-        RefreshToken refreshToken = newRefreshToken(user);
-        log.info("Đăng nhập thành công: userId={}, role={}", user.getId(), user.getRole().getCode());
+        user.setLastLoginAt(Instant.now());
+        String refreshToken = issueRefreshToken(user);
+        log.info("Đăng nhập thành công: userId={}, roles={}", user.getId(), UserMapper.rolesOf(user));
         return new AuthResponse(
                 jwtTokenProvider.generateAccessToken(user),
-                refreshToken.getToken(),
+                refreshToken,
                 TOKEN_TYPE,
                 jwtTokenProvider.accessTokenTtlSeconds(),
                 userMapper.toResponse(user));
@@ -92,7 +94,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(noRollbackFor = AppException.class)
     public TokenRefreshResponse refresh(String tokenStr) {
-        RefreshToken token = refreshTokenRepository.findByTokenWithUser(tokenStr)
+        RefreshToken token = refreshTokenRepository.findByTokenHashWithUser(TokenHasher.sha256Hex(tokenStr))
                 .orElseThrow(() -> new AppException(ErrorCode.REFRESH_TOKEN_NOT_FOUND));
         User user = token.getUser();
 
@@ -120,10 +122,10 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 5. Xoay vòng: cấp token mới
-        RefreshToken newToken = newRefreshToken(user);
+        String newToken = issueRefreshToken(user);
         return new TokenRefreshResponse(
                 jwtTokenProvider.generateAccessToken(user),
-                newToken.getToken(),
+                newToken,
                 TOKEN_TYPE,
                 jwtTokenProvider.accessTokenTtlSeconds());
     }
@@ -131,7 +133,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public void logout(String refreshToken) {
-        refreshTokenRepository.revokeByToken(refreshToken);
+        refreshTokenRepository.revokeByTokenHash(TokenHasher.sha256Hex(refreshToken));
     }
 
     private AppException reuseDetected(User user) {
@@ -140,14 +142,16 @@ public class AuthServiceImpl implements AuthService {
         return new AppException(ErrorCode.REFRESH_TOKEN_REVOKED);
     }
 
-    private RefreshToken newRefreshToken(User user) {
-        RefreshToken refreshToken = RefreshToken.builder()
+    /** Sinh Refresh Token (UUID v4 ngẫu nhiên), CHỈ lưu giá trị băm SHA-256; trả về token gốc để gửi cho client một lần duy nhất. */
+    private String issueRefreshToken(User user) {
+        String raw = UUID.randomUUID().toString();
+        refreshTokenRepository.save(RefreshToken.builder()
                 .user(user)
-                .token(UUID.randomUUID().toString())
+                .tokenHash(TokenHasher.sha256Hex(raw))
                 .expiryDate(Instant.now().plus(jwtProperties.refreshTokenTtl()))
                 .revoked(false)
-                .build();
-        return refreshTokenRepository.save(refreshToken);
+                .build());
+        return raw;
     }
 
     private boolean matches(String rawPassword, String hash) {

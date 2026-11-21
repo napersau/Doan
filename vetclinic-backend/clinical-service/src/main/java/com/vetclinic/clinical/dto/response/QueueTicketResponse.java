@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.TicketStatus;
 
@@ -17,7 +18,7 @@ public record QueueTicketResponse(
         Long visitId,
         String visitCode,
         String petName,
-        Long doctorId,
+        UUID doctorId,
         String roomNumber
 ) {
 }

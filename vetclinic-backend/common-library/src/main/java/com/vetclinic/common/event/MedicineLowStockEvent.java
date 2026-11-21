@@ -10,7 +10,7 @@ import java.util.UUID;
 public record MedicineLowStockEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,
+        UUID actorUserId,
         Long medicineId,
         String medicineCode,
         String medicineName,

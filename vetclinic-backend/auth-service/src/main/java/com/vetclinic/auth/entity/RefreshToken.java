@@ -35,9 +35,12 @@ public class RefreshToken {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    /** UUID v4 ngẫu nhiên, dùng một lần duy nhất (Token Rotation). */
-    @Column(name = "token", nullable = false, unique = true)
-    private String token;
+    /**
+     * Giá trị băm SHA-256 (hex 64 ký tự) của Refresh Token. Chỉ lưu giá trị băm: lộ CSDL không dùng lại được token.
+     * Token gốc là UUID v4 ngẫu nhiên, dùng một lần duy nhất (Token Rotation), chỉ tồn tại trong phản hồi cho client.
+     */
+    @Column(name = "token_hash", nullable = false, unique = true, length = 64, columnDefinition = "CHAR(64)")
+    private String tokenHash;
 
     @Column(name = "expiry_date", nullable = false)
     private Instant expiryDate;

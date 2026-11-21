@@ -13,10 +13,10 @@ import java.util.UUID;
 public record AppointmentNoShowEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,        // null = hệ thống tự quét
+        UUID actorUserId,        // null = hệ thống tự quét
         Long appointmentId,
         String appointmentCode,
-        Long ownerId,
+        UUID ownerId,
         Long petId,
         LocalDate appointmentDate,
         LocalTime startTime

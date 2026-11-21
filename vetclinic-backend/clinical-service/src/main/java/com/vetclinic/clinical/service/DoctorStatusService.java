@@ -3,6 +3,7 @@ package com.vetclinic.clinical.service;
 import com.vetclinic.clinical.constant.DoctorStatus;
 import com.vetclinic.clinical.dto.response.DoctorStatusResponse;
 
+import java.util.UUID;
 import java.util.List;
 
 /**
@@ -15,7 +16,7 @@ import java.util.List;
  */
 public interface DoctorStatusService {
 
-    DoctorStatus statusOf(Long doctorId);
+    DoctorStatus statusOf(UUID doctorId);
 
     /** Bảng trạng thái Bác sĩ: mọi Bác sĩ đang ACTIVE kèm số phòng, trạng thái và số ca đang chờ. */
     List<DoctorStatusResponse> board();

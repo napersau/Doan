@@ -1,6 +1,7 @@
 package com.vetclinic.clinical.dto.response;
 
 import java.time.LocalDate;
+import java.util.UUID;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +23,6 @@ public record OperationsReportResponse(
 ) {
 
     /** Số ca một Bác sĩ phụ trách trong kỳ (ca đã được phân công cho bác sĩ đó). */
-    public record DoctorLoad(Long doctorId, String doctorName, long assignedVisits, long completedVisits) {
+    public record DoctorLoad(UUID doctorId, String doctorName, long assignedVisits, long completedVisits) {
     }
 }

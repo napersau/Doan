@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.UUID;
 import java.util.List;
 
 /** Hồ sơ thú cưng (UC-12, UC-13, UC-18) và dòng thời gian bệnh án (UC-38). */
@@ -38,7 +39,7 @@ public class PetController {
     @GetMapping
     @PreAuthorize("hasAnyRole('PET_OWNER','RECEPTIONIST','VETERINARIAN','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<PetResponse>>> search(
-            @RequestParam(required = false) Long ownerId,
+            @RequestParam(required = false) UUID ownerId,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {

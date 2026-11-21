@@ -15,6 +15,7 @@ import com.vetclinic.clinical.dto.response.VisitSummaryResponse;
 
 import com.vetclinic.common.dto.PageResponse;
 import java.time.LocalDate;
+import java.util.UUID;
 import java.util.Collection;
 import java.util.List;
 
@@ -26,7 +27,7 @@ public interface VisitService {
 
     /** Danh sách đợt khám có lọc (bảng điều phối): trạng thái, ngày check-in theo giờ phòng khám, bác sĩ, thú cưng, mã ca. Mới nhất trước. */
     PageResponse<VisitResponse> search(VisitStatus status,
-            LocalDate date, Long doctorId, Long petId, String keyword, int page, int size);
+            LocalDate date, UUID doctorId, Long petId, String keyword, int page, int size);
 
     VisitResponse getById(Long id);
 

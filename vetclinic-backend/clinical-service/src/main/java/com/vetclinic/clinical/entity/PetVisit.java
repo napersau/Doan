@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -37,10 +38,10 @@ public class PetVisit {
 
     /** Khóa ngoại logic -> auth.users(id): Bác sĩ phụ trách (do Lễ tân phân công). */
     @Column(name = "doctor_id")
-    private Long doctorId;
+    private UUID doctorId;
 
     @Column(name = "receptionist_id", nullable = false)
-    private Long receptionistId;
+    private UUID receptionistId;
 
     @Column(name = "is_emergency", nullable = false)
     private boolean emergency;

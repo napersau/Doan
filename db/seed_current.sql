@@ -2,70 +2,104 @@
 -- DỮ LIỆU DEMO TRUNG GIAN CỦA LỘ TRÌNH v4 (db/seed_current.sql) - chạy sau db/schema_current.sql.
 -- Xuất phát: docs/seed_demo_data.sql tại tag v3-final. Đổi theo từng bước của LO_TRINH_SUA_CODE_V4.md
 -- (UUID cố định theo quyết định D11); bước 8.2 viết lại docs/seed_demo_data.sql v4.0 từ file này.
--- ==============================================================================
-
--- ==============================================================================
--- SEED DỮ LIỆU DEMO (chỉ dùng cho môi trường dev/demo, chạy SAU schema_init.sql)
--- Bảng ID cố định theo LICH_TRINH_XAY_DUNG_MA_NGUON_VA_HUONG_DAN_TEST.md, Task 1.2.3.
--- Mọi lệnh curl kiểm thử trong Lộ trình dựa trên các ID này.
 --
 -- Mật khẩu chung của MỌI tài khoản demo (kể cả admin): Admin@123
--- (cùng hash BCrypt strength 12 với admin trong schema_init.sql)
---
---  id | username        | vai trò (role_id)       | phòng
---   1 | admin           | ADMIN (1)               | -      (đã có trong schema_init.sql)
---   2 | bs_tien         | VETERINARIAN (2)        | P101
---   3 | bs_an           | VETERINARIAN (2)        | P102
---   4 | bs_mai          | VETERINARIAN (2)        | P103
---   5 | letan_hoa       | RECEPTIONIST (3)        | -
---   6 | ktv_lab_minh    | LAB_TECHNICIAN (4)      | P201
---   7 | ktv_cdha_dung   | IMAGING_TECHNICIAN (5)  | P202
---   8 | khach_lan       | PET_OWNER (6)           | -      (chủ thú cưng #1 Lu, #2 Milo)
---   9 | khach_nam       | PET_OWNER (6)           | -      (thú cưng #3 Bông, #4 Mực)           [mở rộng 12/11/2026]
---  10 | khach_huong     | PET_OWNER (6)           | -      (thú cưng #5 Kitty, #6 Tom, #7 Luna)
---  11 | khach_duc       | PET_OWNER (6)           | -      (thú cưng #8 Béo, #9 Sóc)
---  12 | khach_thao      | PET_OWNER (6)           | -      (thú cưng #10 Vàng, #11 Mimi)
---  13 | khach_binh      | PET_OWNER (6)           | -      (thú cưng #12 Rex, #13 Nâu, #14 Cam)
--- LƯU Ý: seed CHỈ thêm người dùng và thú cưng (id >= 9 / >= 3). KHÔNG thêm lịch hẹn, đợt khám, hóa đơn hay biến động kho, để các ID
--- cố định trong Lộ trình vẫn đúng (đợt khám #1, lịch hẹn #1, Clavamox tồn 200 -> 190, hóa đơn thuốc #1).
+-- Bước 2.1: id người dùng là UUIDv7 cố định 019a9442-d810-7000-8000-0000000000NN (NN = số thứ tự cũ):
+--   02 bs_tien (P101) · 03 bs_an (P102) · 04 bs_mai (P103) · 05 letan_hoa · 06 ktv_lab_minh (P201) · 07 ktv_cdha_dung (P202)
+--   08 khach_lan (thú cưng Lu, Milo) · 09 khach_nam · 10 khach_huong · 11 khach_duc · 12 khach_thao · 13 khach_binh
+-- admin dùng UUID của docs (@u_admin trong schema_current.sql). Thú cưng vẫn id BIGINT cho tới bước 3.x.
+-- LƯU Ý: seed CHỈ thêm người dùng và thú cưng. KHÔNG thêm lịch hẹn, đợt khám, hóa đơn hay biến động kho.
 -- ==============================================================================
 SET NAMES utf8mb4;
 
-USE pet_clinic_auth_db;
-INSERT INTO users (id, role_id, username, password_hash, full_name, phone_number, room_number, status) VALUES
-(2, 2, 'bs_tien',       '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Nguyễn Văn Tiến', '0902000002', 'P101', 'ACTIVE'),
-(3, 2, 'bs_an',         '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Trần Bình An',    '0902000003', 'P102', 'ACTIVE'),
-(4, 2, 'bs_mai',        '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Lê Thị Mai',      '0902000004', 'P103', 'ACTIVE'),
-(5, 3, 'letan_hoa',     '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Phạm Thu Hoa',    '0902000005', NULL,   'ACTIVE'),
-(6, 4, 'ktv_lab_minh',  '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Đỗ Quang Minh',   '0902000006', 'P201', 'ACTIVE'),
-(7, 5, 'ktv_cdha_dung', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Vũ Tiến Dũng',    '0902000007', 'P202', 'ACTIVE'),
-(8, 6, 'khach_lan',     '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Hoàng Thị Lan',   '0912000008', NULL,   'ACTIVE');
+-- Mỗi file .sql trong docker-entrypoint-initdb.d chạy bằng một phiên mysql riêng nên biến phải khai báo lại ở đây.
+SET @u_bs_tien = UUID_TO_BIN('019a9442-d810-7000-8000-000000000002');
+SET @u_bs_an = UUID_TO_BIN('019a9442-d810-7000-8000-000000000003');
+SET @u_bs_mai = UUID_TO_BIN('019a9442-d810-7000-8000-000000000004');
+SET @u_letan_hoa = UUID_TO_BIN('019a9442-d810-7000-8000-000000000005');
+SET @u_ktv_lab_minh = UUID_TO_BIN('019a9442-d810-7000-8000-000000000006');
+SET @u_ktv_cdha_dung = UUID_TO_BIN('019a9442-d810-7000-8000-000000000007');
+SET @u_khach_lan = UUID_TO_BIN('019a9442-d810-7000-8000-000000000008');
+SET @u_khach_nam = UUID_TO_BIN('019a9442-d810-7000-8000-000000000009');
+SET @u_khach_huong = UUID_TO_BIN('019a9442-d810-7000-8000-000000000010');
+SET @u_khach_duc = UUID_TO_BIN('019a9442-d810-7000-8000-000000000011');
+SET @u_khach_thao = UUID_TO_BIN('019a9442-d810-7000-8000-000000000012');
+SET @u_khach_binh = UUID_TO_BIN('019a9442-d810-7000-8000-000000000013');
 
--- Thêm chủ nuôi (mật khẩu chung Admin@123) để demo danh sách khách hàng và đặt lịch nhiều người
-INSERT INTO users (id, role_id, username, password_hash, full_name, phone_number, email, status) VALUES
-(9, 6, 'khach_nam', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Nguyễn Hoàng Nam', '0912000009', 'nam.demo@example.com', 'ACTIVE'),
-(10, 6, 'khach_huong', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Lê Thị Hương', '0912000010', 'huong.demo@example.com', 'ACTIVE'),
-(11, 6, 'khach_duc', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Trần Minh Đức', '0912000011', NULL, 'ACTIVE'),
-(12, 6, 'khach_thao', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Phạm Thanh Thảo', '0912000012', 'thao.demo@example.com', 'ACTIVE'),
-(13, 6, 'khach_binh', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'Võ Quốc Bình', '0912000013', NULL, 'ACTIVE');
+USE pet_clinic_auth_db;
+-- Tài khoản nhân sự (admin đã có trong schema_current.sql)
+INSERT INTO users (id, username, password_hash, status) VALUES
+(@u_bs_tien, 'bs_tien', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_bs_an, 'bs_an', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_bs_mai, 'bs_mai', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_letan_hoa, 'letan_hoa', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_ktv_lab_minh, 'ktv_lab_minh', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_ktv_cdha_dung, 'ktv_cdha_dung', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE');
+INSERT INTO user_roles (user_id, role_id) VALUES
+(@u_bs_tien, (SELECT id FROM roles WHERE code = 'VETERINARIAN')),
+(@u_bs_an, (SELECT id FROM roles WHERE code = 'VETERINARIAN')),
+(@u_bs_mai, (SELECT id FROM roles WHERE code = 'VETERINARIAN')),
+(@u_letan_hoa, (SELECT id FROM roles WHERE code = 'RECEPTIONIST')),
+(@u_ktv_lab_minh, (SELECT id FROM roles WHERE code = 'LAB_TECHNICIAN')),
+(@u_ktv_cdha_dung, (SELECT id FROM roles WHERE code = 'IMAGING_TECHNICIAN'));
+INSERT INTO user_profiles (user_id, full_name, phone_number, email) VALUES
+(@u_bs_tien, 'Nguyễn Văn Tiến', '0902000002', NULL),
+(@u_bs_an, 'Trần Bình An', '0902000003', NULL),
+(@u_bs_mai, 'Lê Thị Mai', '0902000004', NULL),
+(@u_letan_hoa, 'Phạm Thu Hoa', '0902000005', NULL),
+(@u_ktv_lab_minh, 'Đỗ Quang Minh', '0902000006', NULL),
+(@u_ktv_cdha_dung, 'Vũ Tiến Dũng', '0902000007', NULL);
+INSERT INTO staff_profiles (user_id, employee_code, position_title, department, room_number, hire_date) VALUES
+(@u_bs_tien, 'NV0002', 'Bác sĩ thú y', 'Khám bệnh', 'P101', '2026-01-02'),
+(@u_bs_an, 'NV0003', 'Bác sĩ thú y', 'Khám bệnh', 'P102', '2026-01-02'),
+(@u_bs_mai, 'NV0004', 'Bác sĩ thú y', 'Khám bệnh', 'P103', '2026-01-02'),
+(@u_letan_hoa, 'NV0005', 'Lễ tân / Thu ngân', 'Tiếp đón', NULL, '2026-01-02'),
+(@u_ktv_lab_minh, 'NV0006', 'KTV xét nghiệm', 'Xét nghiệm', 'P201', '2026-01-02'),
+(@u_ktv_cdha_dung, 'NV0007', 'KTV chẩn đoán hình ảnh', 'Chẩn đoán hình ảnh', 'P202', '2026-01-02');
+-- Hồ sơ chuyên môn của Bác sĩ (bắt buộc với vai trò VETERINARIAN)
+INSERT INTO veterinarian_profiles (user_id, license_number, license_issued_date, license_issued_by, academic_degree, specialty, career_start_year) VALUES
+(@u_bs_tien, 'CCHN-TY-2020-0002', '2020-05-10', 'Chi cục Chăn nuôi và Thú y TP.HCM', 'Bác sĩ thú y', 'Nội khoa', 2014),
+(@u_bs_an, 'CCHN-TY-2020-0003', '2020-05-10', 'Chi cục Chăn nuôi và Thú y TP.HCM', 'Bác sĩ thú y', 'Ngoại khoa', 2016),
+(@u_bs_mai, 'CCHN-TY-2021-0004', '2020-05-10', 'Chi cục Chăn nuôi và Thú y TP.HCM', 'Bác sĩ thú y', 'Da liễu', 2018);
+
+-- Chủ nuôi (mật khẩu chung Admin@123): tài khoản + vai trò PET_OWNER + hồ sơ cá nhân + hồ sơ khách hàng
+INSERT INTO users (id, username, password_hash, status) VALUES
+(@u_khach_lan, 'khach_lan', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_khach_nam, 'khach_nam', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_khach_huong, 'khach_huong', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_khach_duc, 'khach_duc', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_khach_thao, 'khach_thao', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE'),
+(@u_khach_binh, 'khach_binh', '$2a$12$QfxJtMwsg2Wd72ZkvcQ.BeADCJqgMjJ7OPeBqNkj1um98Jt/dcBPG', 'ACTIVE');
+INSERT INTO user_roles (user_id, role_id) SELECT u.id, r.id FROM users u JOIN roles r ON r.code = 'PET_OWNER' WHERE u.username LIKE 'khach\_%';
+INSERT INTO user_profiles (user_id, full_name, phone_number, email) VALUES
+(@u_khach_lan, 'Hoàng Thị Lan', '0912000008', NULL),
+(@u_khach_nam, 'Nguyễn Hoàng Nam', '0912000009', 'nam.demo@example.com'),
+(@u_khach_huong, 'Lê Thị Hương', '0912000010', 'huong.demo@example.com'),
+(@u_khach_duc, 'Trần Minh Đức', '0912000011', NULL),
+(@u_khach_thao, 'Phạm Thanh Thảo', '0912000012', 'thao.demo@example.com'),
+(@u_khach_binh, 'Võ Quốc Bình', '0912000013', NULL);
+INSERT INTO pet_owner_profiles (user_id, customer_code, registered_channel) VALUES
+(@u_khach_lan, 'KH0001', 'AT_CLINIC'),
+(@u_khach_nam, 'KH0002', 'AT_CLINIC'),
+(@u_khach_huong, 'KH0003', 'AT_CLINIC'),
+(@u_khach_duc, 'KH0004', 'AT_CLINIC'),
+(@u_khach_thao, 'KH0005', 'AT_CLINIC'),
+(@u_khach_binh, 'KH0006', 'AT_CLINIC');
 
 USE pet_clinic_clinical_db;
--- species_id: 1 = Chó (DOG), 2 = Mèo (CAT) theo seed của schema_init.sql
+-- species_id: 1 = Chó (DOG), 2 = Mèo (CAT) theo seed của schema_current.sql
 INSERT INTO pets (id, owner_id, species_id, pet_code, name, breed, gender) VALUES
-(1, 8, 2, 'PET-2026-0001', 'Lu',   'Mèo Anh lông ngắn', 'FEMALE'),
-(2, 8, 1, 'PET-2026-0002', 'Milo', 'Poodle',            'MALE');
-
--- Thú cưng bổ sung (id 3-14) cho chủ nuôi id 9-13
-INSERT INTO pets (id, owner_id, species_id, pet_code, name, breed, gender) VALUES
-(3, 9, 1, 'PET-2026-0003', 'Bông', 'Poodle', 'FEMALE'),
-(4, 9, 1, 'PET-2026-0004', 'Mực', 'Labrador', 'MALE'),
-(5, 10, 2, 'PET-2026-0005', 'Kitty', 'Mèo Ba Tư', 'FEMALE'),
-(6, 10, 2, 'PET-2026-0006', 'Tom', 'Mèo mướp', 'MALE'),
-(7, 10, 2, 'PET-2026-0007', 'Luna', 'Mèo Anh lông dài', 'FEMALE'),
-(8, 11, 1, 'PET-2026-0008', 'Béo', 'Corgi', 'MALE'),
-(9, 11, 1, 'PET-2026-0009', 'Sóc', 'Phốc sóc', 'FEMALE'),
-(10, 12, 1, 'PET-2026-0010', 'Vàng', 'Golden Retriever', 'MALE'),
-(11, 12, 2, 'PET-2026-0011', 'Mimi', 'Mèo Xiêm', 'FEMALE'),
-(12, 13, 1, 'PET-2026-0012', 'Rex', 'Becgie Đức', 'MALE'),
-(13, 13, 1, 'PET-2026-0013', 'Nâu', 'Chó ta', 'UNKNOWN'),
-(14, 13, 2, 'PET-2026-0014', 'Cam', 'Mèo tam thể', 'FEMALE');
+(1, @u_khach_lan, 2, 'PET-2026-0001', 'Lu', 'Mèo Anh lông ngắn', 'FEMALE'),
+(2, @u_khach_lan, 1, 'PET-2026-0002', 'Milo', 'Poodle', 'MALE'),
+(3, @u_khach_nam, 1, 'PET-2026-0003', 'Bông', 'Poodle', 'FEMALE'),
+(4, @u_khach_nam, 1, 'PET-2026-0004', 'Mực', 'Labrador', 'MALE'),
+(5, @u_khach_huong, 2, 'PET-2026-0005', 'Kitty', 'Mèo Ba Tư', 'FEMALE'),
+(6, @u_khach_huong, 2, 'PET-2026-0006', 'Tom', 'Mèo mướp', 'MALE'),
+(7, @u_khach_huong, 2, 'PET-2026-0007', 'Luna', 'Mèo Anh lông dài', 'FEMALE'),
+(8, @u_khach_duc, 1, 'PET-2026-0008', 'Béo', 'Corgi', 'MALE'),
+(9, @u_khach_duc, 1, 'PET-2026-0009', 'Sóc', 'Phốc sóc', 'FEMALE'),
+(10, @u_khach_thao, 1, 'PET-2026-0010', 'Vàng', 'Golden Retriever', 'MALE'),
+(11, @u_khach_thao, 2, 'PET-2026-0011', 'Mimi', 'Mèo Xiêm', 'FEMALE'),
+(12, @u_khach_binh, 1, 'PET-2026-0012', 'Rex', 'Becgie Đức', 'MALE'),
+(13, @u_khach_binh, 1, 'PET-2026-0013', 'Nâu', 'Chó ta', 'UNKNOWN'),
+(14, @u_khach_binh, 2, 'PET-2026-0014', 'Cam', 'Mèo tam thể', 'FEMALE');

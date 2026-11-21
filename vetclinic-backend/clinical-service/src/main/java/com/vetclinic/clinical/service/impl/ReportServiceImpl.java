@@ -15,6 +15,7 @@ import com.vetclinic.clinical.service.ReportService;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
+import java.util.UUID;
 import java.util.HashSet;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
@@ -62,7 +63,7 @@ public class ReportServiceImpl implements ReportService {
     }
 
     private record Raw(Map<VisitStatus, Long> byStatus, long emergency, long paraclinical,
-                       Map<Long, Map<VisitStatus, Long>> byDoctor) {
+                       Map<UUID, Map<VisitStatus, Long>> byDoctor) {
     }
 
     private record Range(LocalDate from, LocalDate to, Instant start, Instant end) {
@@ -138,9 +139,9 @@ public class ReportServiceImpl implements ReportService {
             for (Object[] row : visitRepository.countByStatusBetween(start, end)) {
                 byStatus.put((VisitStatus) row[0], (Long) row[1]);
             }
-            Map<Long, Map<VisitStatus, Long>> byDoctor = new HashMap<>();
+            Map<UUID, Map<VisitStatus, Long>> byDoctor = new HashMap<>();
             for (Object[] row : visitRepository.countByDoctorAndStatusBetween(start, end)) {
-                byDoctor.computeIfAbsent((Long) row[0], k -> new EnumMap<>(VisitStatus.class)).put((VisitStatus) row[1], (Long) row[2]);
+                byDoctor.computeIfAbsent((UUID) row[0], k -> new EnumMap<>(VisitStatus.class)).put((VisitStatus) row[1], (Long) row[2]);
             }
             return new Raw(byStatus, visitRepository.countEmergencyBetween(start, end),
                     detailRepository.countVisitsWithCategoriesBetween(ServiceCategory.PARACLINICAL, start, end), byDoctor);
@@ -151,7 +152,7 @@ public class ReportServiceImpl implements ReportService {
         for (VisitStatus s : VisitStatus.values()) {
             byStatus.put(s.name(), raw.byStatus().getOrDefault(s, 0L));
         }
-        Map<Long, String> names = doctorNames(raw.byDoctor().keySet());
+        Map<UUID, String> names = doctorNames(raw.byDoctor().keySet());
         List<OperationsReportResponse.DoctorLoad> doctors = new TreeMap<>(raw.byDoctor()).entrySet().stream()
                 .map(e -> new OperationsReportResponse.DoctorLoad(e.getKey(), names.get(e.getKey()),
                         e.getValue().values().stream().mapToLong(Long::longValue).sum(),
@@ -162,13 +163,13 @@ public class ReportServiceImpl implements ReportService {
                 raw.emergency(), total - raw.paraclinical(), raw.paraclinical(), byStatus, doctors);
     }
 
-    private Map<Long, String> doctorNames(Set<Long> ids) {
+    private Map<UUID, String> doctorNames(Set<UUID> ids) {
         if (ids.isEmpty()) {
             return Map.of();
         }
         try {
             ApiResponse<List<UserSummaryResponse>> response = authClient.getUsers(List.copyOf(ids));
-            Map<Long, String> names = new HashMap<>();
+            Map<UUID, String> names = new HashMap<>();
             if (response != null && response.getData() != null) {
                 response.getData().forEach(u -> names.put(u.id(), u.fullName()));
             }

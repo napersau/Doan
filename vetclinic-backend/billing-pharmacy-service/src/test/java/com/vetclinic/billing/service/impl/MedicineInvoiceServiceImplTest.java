@@ -440,7 +440,7 @@ class MedicineInvoiceServiceImplTest {
         assertThat(invoice.getPaidAt()).isNull();
         verify(invoiceRepository, never()).saveAndFlush(any());
         verify(outboxWriter, never()).write(any(), any(), any(DomainEvent.class));   // không có thông báo giả
-        verify(stockAlerts, never()).publishIfLow(any(), anyLong());
+        verify(stockAlerts, never()).publishIfLow(any(), any());
     }
 
     @Test

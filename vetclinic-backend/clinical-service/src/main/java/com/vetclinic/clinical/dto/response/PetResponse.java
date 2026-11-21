@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.PetGender;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -7,7 +8,7 @@ import java.time.LocalDate;
 
 public record PetResponse(
         Long id,
-        Long ownerId,
+        UUID ownerId,
         Long speciesId,
         String speciesCode,
         String speciesName,

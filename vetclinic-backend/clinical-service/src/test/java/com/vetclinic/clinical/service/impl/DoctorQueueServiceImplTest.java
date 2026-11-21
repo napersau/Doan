@@ -33,9 +33,11 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.util.UUID;
 import java.util.List;
 import java.util.Set;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.OTHER_DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
@@ -77,11 +79,11 @@ class DoctorQueueServiceImplTest {
         SecurityContextHolder.clearContext();
     }
 
-    private static UserSummaryResponse doctor(long id, String room) {
-        return new UserSummaryResponse(id, "BS " + id, "0911111111", RoleCode.VETERINARIAN, room, "ACTIVE");
+    private static UserSummaryResponse doctor(UUID id, String room) {
+        return new UserSummaryResponse(id, "BS " + id, "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), room, "ACTIVE");
     }
 
-    private static QueueTicket doctorTicket(long id, long visitId, Long doctorId, int no, int priority) {
+    private static QueueTicket doctorTicket(long id, long visitId, UUID doctorId, int no, int priority) {
         return ticket(id, QueueType.DOCTOR, visitId, doctorId, no, priority, TicketStatus.WAITING);
     }
 
@@ -124,12 +126,12 @@ class DoctorQueueServiceImplTest {
 
     @Test
     void suggest_prefersTheFewestWaiting_thenAnAvailableDoctor_thenTheLowestId() {
-        var busy = new DoctorQueueResponse(1L, "A", "P1", DoctorStatus.BUSY, 0, List.of());
-        var free = new DoctorQueueResponse(2L, "B", "P2", DoctorStatus.AVAILABLE, 0, List.of());
-        var longer = new DoctorQueueResponse(3L, "C", "P3", DoctorStatus.AVAILABLE, 4, List.of());
+        var busy = new DoctorQueueResponse(uid(1), "A", "P1", DoctorStatus.BUSY, 0, List.of());
+        var free = new DoctorQueueResponse(uid(2), "B", "P2", DoctorStatus.AVAILABLE, 0, List.of());
+        var longer = new DoctorQueueResponse(uid(3), "C", "P3", DoctorStatus.AVAILABLE, 4, List.of());
 
-        assertThat(DoctorQueueServiceImpl.suggest(List.of(busy, free, longer))).isEqualTo(2L);   // hòa số chờ: ưu tiên bác sĩ rảnh
-        assertThat(DoctorQueueServiceImpl.suggest(List.of(longer, busy))).isEqualTo(1L);          // ít phiếu chờ hơn thắng dù đang bận
+        assertThat(DoctorQueueServiceImpl.suggest(List.of(busy, free, longer))).isEqualTo(uid(2));   // hòa số chờ: ưu tiên bác sĩ rảnh
+        assertThat(DoctorQueueServiceImpl.suggest(List.of(longer, busy))).isEqualTo(uid(1));          // ít phiếu chờ hơn thắng dù đang bận
         assertThat(DoctorQueueServiceImpl.suggest(List.of())).isNull();
     }
 

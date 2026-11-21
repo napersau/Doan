@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -39,7 +40,7 @@ public class VisitServiceDetailHistory {
     private String action;
 
     @Column(name = "changed_by_user_id", nullable = false)
-    private Long changedByUserId;
+    private UUID changedByUserId;
 
     @Column(name = "reason", columnDefinition = "TEXT")
     private String reason;

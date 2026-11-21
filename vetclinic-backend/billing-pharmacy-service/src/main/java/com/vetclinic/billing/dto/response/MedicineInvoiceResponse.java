@@ -4,6 +4,7 @@ import com.vetclinic.billing.constant.PaymentStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 import java.util.List;
 
 /**
@@ -18,13 +19,13 @@ public record MedicineInvoiceResponse(
         Long visitId,
         String visitCode,
         String petName,
-        Long ownerId,
+        UUID ownerId,
         BigDecimal amountBeforeVat,
         BigDecimal vatAmount,
         BigDecimal discountAmount,
         BigDecimal payableAmount,
         PaymentStatus paymentStatus,
-        Long cashierId,
+        UUID cashierId,
         Instant paidAt,
         Instant createdAt,
         List<MedicineInvoiceItemResponse> items

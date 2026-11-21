@@ -31,6 +31,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.DOCTOR;
 import static com.vetclinic.clinical.testsupport.TestData.detail;
 import static com.vetclinic.clinical.testsupport.TestData.service;
@@ -145,11 +146,11 @@ class VisitAssemblerTest {
         when(invoiceRepository.findByVisitServiceDetailIdIn(anyCollection())).thenReturn(List.of());
         when(labResultRepository.findByVisitServiceDetailIdInOrderByIdAsc(anyCollection())).thenReturn(List.of(
                 LabTestResult.builder().id(1L).visitServiceDetailId(1L).labTestItem(wbc).resultValue(new BigDecimal("21.00"))
-                        .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(31L).build(),
+                        .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(uid(31)).build(),
                 LabTestResult.builder().id(2L).visitServiceDetailId(1L).labTestItem(wbc).resultValue(new BigDecimal("3.00"))
-                        .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(31L).build(),
+                        .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(uid(31)).build(),
                 LabTestResult.builder().id(3L).visitServiceDetailId(1L).labTestItem(wbc).resultValue(new BigDecimal("10.00"))
-                        .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(31L).build()));
+                        .minValueSnapshot(new BigDecimal("6.00")).maxValueSnapshot(new BigDecimal("17.00")).performedBy(uid(31)).build()));
         when(imagingResultRepository.findByVisitServiceDetailIdIn(anyCollection())).thenReturn(List.of());
         when(historyRepository.findByVisitIdInOrderByIdAsc(anyCollection())).thenReturn(List.of());
 

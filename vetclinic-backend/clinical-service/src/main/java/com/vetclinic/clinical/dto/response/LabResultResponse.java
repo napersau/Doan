@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.LabEvaluation;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -15,7 +16,7 @@ public record LabResultResponse(
         BigDecimal minValue,
         BigDecimal maxValue,
         LabEvaluation evaluation,
-        Long performedBy,
+        UUID performedBy,
         String notes,
         Instant createdAt
 ) {

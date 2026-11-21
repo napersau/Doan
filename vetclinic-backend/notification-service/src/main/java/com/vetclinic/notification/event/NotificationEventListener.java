@@ -29,6 +29,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.format.DateTimeFormatter;
+import java.util.UUID;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -343,7 +344,7 @@ public class NotificationEventListener {
         });
         if (!event.abandoned()) {   // phiếu thu điện tử chỉ gửi khi đã thu đủ
             processed.runOnce("mail:" + event.eventId(), () -> {
-                Optional<Long> ownerId = visit.map(VisitSummary::ownerId);
+                Optional<UUID> ownerId = visit.map(VisitSummary::ownerId);
                 if (ownerId.isEmpty()) {
                     return;   // không biết chủ nuôi (clinical tạm không phản hồi): bỏ thư, thông báo trong ứng dụng đã đi
                 }
@@ -380,7 +381,7 @@ public class NotificationEventListener {
                         "Hóa đơn thuốc " + event.invoiceCode() + " của " + pet + (amount == null ? "" : " (" + amount + ")")
                                 + " đã thanh toán. Vui lòng dùng thuốc đúng hướng dẫn của bác sĩ.", data))));
         processed.runOnce("mail:" + event.eventId(), () -> {
-            Optional<Long> ownerId = visit.map(VisitSummary::ownerId);
+            Optional<UUID> ownerId = visit.map(VisitSummary::ownerId);
             if (ownerId.isEmpty()) {
                 return;
             }

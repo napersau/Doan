@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.PaymentStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -65,7 +66,7 @@ public class ServiceInvoice {
 
     /** Khóa ngoại logic -> auth.users(id), gán khi thu tiền. */
     @Column(name = "cashier_id")
-    private Long cashierId;
+    private UUID cashierId;
 
     @Column(name = "paid_at")
     private Instant paidAt;

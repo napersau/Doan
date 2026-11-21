@@ -11,14 +11,14 @@ import java.util.UUID;
 public record QueueTicketIssuedEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,        // thu ngân phát phiếu; null = hệ thống tự phát
+        UUID actorUserId,        // thu ngân phát phiếu; null = hệ thống tự phát
         Long ticketId,
         String queueType,        // DOCTOR | LABORATORY | IMAGING
         int ticketNo,
         Long visitId,
         String visitCode,
         Long petId,
-        Long doctorId,           // chỉ phiếu DOCTOR; null = danh sách chờ phân công
+        UUID doctorId,           // chỉ phiếu DOCTOR; null = danh sách chờ phân công
         int priority             // 2 cấp cứu, 1 ca có kết quả CLS, 0 thường
 ) implements DomainEvent {
 

@@ -30,9 +30,9 @@ public class NotificationController {
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<List<NotificationMessage>>> recent(@RequestParam(defaultValue = "30") int limit) {
-        Long userId = SecurityUtils.getCurrentUserId();
-        var role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
-        return ResponseEntity.ok(ApiResponse.success(history.recent(userId, role, Math.min(Math.max(limit, 1), MAX_LIMIT))));
+        UUID userId = SecurityUtils.getCurrentUserId();
+        var roles = SecurityUtils.getCurrentRoles();
+        return ResponseEntity.ok(ApiResponse.success(history.recent(userId, roles, Math.min(Math.max(limit, 1), MAX_LIMIT))));
     }
 
     /**
@@ -42,9 +42,9 @@ public class NotificationController {
     @PostMapping("/{id}/read")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Void>> markRead(@PathVariable UUID id) {
-        Long userId = SecurityUtils.getCurrentUserId();
-        var role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
-        if (!history.markRead(userId, role, id)) {
+        UUID userId = SecurityUtils.getCurrentUserId();
+        var roles = SecurityUtils.getCurrentRoles();
+        if (!history.markRead(userId, roles, id)) {
             throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy thông báo");
         }
         return ResponseEntity.ok(ApiResponse.<Void>success("Đã đánh dấu đã đọc", null));

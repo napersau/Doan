@@ -1,5 +1,6 @@
 package com.vetclinic.billing.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.billing.constant.InventoryTransactionType;
 
 import java.time.Instant;
@@ -12,7 +13,7 @@ public record InventoryTransactionResponse(
         int quantity,
         Long medicineInvoiceId,
         String notes,
-        Long createdBy,
+        UUID createdBy,
         Instant createdAt
 ) {
 }

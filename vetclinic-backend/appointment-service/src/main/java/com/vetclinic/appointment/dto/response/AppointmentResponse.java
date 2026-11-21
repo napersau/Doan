@@ -1,5 +1,6 @@
 package com.vetclinic.appointment.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.appointment.constant.AppointmentStatus;
 import com.vetclinic.appointment.constant.BookingChannel;
 
@@ -11,7 +12,7 @@ public record AppointmentResponse(
         Long id,
         String appointmentCode,
         Long petId,
-        Long ownerId,
+        UUID ownerId,
         LocalDate appointmentDate,
         LocalTime startTime,
         LocalTime endTime,
@@ -19,9 +20,9 @@ public record AppointmentResponse(
         BookingChannel bookingChannel,
         AppointmentStatus status,
         String cancelReason,
-        Long confirmedBy,
+        UUID confirmedBy,
         Instant confirmedAt,
-        Long cancelledBy,
+        UUID cancelledBy,
         Instant cancelledAt,
         Instant createdAt,
         Instant updatedAt,
@@ -43,15 +44,15 @@ public record AppointmentResponse(
     }
 
     /** Gắn chủ nuôi (suy ra từ thú cưng). Tham số null thì giữ nguyên giá trị hiện có. */
-    public AppointmentResponse withOwnerId(Long ownerId) {
+    public AppointmentResponse withOwnerId(UUID ownerId) {
         return new AppointmentResponse(id, appointmentCode, petId, ownerId != null ? ownerId : this.ownerId, appointmentDate,
                 startTime, endTime, reason, bookingChannel, status, cancelReason, confirmedBy, confirmedAt, cancelledBy,
                 cancelledAt, createdAt, updatedAt, petName, ownerName, ownerPhone);
     }
 
     /** Gắn người/lý do/thời điểm duyệt, hủy và lần cập nhật cuối (lấy từ lịch sử trạng thái). */
-    public AppointmentResponse withAudit(String cancelReason, Long confirmedBy, Instant confirmedAt,
-                                         Long cancelledBy, Instant cancelledAt, Instant updatedAt) {
+    public AppointmentResponse withAudit(String cancelReason, UUID confirmedBy, Instant confirmedAt,
+                                         UUID cancelledBy, Instant cancelledAt, Instant updatedAt) {
         return new AppointmentResponse(id, appointmentCode, petId, ownerId, appointmentDate, startTime, endTime, reason,
                 bookingChannel, status, cancelReason, confirmedBy, confirmedAt, cancelledBy, cancelledAt, createdAt,
                 updatedAt != null ? updatedAt : this.updatedAt, petName, ownerName, ownerPhone);

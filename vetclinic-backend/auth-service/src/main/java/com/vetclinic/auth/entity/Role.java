@@ -15,6 +15,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Danh mục vai trò (docs v4.0 mục 1): thêm vai trò mới chỉ cần INSERT, không ALTER TABLE. */
 @Entity
 @Table(name = "roles")
 @Getter
@@ -26,10 +27,10 @@ public class Role {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private Short id;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "code", nullable = false, unique = true)
+    @Column(name = "code", nullable = false, unique = true, length = 30)
     private RoleCode code;
 
     @Column(name = "name", nullable = false, length = 100)
@@ -37,4 +38,12 @@ public class Role {
 
     @Column(name = "description")
     private String description;
+
+    /** Vai trò lõi của hệ thống, không cho xóa. */
+    @Column(name = "is_system", nullable = false)
+    private boolean system;
+
+    @Column(name = "is_active", nullable = false)
+    @Builder.Default
+    private boolean active = true;
 }

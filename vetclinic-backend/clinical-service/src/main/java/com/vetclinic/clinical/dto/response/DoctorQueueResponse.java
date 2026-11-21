@@ -2,6 +2,7 @@ package com.vetclinic.clinical.dto.response;
 
 import com.vetclinic.clinical.constant.DoctorStatus;
 
+import java.util.UUID;
 import java.util.List;
 
 /**
@@ -9,7 +10,7 @@ import java.util.List;
  * waitingCount = số ca đang chờ (chưa vào phòng). Ca đang IN_PROGRESS không nằm trong hàng đợi nhưng làm status = BUSY.
  */
 public record DoctorQueueResponse(
-        Long doctorId,
+        UUID doctorId,
         String fullName,
         String roomNumber,
         DoctorStatus status,

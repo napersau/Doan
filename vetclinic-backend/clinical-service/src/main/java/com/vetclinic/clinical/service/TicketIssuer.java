@@ -53,7 +53,7 @@ public class TicketIssuer {
      * Phí khám / XN / CĐHA vừa được thu (hoặc ca cấp cứu: gọi với issuedBy = null ngay khi tiếp đón / chỉ định).
      * Bỏ qua dịch vụ không cần phiếu (làm tại phòng) và trường hợp không còn ý nghĩa xếp hàng (ca đã qua bước chờ tương ứng).
      */
-    public void issueForPaidServices(PetVisit visit, Collection<VisitServiceDetail> details, Long issuedBy) {
+    public void issueForPaidServices(PetVisit visit, Collection<VisitServiceDetail> details, UUID issuedBy) {
         int priority = visit.isEmergency() ? QueueTicket.PRIORITY_EMERGENCY : QueueTicket.PRIORITY_NORMAL;
         for (VisitServiceDetail d : details) {
             ServiceCategory category = d.getService().getCategory();
@@ -81,7 +81,7 @@ public class TicketIssuer {
         return issue(visit, QueueType.DOCTOR, visit.getDoctorId(), QueueTicket.PRIORITY_RESULTS_READY, null);
     }
 
-    private QueueTicket issue(PetVisit visit, QueueType type, Long doctorId, int priority, Long issuedBy) {
+    private QueueTicket issue(PetVisit visit, QueueType type, UUID doctorId, int priority, UUID issuedBy) {
         LocalDate today = LocalDate.now(clock);
         Integer max = ticketRepository.findMaxTicketNo(type, today);
         QueueTicket ticket = ticketRepository.saveAndFlush(QueueTicket.builder()
@@ -112,7 +112,7 @@ public class TicketIssuer {
      * T02 / T07: Bác sĩ bấm "Bắt đầu" khi bệnh nhân vào phòng. Ca phải có phiếu DOCTOR đang chờ (đã nộp phí khám, ca cấp cứu,
      * hoặc phiếu ưu tiên của ca có kết quả) - thanh toán tách khỏi khám (BR-35). Phiếu -> IN_SERVICE.
      */
-    public QueueTicket startDoctorTicket(Long visitId, Long doctorId) {
+    public QueueTicket startDoctorTicket(Long visitId, UUID doctorId) {
         QueueTicket ticket = ticketRepository
                 .findFirstByVisitIdAndQueueTypeAndStatus(visitId, QueueType.DOCTOR, TicketStatus.WAITING)
                 .orElseThrow(() -> new AppException(ErrorCode.NO_QUEUE_TICKET));
@@ -131,7 +131,7 @@ public class TicketIssuer {
     }
 
     /** Lễ tân đổi / gỡ Bác sĩ (Q3): phiếu DOCTOR đang chờ đi theo, GIỮ NGUYÊN số phiếu và giờ phát. */
-    public void reassignDoctorTicket(Long visitId, Long doctorId) {
+    public void reassignDoctorTicket(Long visitId, UUID doctorId) {
         ticketRepository.findFirstByVisitIdAndQueueTypeAndStatus(visitId, QueueType.DOCTOR, TicketStatus.WAITING)
                 .ifPresent(t -> {
                     t.setDoctorId(doctorId);

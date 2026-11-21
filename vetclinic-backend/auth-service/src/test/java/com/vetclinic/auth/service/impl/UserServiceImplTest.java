@@ -1,13 +1,21 @@
 package com.vetclinic.auth.service.impl;
 
 import com.vetclinic.auth.constant.UserStatus;
+import com.vetclinic.auth.dto.request.CreateUserRequest;
 import com.vetclinic.auth.dto.request.RegisterRequest;
 import com.vetclinic.auth.dto.response.UserResponse;
+import com.vetclinic.auth.dto.response.UserSummaryResponse;
+import com.vetclinic.auth.entity.PetOwnerProfile;
 import com.vetclinic.auth.entity.Role;
+import com.vetclinic.auth.entity.StaffProfile;
 import com.vetclinic.auth.entity.User;
-import com.vetclinic.auth.mapper.UserMapperImpl;
+import com.vetclinic.auth.entity.UserProfile;
+import com.vetclinic.auth.mapper.UserMapper;
+import com.vetclinic.auth.repository.PetOwnerProfileRepository;
 import com.vetclinic.auth.repository.RefreshTokenRepository;
 import com.vetclinic.auth.repository.RoleRepository;
+import com.vetclinic.auth.repository.StaffProfileRepository;
+import com.vetclinic.auth.repository.UserProfileRepository;
 import com.vetclinic.auth.repository.UserRepository;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
@@ -25,8 +33,12 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,13 +51,19 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UserServiceImplTest {
 
-    private static final long ADMIN = 1L;
-    private static final long RECEPTIONIST = 2L;
+    private static final UUID ADMIN = uid(1);
+    private static final UUID RECEPTIONIST = uid(2);
 
     @Mock
     private UserRepository userRepository;
     @Mock
     private RoleRepository roleRepository;
+    @Mock
+    private UserProfileRepository userProfileRepository;
+    @Mock
+    private StaffProfileRepository staffProfileRepository;
+    @Mock
+    private PetOwnerProfileRepository petOwnerProfileRepository;
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
 
@@ -54,17 +72,20 @@ class UserServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new UserServiceImpl(userRepository, roleRepository, refreshTokenRepository, encoder, new UserMapperImpl());
+        service = new UserServiceImpl(userRepository, roleRepository, userProfileRepository, staffProfileRepository,
+                petOwnerProfileRepository, refreshTokenRepository, encoder, new UserMapper());
         lenient().when(userRepository.saveAndFlush(any(User.class))).thenAnswer(inv -> {
             User saved = inv.getArgument(0);
             if (saved.getId() == null) {
-                saved.setId(50L);
+                saved.setId(uid(50));
             }
             return saved;
         });
         for (RoleCode code : RoleCode.values()) {
             lenient().when(roleRepository.findByCode(code)).thenReturn(Optional.of(role(code)));
         }
+        lenient().when(staffProfileRepository.nextEmployeeNumber()).thenReturn(8L);
+        lenient().when(petOwnerProfileRepository.nextCustomerNumber()).thenReturn(7L);
     }
 
     @AfterEach
@@ -72,23 +93,42 @@ class UserServiceImplTest {
         SecurityContextHolder.clearContext();
     }
 
+    /** UUID demo cố định, cùng dạng với dữ liệu seed (019a9442-d810-7000-8000-0000000000NN). */
+    private static UUID uid(long n) {
+        return UUID.fromString(String.format("019a9442-d810-7000-8000-%012d", n));
+    }
+
     private static Role role(RoleCode code) {
-        return Role.builder().id((long) code.ordinal() + 1).code(code).name(code.name()).build();
+        return Role.builder().id((short) (code.ordinal() + 1)).code(code).name(code.name()).build();
     }
 
-    private static User user(long id, RoleCode code, String room) {
-        return User.builder().id(id).role(role(code)).username("u" + id).passwordHash("old-hash").fullName("Người " + id)
-                .phoneNumber("09000000" + id).roomNumber(room).status(UserStatus.ACTIVE).build();
+    private static User user(UUID id, RoleCode code, String room) {
+        User user = User.builder().id(id).username("u" + id).passwordHash("old-hash").status(UserStatus.ACTIVE).build();
+        user.getRoles().add(role(code));
+        user.setProfile(UserProfile.builder().user(user).fullName("Người " + id).phoneNumber("09000000" + id.getLeastSignificantBits()).build());
+        if (code == RoleCode.PET_OWNER) {
+            user.setPetOwnerProfile(PetOwnerProfile.builder().user(user).customerCode("KH0001").build());
+        } else {
+            user.setStaffProfile(StaffProfile.builder().user(user).employeeCode("NV0001").positionTitle(code.name())
+                    .roomNumber(room).hireDate(LocalDate.of(2026, 1, 2)).build());
+        }
+        return user;
     }
 
-    private static void loginAs(long userId, RoleCode role) {
-        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
-                String.valueOf(userId), null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
+    private static void loginAs(UUID userId, RoleCode... roles) {
+        List<SimpleGrantedAuthority> authorities = Arrays.stream(roles).map(r -> new SimpleGrantedAuthority("ROLE_" + r.name())).toList();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(userId.toString(), null, authorities));
     }
 
     private static void assertError(ErrorCode expected, Runnable call) {
         assertThatThrownBy(call::run).isInstanceOfSatisfying(AppException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(expected));
+    }
+
+    private User savedUser() {
+        ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).saveAndFlush(saved.capture());
+        return saved.getValue();
     }
 
     // ================================================================== tự đăng ký
@@ -97,24 +137,37 @@ class UserServiceImplTest {
     void register_alwaysCreatesAnActivePetOwnerWithThePhoneAsUsername() {
         UserResponse response = service.register(new RegisterRequest("Chunuoi@1", "  Nguyễn Văn A ", "0944444441", "a@example.com", null));
 
-        ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
-        verify(userRepository).saveAndFlush(saved.capture());
-        User user = saved.getValue();
-        assertThat(user.getRole().getCode()).isEqualTo(RoleCode.PET_OWNER);   // không có đường nào để tự cấp quyền khác
+        User user = savedUser();
+        assertThat(user.getRoles()).extracting(Role::getCode).containsExactly(RoleCode.PET_OWNER);   // không có đường nào để tự cấp quyền khác
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getUsername()).isEqualTo("0944444441");
-        assertThat(user.getFullName()).isEqualTo("Nguyễn Văn A");
-        assertThat(user.getRoomNumber()).isNull();
+        assertThat(user.getProfile().getFullName()).isEqualTo("Nguyễn Văn A");
+        assertThat(user.getProfile().getPhoneNumber()).isEqualTo("0944444441");
+        assertThat(user.getProfile().getEmail()).isEqualTo("a@example.com");
+        assertThat(user.getStaffProfile()).isNull();
+        assertThat(user.getPetOwnerProfile().getCustomerCode()).isEqualTo("KH0007");
+        assertThat(user.getPetOwnerProfile().getRegisteredChannel()).isEqualTo("ONLINE");
         assertThat(encoder.matches("Chunuoi@1", user.getPasswordHash())).isTrue();   // lưu BCrypt, không lưu mật khẩu thô
         assertThat(response.role()).isEqualTo(RoleCode.PET_OWNER);
+        assertThat(response.roles()).containsExactly(RoleCode.PET_OWNER);
+        assertThat(response.roomNumber()).isNull();
     }
 
     @Test
     void register_refusesAPhoneNumberThatIsAlreadyRegistered() {
-        when(userRepository.existsByPhoneNumber("0944444441")).thenReturn(true);
+        when(userProfileRepository.existsByPhoneNumber("0944444441")).thenReturn(true);
 
         assertError(ErrorCode.PHONE_NUMBER_ALREADY_EXISTS,
                 () -> service.register(new RegisterRequest("Chunuoi@1", "A", "0944444441", null, null)));
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void register_refusesAnEmailThatBelongsToAnotherAccount() {
+        when(userProfileRepository.existsByEmailIgnoreCase("a@example.com")).thenReturn(true);
+
+        assertError(ErrorCode.INVALID_INPUT_DATA,
+                () -> service.register(new RegisterRequest("Chunuoi@1", "A", "0944444441", "a@example.com", null)));
         verify(userRepository, never()).saveAndFlush(any());
     }
 
@@ -125,41 +178,93 @@ class UserServiceImplTest {
         assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.register(new RegisterRequest(tooLong, "A", "0944444441", null, null)));
     }
 
+    // ================================================================== tạo tài khoản
+
+    @Test
+    void create_aDoctorByAdminWritesUserRoleProfileAndStaffProfileWithTheRoom() {
+        loginAs(ADMIN, RoleCode.ADMIN);
+
+        UserResponse response = service.create(new CreateUserRequest(null, "Doctor@123", "BS Mới", "0955555551", null, null, "p05",
+                RoleCode.VETERINARIAN));
+
+        User user = savedUser();
+        assertThat(user.getRoles()).extracting(Role::getCode).containsExactly(RoleCode.VETERINARIAN);
+        assertThat(user.getProfile().getFullName()).isEqualTo("BS Mới");
+        assertThat(user.getPetOwnerProfile()).isNull();
+        StaffProfile staff = user.getStaffProfile();
+        assertThat(staff.getEmployeeCode()).isEqualTo("NV0008");
+        assertThat(staff.getPositionTitle()).isEqualTo("VETERINARIAN");
+        assertThat(staff.getDepartment()).isEqualTo("Khám bệnh");
+        assertThat(staff.getRoomNumber()).isEqualTo("P05");   // viết hoa
+        assertThat(staff.getHireDate()).isNotNull();
+        assertThat(response.roomNumber()).isEqualTo("P05");
+    }
+
+    @Test
+    void create_refusesARoomAlreadyAssignedToAnotherStaffMember() {
+        loginAs(ADMIN, RoleCode.ADMIN);
+        when(staffProfileRepository.existsByRoomNumber("P05")).thenReturn(true);
+
+        assertError(ErrorCode.ROOM_NUMBER_ALREADY_ASSIGNED,
+                () -> service.create(new CreateUserRequest(null, "Doctor@123", "BS Mới", "0955555551", null, null, "P05", RoleCode.VETERINARIAN)));
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void create_aReceptionistMayOnlyCreatePetOwners_markedAsCreatedAtTheClinic() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
+
+        assertError(ErrorCode.ACCESS_DENIED,
+                () -> service.create(new CreateUserRequest(null, "Doctor@123", "BS", "0955555551", null, null, null, RoleCode.VETERINARIAN)));
+
+        service.create(new CreateUserRequest(null, "Owner@1234", "Khách quầy", "0955555552", null, null, null, RoleCode.PET_OWNER));
+        assertThat(savedUser().getPetOwnerProfile().getRegisteredChannel()).isEqualTo("AT_CLINIC");
+    }
+
+    @Test
+    void create_onlyDoctorsAndTechniciansMayHaveARoom() {
+        loginAs(ADMIN, RoleCode.ADMIN);
+
+        assertError(ErrorCode.INVALID_INPUT_DATA,
+                () -> service.create(new CreateUserRequest(null, "Staff@1234", "Lễ tân", "0955555553", null, null, "P01", RoleCode.RECEPTIONIST)));
+    }
+
     // ================================================================== đổi vai trò
 
     @Test
     void changeRole_movesStaffToTheNewRoleAndRevokesTheirSessions() {
         loginAs(ADMIN, RoleCode.ADMIN);
-        User receptionist = user(7L, RoleCode.RECEPTIONIST, null);
-        when(userRepository.findWithRoleById(7L)).thenReturn(Optional.of(receptionist));
+        User receptionist = user(uid(7), RoleCode.RECEPTIONIST, null);
+        when(userRepository.findDetailedById(uid(7))).thenReturn(Optional.of(receptionist));
 
-        UserResponse response = service.changeRole(7L, RoleCode.VETERINARIAN);
+        UserResponse response = service.changeRole(uid(7), RoleCode.VETERINARIAN);
 
-        assertThat(receptionist.getRole().getCode()).isEqualTo(RoleCode.VETERINARIAN);
+        assertThat(receptionist.getRoles()).extracting(Role::getCode).containsExactly(RoleCode.VETERINARIAN);
+        assertThat(receptionist.getStaffProfile().getDepartment()).isEqualTo("Khám bệnh");
         assertThat(response.role()).isEqualTo(RoleCode.VETERINARIAN);
-        verify(refreshTokenRepository).revokeAllUserTokens(7L);   // phiên kế tiếp phải mang vai trò mới
+        verify(refreshTokenRepository).revokeAllUserTokens(uid(7));   // phiên kế tiếp phải mang vai trò mới
     }
 
     @Test
     void changeRole_awayFromAClinicRoleClearsTheFixedRoomNumber() {
         loginAs(ADMIN, RoleCode.ADMIN);
-        User doctor = user(7L, RoleCode.VETERINARIAN, "P01");
-        when(userRepository.findWithRoleById(7L)).thenReturn(Optional.of(doctor));
+        User doctor = user(uid(7), RoleCode.VETERINARIAN, "P01");
+        when(userRepository.findDetailedById(uid(7))).thenReturn(Optional.of(doctor));
 
-        service.changeRole(7L, RoleCode.RECEPTIONIST);
+        service.changeRole(uid(7), RoleCode.RECEPTIONIST);
 
-        assertThat(doctor.getRoomNumber()).isNull();
+        assertThat(doctor.getStaffProfile().getRoomNumber()).isNull();
     }
 
     @Test
     void changeRole_betweenRoomRolesKeepsTheRoom() {
         loginAs(ADMIN, RoleCode.ADMIN);
-        User tech = user(7L, RoleCode.LAB_TECHNICIAN, "LAB01");
-        when(userRepository.findWithRoleById(7L)).thenReturn(Optional.of(tech));
+        User tech = user(uid(7), RoleCode.LAB_TECHNICIAN, "LAB01");
+        when(userRepository.findDetailedById(uid(7))).thenReturn(Optional.of(tech));
 
-        service.changeRole(7L, RoleCode.IMAGING_TECHNICIAN);
+        service.changeRole(uid(7), RoleCode.IMAGING_TECHNICIAN);
 
-        assertThat(tech.getRoomNumber()).isEqualTo("LAB01");
+        assertThat(tech.getStaffProfile().getRoomNumber()).isEqualTo("LAB01");
     }
 
     @Test
@@ -167,12 +272,12 @@ class UserServiceImplTest {
         loginAs(ADMIN, RoleCode.ADMIN);
         assertError(ErrorCode.CANNOT_MODIFY_OWN_ACCOUNT, () -> service.changeRole(ADMIN, RoleCode.VETERINARIAN));
 
-        when(userRepository.findWithRoleById(7L)).thenReturn(Optional.of(user(7L, RoleCode.RECEPTIONIST, null)));
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.changeRole(7L, RoleCode.RECEPTIONIST));
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.changeRole(7L, RoleCode.PET_OWNER));
+        when(userRepository.findDetailedById(uid(7))).thenReturn(Optional.of(user(uid(7), RoleCode.RECEPTIONIST, null)));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.changeRole(uid(7), RoleCode.RECEPTIONIST));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.changeRole(uid(7), RoleCode.PET_OWNER));
 
-        when(userRepository.findWithRoleById(8L)).thenReturn(Optional.of(user(8L, RoleCode.PET_OWNER, null)));
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.changeRole(8L, RoleCode.VETERINARIAN));
+        when(userRepository.findDetailedById(uid(8))).thenReturn(Optional.of(user(uid(8), RoleCode.PET_OWNER, null)));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.changeRole(uid(8), RoleCode.VETERINARIAN));
         verify(refreshTokenRepository, never()).revokeAllUserTokens(any());
     }
 
@@ -181,38 +286,74 @@ class UserServiceImplTest {
     @Test
     void resetPassword_byAdminReplacesTheHashAndRevokesSessions() {
         loginAs(ADMIN, RoleCode.ADMIN);
-        User doctor = user(7L, RoleCode.VETERINARIAN, "P01");
-        when(userRepository.findWithRoleById(7L)).thenReturn(Optional.of(doctor));
+        User doctor = user(uid(7), RoleCode.VETERINARIAN, "P01");
+        when(userRepository.findDetailedById(uid(7))).thenReturn(Optional.of(doctor));
 
-        service.resetPassword(7L, "MatKhau@2026");
+        service.resetPassword(uid(7), "MatKhau@2026");
 
         assertThat(encoder.matches("MatKhau@2026", doctor.getPasswordHash())).isTrue();
         verify(userRepository).save(doctor);
-        verify(refreshTokenRepository).revokeAllUserTokens(7L);
+        verify(refreshTokenRepository).revokeAllUserTokens(uid(7));
     }
 
     @Test
     void resetPassword_byReceptionistOnlyForPetOwners() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        User owner = user(8L, RoleCode.PET_OWNER, null);
-        User doctor = user(7L, RoleCode.VETERINARIAN, "P01");
-        when(userRepository.findWithRoleById(8L)).thenReturn(Optional.of(owner));
-        when(userRepository.findWithRoleById(7L)).thenReturn(Optional.of(doctor));
+        User owner = user(uid(8), RoleCode.PET_OWNER, null);
+        User doctor = user(uid(7), RoleCode.VETERINARIAN, "P01");
+        when(userRepository.findDetailedById(uid(8))).thenReturn(Optional.of(owner));
+        when(userRepository.findDetailedById(uid(7))).thenReturn(Optional.of(doctor));
 
-        service.resetPassword(8L, "MatKhau@2026");
+        service.resetPassword(uid(8), "MatKhau@2026");
         assertThat(encoder.matches("MatKhau@2026", owner.getPasswordHash())).isTrue();
 
-        assertError(ErrorCode.ACCESS_DENIED, () -> service.resetPassword(7L, "MatKhau@2026"));
+        assertError(ErrorCode.ACCESS_DENIED, () -> service.resetPassword(uid(7), "MatKhau@2026"));
         assertThat(doctor.getPasswordHash()).isEqualTo("old-hash");   // tài khoản nhân sự không bị đụng tới
+    }
+
+    @Test
+    void resetPassword_aReceptionistWhoIsAlsoAdminMayResetStaff() {
+        loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST, RoleCode.ADMIN);
+        User doctor = user(uid(7), RoleCode.VETERINARIAN, "P01");
+        when(userRepository.findDetailedById(uid(7))).thenReturn(Optional.of(doctor));
+
+        service.resetPassword(uid(7), "MatKhau@2026");
+
+        assertThat(encoder.matches("MatKhau@2026", doctor.getPasswordHash())).isTrue();
     }
 
     @Test
     void resetPassword_notForYourOwnAccountAndNotForUnknownOrOverlongPasswords() {
         loginAs(ADMIN, RoleCode.ADMIN);
         assertError(ErrorCode.CANNOT_MODIFY_OWN_ACCOUNT, () -> service.resetPassword(ADMIN, "MatKhau@2026"));
-        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.resetPassword(7L, "Aa1" + "x".repeat(80)));
-        when(userRepository.findWithRoleById(99L)).thenReturn(Optional.empty());
-        assertError(ErrorCode.USER_NOT_FOUND, () -> service.resetPassword(99L, "MatKhau@2026"));
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.resetPassword(uid(7), "Aa1" + "x".repeat(80)));
+        when(userRepository.findDetailedById(uid(99))).thenReturn(Optional.empty());
+        assertError(ErrorCode.USER_NOT_FOUND, () -> service.resetPassword(uid(99), "MatKhau@2026"));
         verify(refreshTokenRepository, never()).revokeAllUserTokens(any());
+    }
+
+    // ================================================================== tra cứu nội bộ
+
+    @Test
+    void getDoctors_returnsSummariesWithEveryRoleAndTheRoomFromTheStaffProfile() {
+        User doctor = user(uid(7), RoleCode.VETERINARIAN, "P01");
+        doctor.getRoles().add(role(RoleCode.ADMIN));   // Bác sĩ kiêm Quản trị viên vẫn là Bác sĩ
+        when(userRepository.findByRoleAndStatus(RoleCode.VETERINARIAN, UserStatus.ACTIVE)).thenReturn(List.of(doctor));
+
+        List<UserSummaryResponse> doctors = service.getActiveDoctors();
+
+        assertThat(doctors).hasSize(1);
+        assertThat(doctors.get(0).id()).isEqualTo(uid(7));
+        assertThat(doctors.get(0).roomNumber()).isEqualTo("P01");
+        assertThat(doctors.get(0).roles()).containsExactly(RoleCode.ADMIN, RoleCode.VETERINARIAN);
+        assertThat(doctors.get(0).status()).isEqualTo(UserStatus.ACTIVE);
+    }
+
+    @Test
+    void getSummaries_isBoundedToAvoidHugeBatches() {
+        List<UUID> tooMany = LongStream.rangeClosed(1, 201).mapToObj(UserServiceImplTest::uid).toList();
+
+        assertError(ErrorCode.INVALID_INPUT_DATA, () -> service.getSummaries(tooMany));
+        assertThat(service.getSummaries(List.of())).isEmpty();
     }
 }

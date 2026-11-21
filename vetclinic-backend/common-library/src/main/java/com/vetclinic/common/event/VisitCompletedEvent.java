@@ -11,7 +11,7 @@ import java.util.UUID;
 public record VisitCompletedEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,        // thu ngân (T10) hoặc người thao tác "Khách bỏ về"
+        UUID actorUserId,        // thu ngân (T10) hoặc người thao tác "Khách bỏ về"
         Long visitId,
         String visitCode,
         Long petId,

@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,20 +33,20 @@ public class VisitEnricher {
     }
 
     public List<VisitResponse> enrichAll(List<VisitResponse> visits) {
-        Set<Long> doctorIds = visits.stream().map(VisitResponse::doctorId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<UUID> doctorIds = visits.stream().map(VisitResponse::doctorId).filter(Objects::nonNull).collect(Collectors.toSet());
         if (doctorIds.isEmpty()) {
             return visits;
         }
-        Map<Long, String> rooms = roomsOf(doctorIds);
+        Map<UUID, String> rooms = roomsOf(doctorIds);
         return visits.stream()
                 .map(v -> v.doctorId() == null ? v : v.withAssignedRoom(rooms.get(v.doctorId())))
                 .toList();
     }
 
-    private Map<Long, String> roomsOf(Set<Long> doctorIds) {
+    private Map<UUID, String> roomsOf(Set<UUID> doctorIds) {
         try {
             ApiResponse<List<UserSummaryResponse>> response = authClient.getUsers(List.copyOf(doctorIds));
-            Map<Long, String> rooms = new HashMap<>();
+            Map<UUID, String> rooms = new HashMap<>();
             if (response != null && response.getData() != null) {
                 for (UserSummaryResponse u : response.getData()) {
                     if (u.roomNumber() != null) {

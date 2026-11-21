@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
 import java.util.List;
 
 /**
@@ -41,7 +42,7 @@ public class InternalClinicalController {
      * hỏi danh sách thú cưng của chủ rồi lọc {@code pet_id IN (...)}.
      */
     @GetMapping(value = "/pets", params = "ownerId")
-    public ResponseEntity<ApiResponse<List<PetSummaryResponse>>> petsOfOwner(@RequestParam("ownerId") Long ownerId) {
+    public ResponseEntity<ApiResponse<List<PetSummaryResponse>>> petsOfOwner(@RequestParam("ownerId") UUID ownerId) {
         return ResponseEntity.ok(ApiResponse.success(petService.getSummariesByOwner(ownerId)));
     }
 }

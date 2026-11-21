@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.TicketStatus;
 import jakarta.persistence.Column;
@@ -61,7 +62,7 @@ public class QueueTicket {
 
     /** Chỉ phiếu DOCTOR: Bác sĩ của hàng đợi; null = danh sách chờ phân công. LFK: auth.users */
     @Column(name = "doctor_id")
-    private Long doctorId;
+    private UUID doctorId;
 
     @JdbcTypeCode(SqlTypes.TINYINT)
     @Column(name = "priority", nullable = false)
@@ -77,7 +78,7 @@ public class QueueTicket {
 
     /** Thu ngân phát phiếu; null = hệ thống tự phát (cấp cứu, ca có kết quả CLS). LFK: auth.users */
     @Column(name = "issued_by")
-    private Long issuedBy;
+    private UUID issuedBy;
 
     @Column(name = "last_called_at")
     private Instant lastCalledAt;

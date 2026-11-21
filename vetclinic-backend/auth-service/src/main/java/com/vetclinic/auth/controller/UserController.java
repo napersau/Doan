@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Quản lý tài khoản (FR-01, FR-02, UC-01, UC-02, UC-18).
@@ -59,7 +60,7 @@ public class UserController {
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN','RECEPTIONIST','VETERINARIAN','LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
-    public ResponseEntity<ApiResponse<UserResponse>> getById(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<UserResponse>> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(userService.getById(id)));
     }
 
@@ -73,7 +74,7 @@ public class UserController {
 
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<UserResponse>> update(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<UserResponse>> update(@PathVariable UUID id,
                                                             @Valid @RequestBody UpdateUserRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Cập nhật tài khoản thành công", userService.update(id, request)));
     }
@@ -81,7 +82,7 @@ public class UserController {
     /** Đổi vai trò nhân sự (FR-01). Thu hồi phiên đăng nhập của tài khoản đó. */
     @PostMapping("/{id}/role")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<UserResponse>> changeRole(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<UserResponse>> changeRole(@PathVariable UUID id,
                                                                 @Valid @RequestBody ChangeRoleRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đổi vai trò thành công", userService.changeRole(id, request.roleCode())));
     }
@@ -89,7 +90,7 @@ public class UserController {
     /** Quên mật khẩu: Admin đặt lại cho mọi tài khoản, Lễ tân chỉ cho chủ nuôi (kiểm tra trong service). */
     @PostMapping("/{id}/reset-password")
     @PreAuthorize("hasAnyRole('ADMIN','RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<Void>> resetPassword(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<Void>> resetPassword(@PathVariable UUID id,
                                                            @Valid @RequestBody ResetPasswordRequest request) {
         userService.resetPassword(id, request.newPassword());
         return ResponseEntity.ok(ApiResponse.<Void>success("Đã đặt lại mật khẩu", null));
@@ -98,7 +99,7 @@ public class UserController {
     /** Khóa / ngừng / kích hoạt tài khoản. Chuyển trạng thái dùng POST theo quy chuẩn Action Endpoint. */
     @PostMapping("/{id}/status")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<UserResponse>> changeStatus(@PathVariable Long id,
+    public ResponseEntity<ApiResponse<UserResponse>> changeStatus(@PathVariable UUID id,
                                                                   @Valid @RequestBody ChangeStatusRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Đổi trạng thái tài khoản thành công",
                 userService.changeStatus(id, request.status())));

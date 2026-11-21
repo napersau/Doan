@@ -11,13 +11,13 @@ import java.util.UUID;
 public record VisitCheckedInEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,
+        UUID actorUserId,
         Long visitId,
         String visitCode,
         Long petId,
         Long appointmentId,   // null nếu khách vãng lai (walk-in)
         boolean emergency,
-        Long doctorId         // Bác sĩ được xếp ngay khi tiếp nhận (hàng đợi riêng của Bác sĩ); null = vào danh sách chờ phân công
+        UUID doctorId         // Bác sĩ được xếp ngay khi tiếp nhận (hàng đợi riêng của Bác sĩ); null = vào danh sách chờ phân công
 ) implements DomainEvent {
 
     @Override

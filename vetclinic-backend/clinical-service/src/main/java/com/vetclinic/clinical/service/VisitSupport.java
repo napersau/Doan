@@ -67,13 +67,13 @@ public class VisitSupport {
     }
 
     /** Chỉ Bác sĩ được Lễ tân phân công mới thao tác chuyên môn trên ca này. */
-    public void assertAssignedTo(PetVisit visit, Long doctorId) {
+    public void assertAssignedTo(PetVisit visit, UUID doctorId) {
         if (visit.getDoctorId() == null || !visit.getDoctorId().equals(doctorId)) {
             throw new AppException(ErrorCode.NOT_ASSIGNED_DOCTOR);
         }
     }
 
-    public void transition(PetVisit visit, VisitStatus to, Long actorId, String note) {
+    public void transition(PetVisit visit, VisitStatus to, UUID actorId, String note) {
         VisitStatus from = visit.getStatus();
         if (!from.canTransitionTo(to)) {
             throw new AppException(ErrorCode.INVALID_STATUS_TRANSITION,
@@ -84,7 +84,7 @@ public class VisitSupport {
         record(visit.getId(), from, to, actorId, note);
     }
 
-    public void record(Long visitId, VisitStatus from, VisitStatus to, Long actorId, String note) {
+    public void record(Long visitId, VisitStatus from, VisitStatus to, UUID actorId, String note) {
         historyRepository.save(PetVisitStatusHistory.builder()
                 .visitId(visitId)
                 .fromStatus(from)
@@ -96,7 +96,7 @@ public class VisitSupport {
 
     /** Audit trail tiến độ một chỉ định. action: ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED. */
     public void recordDetail(Long detailId, ServiceDetailStatus from, ServiceDetailStatus to, String action,
-                             Long actorId, String reason) {
+                             UUID actorId, String reason) {
         detailHistoryRepository.save(VisitServiceDetailHistory.builder()
                 .visitServiceDetailId(detailId)
                 .fromStatus(from)
@@ -161,7 +161,7 @@ public class VisitSupport {
      * Dịch vụ khám (EXAMINATION) tạo ở T01 (check-in, PENDING), IN_PROGRESS ở T02; hoàn tất (COMPLETED) khi Bác sĩ rời giai đoạn
      * khám: chỉ định cận lâm sàng (T04) hoặc chốt ca (T05 / T09). Hóa đơn của nó không đổi (đã thu lúc tiếp đón, ca cấp cứu thu sau).
      */
-    public void completeExamDetails(Long visitId, Long actorId) {
+    public void completeExamDetails(Long visitId, UUID actorId) {
         for (VisitServiceDetail detail : detailRepository.findByVisitIdOrderByIdAsc(visitId)) {
             if (detail.getService().getCategory() == ServiceCategory.EXAMINATION
                     && detail.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
@@ -189,7 +189,7 @@ public class VisitSupport {
      * của kỹ thuật viên phòng còn lại vừa commit; nếu đếm trước khi khóa thì hai kỹ thuật viên hoàn tất cùng lúc làm ca kẹt mãi.
      * {@code actorId} là người vừa hoàn tất dịch vụ cuối (chỉ dùng cho event, không ghi vào lịch sử trạng thái).
      */
-    public void evaluateParaclinicalCompletion(PetVisit visit, Long actorId) {
+    public void evaluateParaclinicalCompletion(PetVisit visit, UUID actorId) {
         if (visit.getStatus() != VisitStatus.WAITING_RESULTS) {
             return;
         }
@@ -198,7 +198,7 @@ public class VisitSupport {
         if (open > 0) {
             return;
         }
-        Long doctorId = visit.getDoctorId();
+        UUID doctorId = visit.getDoctorId();
         transition(visit, VisitStatus.RESULTS_READY, null,
                 "Đã có đủ kết quả cận lâm sàng: hệ thống tự chuyển và phát phiếu ưu tiên vào hàng đợi Bác sĩ");
         // Phiếu phòng còn chờ (dịch vụ đã bị hủy hết) đóng lại; phiếu DOCTOR ưu tiên mới cho Bác sĩ khám chính

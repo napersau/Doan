@@ -16,6 +16,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import com.vetclinic.common.security.RoleCode;
+import java.util.UUID;
 import java.util.Date;
 import java.util.List;
 
@@ -25,6 +27,10 @@ import static org.mockito.Mockito.mock;
 
 class StompSecurityTest {
 
+    private static final String U1 = "019a9442-d810-7000-8000-000000000001";
+    private static final String U5 = "019a9442-d810-7000-8000-000000000005";
+    private static final String U7 = "019a9442-d810-7000-8000-000000000007";
+
     private static final String SECRET = "0123456789abcdef0123456789abcdef-test-secret";
     private static final SecretKey KEY = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
 
@@ -33,12 +39,13 @@ class StompSecurityTest {
     private final StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(verifier);
     private final MessageChannel channel = mock(MessageChannel.class);
 
-    private static String token(String userId, String role, Date expiry, SecretKey key) {
-        return Jwts.builder().claim("userId", userId).claim("role", role).expiration(expiry).signWith(key).compact();
+    /** roles là danh sách phân tách dấu phẩy (JWT v4.0 mang claim "roles" dạng danh sách). */
+    private static String token(String userId, String roles, Date expiry, SecretKey key) {
+        return Jwts.builder().claim("userId", userId).claim("roles", List.of(roles.split(","))).expiration(expiry).signWith(key).compact();
     }
 
-    private static String validToken(String userId, String role) {
-        return token(userId, role, Date.from(Instant.now().plusSeconds(600)), KEY);
+    private static String validToken(String userId, String roles) {
+        return token(userId, roles, Date.from(Instant.now().plusSeconds(600)), KEY);
     }
 
     private static StompHeaderAccessor accessor(StompCommand command) {
@@ -51,9 +58,9 @@ class StompSecurityTest {
         return interceptor.preSend(MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders()), channel);
     }
 
-    private StompHeaderAccessor connected(String userId, String role) {
+    private StompHeaderAccessor connected(String userId, String roles) {
         StompHeaderAccessor connect = accessor(StompCommand.CONNECT);
-        connect.setNativeHeader("Authorization", "Bearer " + validToken(userId, role));
+        connect.setNativeHeader("Authorization", "Bearer " + validToken(userId, roles));
         send(connect);
         return connect;
     }
@@ -70,11 +77,11 @@ class StompSecurityTest {
 
     @Test
     void verifier_acceptsATokenSignedWithTheSharedSecret() {
-        var user = verifier.verify(validToken("5", "VETERINARIAN"));
+        var user = verifier.verify(validToken(U5, "VETERINARIAN"));
 
         assertThat(user).hasValueSatisfying(u -> {
-            assertThat(u.userId()).isEqualTo(5L);
-            assertThat(u.role().name()).isEqualTo("VETERINARIAN");
+            assertThat(u.userId()).isEqualTo(UUID.fromString(U5));
+            assertThat(u.roles()).containsExactly(RoleCode.VETERINARIAN);
         });
     }
 
@@ -82,11 +89,23 @@ class StompSecurityTest {
     void verifier_rejectsExpiredForgedAndMalformedTokens() {
         SecretKey other = Keys.hmacShaKeyFor("ANOTHER-0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8));
 
-        assertThat(verifier.verify(token("5", "ADMIN", Date.from(Instant.now().minusSeconds(60)), KEY))).isEmpty();
-        assertThat(verifier.verify(token("5", "ADMIN", Date.from(Instant.now().plusSeconds(600)), other))).isEmpty();
+        assertThat(verifier.verify(token(U5, "ADMIN", Date.from(Instant.now().minusSeconds(60)), KEY))).isEmpty();
+        assertThat(verifier.verify(token(U5, "ADMIN", Date.from(Instant.now().plusSeconds(600)), other))).isEmpty();
         assertThat(verifier.verify("khong.phai.jwt")).isEmpty();
-        assertThat(verifier.verify(validToken("abc", "ADMIN"))).isEmpty();          // userId không phải số
-        assertThat(verifier.verify(validToken("5", "SUPERUSER"))).isEmpty();        // vai trò không tồn tại
+        assertThat(verifier.verify(validToken("abc", "ADMIN"))).isEmpty();          // userId không phải UUID
+        assertThat(verifier.verify(validToken(U5, "SUPERUSER"))).isEmpty();        // vai trò không tồn tại
+    }
+
+    @Test
+    void verifier_readsEveryRoleOfTheToken_andRefusesATokenWithoutAnyValidRole() {
+        assertThat(verifier.verify(validToken(U7, "VETERINARIAN,ADMIN"))).hasValueSatisfying(u ->
+                assertThat(u.roles()).containsExactlyInAnyOrder(RoleCode.VETERINARIAN, RoleCode.ADMIN));
+        assertThat(verifier.verify(validToken(U7, "ADMIN,SOMETHING_NEW"))).hasValueSatisfying(u ->
+                assertThat(u.roles()).containsExactly(RoleCode.ADMIN));   // vai trò lạ bị bỏ qua
+        // token v3 chỉ có claim đơn "role" (không có "roles") không còn được chấp nhận
+        String legacy = Jwts.builder().claim("userId", U7).claim("role", "ADMIN")
+                .expiration(Date.from(Instant.now().plusSeconds(600))).signWith(KEY).compact();
+        assertThat(verifier.verify(legacy)).isEmpty();
     }
 
     @Test
@@ -99,27 +118,27 @@ class StompSecurityTest {
 
     @Test
     void connect_withBearerTokenAttachesTheUser() {
-        StompHeaderAccessor session = connected("7", "RECEPTIONIST");
+        StompHeaderAccessor session = connected(U7, "RECEPTIONIST");
 
         assertThat(session.getUser()).isNotNull();
-        assertThat(session.getUser().getName()).isEqualTo("7");   // Principal name = userId, khớp convertAndSendToUser
+        assertThat(session.getUser().getName()).isEqualTo(U7);   // Principal name = userId, khớp convertAndSendToUser
     }
 
     @Test
     void connect_acceptsTheTokenHeaderToo() {
         StompHeaderAccessor connect = accessor(StompCommand.CONNECT);
-        connect.setNativeHeader("token", validToken("7", "ADMIN"));
+        connect.setNativeHeader("token", validToken(U7, "ADMIN"));
 
         send(connect);
 
-        assertThat(connect.getUser().getName()).isEqualTo("7");
+        assertThat(connect.getUser().getName()).isEqualTo(U7);
     }
 
     @Test
     void connect_withoutOrWithBadTokenIsRejected() {
         StompHeaderAccessor none = accessor(StompCommand.CONNECT);
         StompHeaderAccessor bad = accessor(StompCommand.CONNECT);
-        bad.setNativeHeader("Authorization", "Bearer " + validToken("7", "ADMIN") + "x");
+        bad.setNativeHeader("Authorization", "Bearer " + validToken(U7, "ADMIN") + "x");
         StompHeaderAccessor notBearer = accessor(StompCommand.CONNECT);
         notBearer.setNativeHeader("Authorization", "Basic abc");
 
@@ -132,15 +151,24 @@ class StompSecurityTest {
 
     @Test
     void subscribe_toOwnPrivateQueueAndOwnRoleTopicIsAllowed() {
-        StompHeaderAccessor session = connected("7", "RECEPTIONIST");
+        StompHeaderAccessor session = connected(U7, "RECEPTIONIST");
 
         send(subscribe(session, "/user/queue/notifications"));
         send(subscribe(session, "/topic/role/RECEPTIONIST"));
     }
 
     @Test
+    void subscribe_aUserWithSeveralRolesMayListenToEachOfTheirRoleTopics() {
+        StompHeaderAccessor session = connected(U7, "RECEPTIONIST,ADMIN");
+
+        send(subscribe(session, "/topic/role/RECEPTIONIST"));
+        send(subscribe(session, "/topic/role/ADMIN"));
+        assertThatThrownBy(() -> send(subscribe(session, "/topic/role/VETERINARIAN"))).isInstanceOf(MessagingException.class);
+    }
+
+    @Test
     void subscribe_toAnotherRolesTopicOrAnythingElseIsRejected() {
-        StompHeaderAccessor session = connected("7", "RECEPTIONIST");
+        StompHeaderAccessor session = connected(U7, "RECEPTIONIST");
 
         assertThatThrownBy(() -> send(subscribe(session, "/topic/role/ADMIN"))).isInstanceOf(MessagingException.class);
         assertThatThrownBy(() -> send(subscribe(session, "/topic/role/NOPE"))).isInstanceOf(MessagingException.class);
@@ -161,7 +189,7 @@ class StompSecurityTest {
 
     @Test
     void send_isAlwaysRejectedEvenForAuthenticatedUsers() {
-        StompHeaderAccessor session = connected("1", "ADMIN");
+        StompHeaderAccessor session = connected(U1, "ADMIN");
         StompHeaderAccessor message = accessor(StompCommand.SEND);
         message.setDestination("/topic/role/ADMIN");
         message.setUser(session.getUser());
@@ -173,7 +201,7 @@ class StompSecurityTest {
     void otherFrames_requireAnAuthenticatedSession_andHeartbeatsPass() {
         StompHeaderAccessor unsubscribeAnonymous = accessor(StompCommand.UNSUBSCRIBE);
         StompHeaderAccessor unsubscribe = accessor(StompCommand.UNSUBSCRIBE);
-        unsubscribe.setUser(new UsernamePasswordAuthenticationToken("7", null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+        unsubscribe.setUser(new UsernamePasswordAuthenticationToken(U7, null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         StompHeaderAccessor heartbeat = StompHeaderAccessor.createForHeartbeat();
         heartbeat.setLeaveMutable(true);
 

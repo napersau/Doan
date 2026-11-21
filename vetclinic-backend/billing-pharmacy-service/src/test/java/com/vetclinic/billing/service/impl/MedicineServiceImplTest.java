@@ -26,8 +26,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 import java.util.Optional;
 
+import static com.vetclinic.billing.testsupport.TestData.uid;
 import static com.vetclinic.billing.testsupport.TestData.DOCTOR;
 import static com.vetclinic.billing.testsupport.TestData.assertError;
 import static com.vetclinic.billing.testsupport.TestData.loginAs;
@@ -45,7 +47,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class MedicineServiceImplTest {
 
-    private static final long ADMIN = 1L;
+    private static final UUID ADMIN = uid(1);
 
     @Mock
     private MedicineRepository medicineRepository;
@@ -130,7 +132,7 @@ class MedicineServiceImplTest {
 
         service.adjustStock(new InventoryAdjustRequest(1L, 30, "Kiểm kê thừa"));
 
-        verify(stockAlerts, never()).publishIfLow(any(), anyLong());
+        verify(stockAlerts, never()).publishIfLow(any(), any());
     }
 
     @Test

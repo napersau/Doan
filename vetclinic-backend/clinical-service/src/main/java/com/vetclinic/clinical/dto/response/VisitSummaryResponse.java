@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.VisitStatus;
 
 /**
@@ -12,7 +13,7 @@ public record VisitSummaryResponse(
         VisitStatus status,
         Long petId,
         String petName,
-        Long ownerId,
-        Long doctorId
+        UUID ownerId,
+        UUID doctorId
 ) {
 }

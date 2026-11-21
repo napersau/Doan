@@ -71,7 +71,7 @@ public class QueueTicketServiceImpl implements QueueTicketService {
 
     @Override
     public QueueTicketResponse callNext(QueueType type) {
-        Long userId = SecurityUtils.getCurrentUserId();
+        UUID userId = SecurityUtils.getCurrentUserId();
         assertCanServe(type);
         String room = roomOf(userId);   // Feign NGOÀI transaction
         return tx.execute(s -> {
@@ -91,7 +91,7 @@ public class QueueTicketServiceImpl implements QueueTicketService {
 
     @Override
     public QueueTicketResponse call(Long ticketId) {
-        Long userId = SecurityUtils.getCurrentUserId();
+        UUID userId = SecurityUtils.getCurrentUserId();
         QueueType type = ticketRepository.findById(ticketId).map(QueueTicket::getQueueType)
                 .orElseThrow(() -> new AppException(ErrorCode.TICKET_NOT_FOUND));
         assertCanServe(type);
@@ -106,7 +106,7 @@ public class QueueTicketServiceImpl implements QueueTicketService {
         });
     }
 
-    private QueueTicketResponse doCall(QueueTicket ticket, Long userId, String room) {
+    private QueueTicketResponse doCall(QueueTicket ticket, UUID userId, String room) {
         if (ticket.getStatus() != TicketStatus.WAITING) {
             throw new AppException(ErrorCode.TICKET_NOT_WAITING);   // CLIN_1313
         }
@@ -128,7 +128,7 @@ public class QueueTicketServiceImpl implements QueueTicketService {
 
     @Override
     public QueueTicketResponse start(Long ticketId) {
-        Long userId = SecurityUtils.getCurrentUserId();
+        UUID userId = SecurityUtils.getCurrentUserId();
         QueueType type = ticketRepository.findById(ticketId).map(QueueTicket::getQueueType)
                 .orElseThrow(() -> new AppException(ErrorCode.TICKET_NOT_FOUND));
         if (type == QueueType.DOCTOR) {
@@ -202,7 +202,7 @@ public class QueueTicketServiceImpl implements QueueTicketService {
     }
 
     /** Số phòng của người gọi để hiển thị; không tra được thì bỏ trống, không làm hỏng việc gọi số. */
-    private String roomOf(Long userId) {
+    private String roomOf(UUID userId) {
         try {
             ApiResponse<UserSummaryResponse> response = authClient.getUser(userId);
             return response == null || response.getData() == null ? null : response.getData().roomNumber();

@@ -11,8 +11,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.UUID;
 import java.util.List;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -26,14 +28,14 @@ class VisitEnricherTest {
     @Mock
     private AuthClient authClient;
 
-    private static VisitResponse visit(long id, Long doctorId) {
-        return new VisitResponse(id, "VIS-" + id, 11L, "Lu", "PET-11", "Chó", 5L, null, doctorId, 9L, null, false,
+    private static VisitResponse visit(long id, UUID doctorId) {
+        return new VisitResponse(id, "VIS-" + id, 11L, "Lu", "PET-11", "Chó", uid(5), null, doctorId, uid(9), null, false,
                 VisitStatus.WAITING, false, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null);
     }
 
     private static UserSummaryResponse doctor(long id, String room) {
-        return new UserSummaryResponse(id, "BS " + id, "0911111111", RoleCode.VETERINARIAN, room, "ACTIVE");
+        return new UserSummaryResponse(uid(id), "BS " + id, "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), room, "ACTIVE");
     }
 
     @Test
@@ -41,7 +43,7 @@ class VisitEnricherTest {
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(doctor(2L, "P101"), doctor(3L, "P102"))));
 
         List<VisitResponse> result = new VisitEnricher(authClient)
-                .enrichAll(List.of(visit(1, 2L), visit(2, 3L), visit(3, 2L), visit(4, null)));
+                .enrichAll(List.of(visit(1, uid(2)), visit(2, uid(3)), visit(3, uid(2)), visit(4, null)));
 
         assertThat(result).extracting(VisitResponse::assignedRoom).containsExactly("P101", "P102", "P101", null);
         verify(authClient).getUsers(any());   // đúng một lời gọi dù 4 ca khám: không N+1
@@ -59,7 +61,7 @@ class VisitEnricherTest {
     void enrich_whenAuthServiceIsDown_returnsTheVisitUnchanged() {
         when(authClient.getUsers(any())).thenThrow(new RuntimeException("auth down"));
 
-        VisitResponse result = new VisitEnricher(authClient).enrich(visit(1, 2L));
+        VisitResponse result = new VisitEnricher(authClient).enrich(visit(1, uid(2)));
 
         assertThat(result.assignedRoom()).isNull();
         assertThat(result.id()).isEqualTo(1L);

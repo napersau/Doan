@@ -31,6 +31,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -78,7 +79,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
 
     @Override
     public PrescriptionResponse create(PrescriptionRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         if (request.visitId() == null) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Phải chọn đợt khám để kê đơn");
         }
@@ -106,7 +107,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
 
     @Override
     public PrescriptionResponse update(Long id, PrescriptionRequest request) {
-        Long doctorId = SecurityUtils.getCurrentUserId();
+        UUID doctorId = SecurityUtils.getCurrentUserId();
         Prescription existing = prescriptionRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.PRESCRIPTION_NOT_FOUND));
         VisitSummaryResponse visit = visitLookup.require(existing.getVisitId());
@@ -181,7 +182,7 @@ public class PrescriptionServiceImpl implements PrescriptionService {
         return warnings;
     }
 
-    private static void assertDoctorMayPrescribe(VisitSummaryResponse visit, Long doctorId) {
+    private static void assertDoctorMayPrescribe(VisitSummaryResponse visit, UUID doctorId) {
         if (!doctorId.equals(visit.doctorId())) {
             throw new AppException(ErrorCode.NOT_ASSIGNED_DOCTOR);
         }

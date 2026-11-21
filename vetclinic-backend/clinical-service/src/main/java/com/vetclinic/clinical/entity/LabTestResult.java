@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -41,7 +42,7 @@ public class LabTestResult {
     private BigDecimal maxValueSnapshot;
 
     @Column(name = "performed_by", nullable = false)
-    private Long performedBy;
+    private UUID performedBy;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;

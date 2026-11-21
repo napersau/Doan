@@ -4,6 +4,7 @@ import com.vetclinic.clinical.constant.VisitStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 import java.util.List;
 
 /**
@@ -21,10 +22,10 @@ public record VisitResponse(
         String petName,
         String petCode,
         String speciesName,
-        Long ownerId,
+        UUID ownerId,
         Long appointmentId,
-        Long doctorId,
-        Long receptionistId,
+        UUID doctorId,
+        UUID receptionistId,
         String assignedRoom,
         boolean emergency,
         VisitStatus status,

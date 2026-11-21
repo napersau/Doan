@@ -2,6 +2,7 @@ package com.vetclinic.appointment.client;
 
 import com.vetclinic.appointment.dto.response.PetSummaryResponse;
 import com.vetclinic.common.dto.ApiResponse;
+import java.util.UUID;
 import java.util.List;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,5 +29,5 @@ public interface PetClient {
      * "lịch của tôi" / lọc theo chủ nuôi được thực hiện bằng {@code pet_id IN (...)} (CLAUDE.md §10 #3).
      */
     @GetMapping("/pets")
-    ApiResponse<List<PetSummaryResponse>> getPetsByOwner(@RequestParam("ownerId") Long ownerId);
+    ApiResponse<List<PetSummaryResponse>> getPetsByOwner(@RequestParam("ownerId") UUID ownerId);
 }

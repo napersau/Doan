@@ -1,5 +1,6 @@
 package com.vetclinic.billing.service;
 
+import java.util.UUID;
 import com.vetclinic.billing.entity.Medicine;
 import com.vetclinic.common.event.MedicineLowStockEvent;
 import com.vetclinic.common.event.outbox.OutboxWriter;
@@ -25,7 +26,7 @@ public class StockAlertPublisher {
     private final Clock clock;
 
     /** medicine phải là bản vừa refresh (tồn kho thật sau khi trừ). Phải gọi trong một giao dịch đang chạy. */
-    public void publishIfLow(Medicine medicine, Long actorUserId) {
+    public void publishIfLow(Medicine medicine, UUID actorUserId) {
         if (medicine.getStockQuantity() <= medicine.getMinStockAlert()) {
             outboxWriter.write(AGGREGATE, medicine.getId(), new MedicineLowStockEvent(UuidV7.generate(clock), clock.instant(),
                     actorUserId, medicine.getId(), medicine.getCode(), medicine.getName(), medicine.getStockQuantity(),

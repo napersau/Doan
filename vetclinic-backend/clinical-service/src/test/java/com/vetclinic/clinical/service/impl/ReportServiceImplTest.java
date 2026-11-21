@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
+import static com.vetclinic.clinical.testsupport.TestData.uid;
 import static com.vetclinic.clinical.testsupport.TestData.CLOCK;
 import static com.vetclinic.clinical.testsupport.TestData.assertError;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,10 +120,10 @@ class ReportServiceImplTest {
         when(visitRepository.countEmergencyBetween(any(), any())).thenReturn(2L);
         when(detailRepository.countVisitsWithCategoriesBetween(any(), any(), any())).thenReturn(4L);
         when(visitRepository.countByDoctorAndStatusBetween(any(), any())).thenReturn(List.of(
-                new Object[]{21L, VisitStatus.COMPLETED, 4L}, new Object[]{21L, VisitStatus.CANCELLED, 1L},
-                new Object[]{22L, VisitStatus.COMPLETED, 2L}));
+                new Object[]{uid(21), VisitStatus.COMPLETED, 4L}, new Object[]{uid(21), VisitStatus.CANCELLED, 1L},
+                new Object[]{uid(22), VisitStatus.COMPLETED, 2L}));
         when(authClient.getUsers(any())).thenReturn(ApiResponse.success(List.of(
-                new UserSummaryResponse(21L, "BS Lan", "0911111111", RoleCode.VETERINARIAN, "P01", "ACTIVE"))));
+                new UserSummaryResponse(uid(21), "BS Lan", "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), "P01", "ACTIVE"))));
 
         OperationsReportResponse report = service.operations(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 30));
 
@@ -133,7 +134,7 @@ class ReportServiceImplTest {
         assertThat(report.paraclinicalVisits()).isEqualTo(4);
         assertThat(report.routineVisits()).isEqualTo(6);
         assertThat(report.byStatus()).containsEntry("WAITING", 3L).containsEntry("IN_PROGRESS", 0L);   // đủ mọi trạng thái
-        assertThat(report.doctors()).extracting(OperationsReportResponse.DoctorLoad::doctorId).containsExactly(21L, 22L);   // nhiều ca nhất trước
+        assertThat(report.doctors()).extracting(OperationsReportResponse.DoctorLoad::doctorId).containsExactly(uid(21), uid(22));   // nhiều ca nhất trước
         assertThat(report.doctors().get(0).assignedVisits()).isEqualTo(5);
         assertThat(report.doctors().get(0).completedVisits()).isEqualTo(4);
         assertThat(report.doctors().get(0).doctorName()).isEqualTo("BS Lan");

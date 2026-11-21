@@ -9,7 +9,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
- * Chuyển tiếp X-User-Id / X-User-Role của request hiện tại sang service được gọi,
+ * Chuyển tiếp X-User-Id / X-User-Roles của request hiện tại sang service được gọi,
  * để service đích áp dụng @PreAuthorize đúng người dùng.
  * Khi không có request (consumer RabbitMQ, scheduler) thì không gắn gì: hãy gọi endpoint /internal/** trong trường hợp đó.
  */
@@ -23,7 +23,7 @@ public class FeignClientInterceptor implements RequestInterceptor {
         }
         HttpServletRequest request = servletAttributes.getRequest();
         copyHeader(request, template, SecurityConstants.HEADER_USER_ID);
-        copyHeader(request, template, SecurityConstants.HEADER_USER_ROLE);
+        copyHeader(request, template, SecurityConstants.HEADER_USER_ROLES);
     }
 
     private static void copyHeader(HttpServletRequest request, RequestTemplate template, String name) {

@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.request;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.PetGender;
 import jakarta.validation.constraints.*;
 import java.math.BigDecimal;
@@ -7,7 +8,7 @@ import java.time.LocalDate;
 
 /** Chủ nuôi tự thêm: ownerId bị bỏ qua. Lễ tân thêm hộ: bắt buộc ownerId. */
 public record CreatePetRequest(
-        Long ownerId,
+        UUID ownerId,
         @NotNull(message = "Loài không được để trống") Long speciesId,
         @NotBlank(message = "Tên thú cưng không được để trống") @Size(max = 100, message = "Tên tối đa 100 ký tự") String name,
         @Size(max = 100, message = "Giống tối đa 100 ký tự") String breed,

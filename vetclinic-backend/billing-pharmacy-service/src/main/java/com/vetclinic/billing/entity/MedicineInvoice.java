@@ -11,6 +11,7 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -49,7 +50,7 @@ public class MedicineInvoice {
 
     /** Khóa ngoại logic -> auth.users(id): thu ngân, gán khi thu tiền. */
     @Column(name = "cashier_id")
-    private Long cashierId;
+    private UUID cashierId;
 
     @Column(name = "paid_at")
     private Instant paidAt;

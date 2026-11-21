@@ -221,12 +221,12 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
 
     @Override
     public MedicineInvoiceResponse confirmPayment(Long id) {
-        Long cashierId = SecurityUtils.getCurrentUserId();
+        UUID cashierId = SecurityUtils.getCurrentUserId();
         MedicineInvoiceResponse paid = tx.execute(s -> doConfirmPayment(id, cashierId));
         return enrich(paid);
     }
 
-    private MedicineInvoiceResponse doConfirmPayment(Long id, Long cashierId) {
+    private MedicineInvoiceResponse doConfirmPayment(Long id, UUID cashierId) {
         // Khóa dòng hóa đơn: hai thu ngân bấm cùng lúc thì người sau chờ, rồi thấy PAID -> BILL_1403 (EX-16); @Version là lớp bảo vệ thứ hai
         MedicineInvoice invoice = invoiceRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new AppException(ErrorCode.INVOICE_NOT_FOUND));

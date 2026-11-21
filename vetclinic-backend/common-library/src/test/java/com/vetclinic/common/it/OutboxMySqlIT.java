@@ -155,7 +155,7 @@ class OutboxMySqlIT {
     }
 
     private VisitCompletedEvent event() {
-        return new VisitCompletedEvent(UuidV7.generate(), Instant.now(), 5L, 42L, "VIS-2026-00042", 11L, false);
+        return new VisitCompletedEvent(UuidV7.generate(), Instant.now(), UuidV7.generate(), 42L, "VIS-2026-00042", 11L, false);
     }
 
     @Test

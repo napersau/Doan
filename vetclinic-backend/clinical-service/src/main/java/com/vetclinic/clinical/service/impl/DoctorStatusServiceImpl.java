@@ -14,6 +14,7 @@ import com.vetclinic.common.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
@@ -29,7 +30,7 @@ public class DoctorStatusServiceImpl implements DoctorStatusService {
     private final AuthClient authClient;
 
     @Override
-    public DoctorStatus statusOf(Long doctorId) {
+    public DoctorStatus statusOf(UUID doctorId) {
         return visitRepository.existsByDoctorIdAndStatus(doctorId, VisitStatus.IN_PROGRESS)
                 ? DoctorStatus.BUSY : DoctorStatus.AVAILABLE;
     }
@@ -40,10 +41,10 @@ public class DoctorStatusServiceImpl implements DoctorStatusService {
         if (response == null || response.getData() == null) {
             throw new AppException(ErrorCode.SERVICE_UNAVAILABLE);
         }
-        Set<Long> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS));
-        Map<Long, Integer> waiting = new HashMap<>();
+        Set<UUID> busy = visitRepository.findDoctorIdsWithStatusIn(List.of(VisitStatus.IN_PROGRESS));
+        Map<UUID, Integer> waiting = new HashMap<>();
         for (Object[] row : ticketRepository.countWaitingByDoctor()) {   // số phiếu DOCTOR đang chờ (ca chưa nộp phí khám không tính)
-            waiting.put((Long) row[0], ((Long) row[1]).intValue());
+            waiting.put((UUID) row[0], ((Long) row[1]).intValue());
         }
 
         return response.getData().stream().map(d -> {

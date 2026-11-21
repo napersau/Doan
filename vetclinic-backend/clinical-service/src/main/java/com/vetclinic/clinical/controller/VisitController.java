@@ -26,6 +26,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.UUID;
 import java.util.List;
 
 /** Đợt khám ngoại trú hai pha. Chuyển trạng thái dùng POST theo quy chuẩn Action Endpoint. */
@@ -70,7 +71,7 @@ public class VisitController {
     public ResponseEntity<ApiResponse<PageResponse<VisitResponse>>> search(
             @RequestParam(required = false) VisitStatus status,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestParam(required = false) Long doctorId,
+            @RequestParam(required = false) UUID doctorId,
             @RequestParam(required = false) Long petId,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,

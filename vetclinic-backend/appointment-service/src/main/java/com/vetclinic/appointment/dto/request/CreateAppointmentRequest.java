@@ -1,5 +1,6 @@
 package com.vetclinic.appointment.dto.request;
 
+import java.util.UUID;
 import com.vetclinic.appointment.constant.BookingChannel;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -19,7 +20,7 @@ public record CreateAppointmentRequest(
         @NotNull(message = "Thú cưng không được để trống")
         Long petId,
 
-        Long ownerId,
+        UUID ownerId,
 
         @NotNull(message = "Ngày hẹn không được để trống")
         LocalDate appointmentDate,

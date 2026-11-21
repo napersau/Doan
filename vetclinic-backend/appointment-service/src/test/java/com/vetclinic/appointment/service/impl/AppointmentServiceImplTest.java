@@ -32,6 +32,7 @@ import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
+import java.util.UUID;
 import java.util.Collection;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,10 +81,15 @@ class AppointmentServiceImplTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-30T02:00:00Z"), ZoneId.of("Asia/Ho_Chi_Minh"));
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 30);
     private static final LocalDate TOMORROW = TODAY.plusDays(1);
-    private static final long OWNER = 5L;
-    private static final long OTHER_OWNER = 6L;
-    private static final long RECEPTIONIST = 9L;
+    private static final UUID OWNER = uid(5);
+    private static final UUID OTHER_OWNER = uid(6);
+    private static final UUID RECEPTIONIST = uid(9);
     private static final long PET = 11L;
+
+    /** UUID demo cố định, cùng dạng với dữ liệu seed (019a9442-d810-7000-8000-0000000000NN). */
+    private static UUID uid(long n) {
+        return UUID.fromString(String.format("019a9442-d810-7000-8000-%012d", n));
+    }
 
     @Mock
     private AppointmentRepository appointmentRepository;
@@ -258,17 +264,17 @@ class AppointmentServiceImplTest {
     @Test
     void create_byReceptionist_isConfirmedImmediatelyWithConfirmer() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(authClient.getUser(77L)).thenReturn(ApiResponse.success(
-                new UserSummaryResponse(77L, "Chủ Nuôi", "0944444444", RoleCode.PET_OWNER, "ACTIVE")));
+        when(authClient.getUser(uid(77))).thenReturn(ApiResponse.success(
+                new UserSummaryResponse(uid(77), "Chủ Nuôi", "0944444444", RoleCode.PET_OWNER, List.of(RoleCode.PET_OWNER), "ACTIVE")));
         stubCapacity(1);
         stubSave();
 
         AppointmentResponse response = service.create(new CreateAppointmentRequest(
-                PET, 77L, TOMORROW, LocalTime.of(14, 0), "Khám tổng quát", BookingChannel.PHONE));
+                PET, uid(77), TOMORROW, LocalTime.of(14, 0), "Khám tổng quát", BookingChannel.PHONE));
 
         assertThat(response.status()).isEqualTo(AppointmentStatus.CONFIRMED);
         assertThat(response.bookingChannel()).isEqualTo(BookingChannel.PHONE);
-        assertThat(response.ownerId()).isEqualTo(77L);
+        assertThat(response.ownerId()).isEqualTo(uid(77));
         // Người tạo/duyệt nằm ở lịch sử (appointments không còn confirmed_by/confirmed_at)
         assertThat(lastHistory().getToStatus()).isEqualTo(AppointmentStatus.CONFIRMED);
         assertThat(lastHistory().getChangedByUserId()).isEqualTo(RECEPTIONIST);
@@ -283,11 +289,11 @@ class AppointmentServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT_DATA);
         assertThatThrownBy(() -> service.create(new CreateAppointmentRequest(
-                PET, 77L, TOMORROW, LocalTime.of(14, 0), "Khám", BookingChannel.ONLINE)))
+                PET, uid(77), TOMORROW, LocalTime.of(14, 0), "Khám", BookingChannel.ONLINE)))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT_DATA);
         assertThatThrownBy(() -> service.create(new CreateAppointmentRequest(
-                PET, 77L, TOMORROW, LocalTime.of(14, 0), "Khám", null)))
+                PET, uid(77), TOMORROW, LocalTime.of(14, 0), "Khám", null)))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT_DATA);
     }
@@ -295,12 +301,12 @@ class AppointmentServiceImplTest {
     @Test
     void create_byReceptionist_forUserThatIsNotAnActivePetOwner_isRejected() {
         loginAs(RECEPTIONIST, RoleCode.RECEPTIONIST);
-        when(authClient.getUser(3L)).thenReturn(ApiResponse.success(
-                new UserSummaryResponse(3L, "Bác sĩ", "0911111111", RoleCode.VETERINARIAN, "ACTIVE")));
-        when(authClient.getUser(4L)).thenReturn(ApiResponse.success(
-                new UserSummaryResponse(4L, "Chủ cũ", "0922222222", RoleCode.PET_OWNER, "LOCKED")));
+        when(authClient.getUser(uid(3))).thenReturn(ApiResponse.success(
+                new UserSummaryResponse(uid(3), "Bác sĩ", "0911111111", RoleCode.VETERINARIAN, List.of(RoleCode.VETERINARIAN), "ACTIVE")));
+        when(authClient.getUser(uid(4))).thenReturn(ApiResponse.success(
+                new UserSummaryResponse(uid(4), "Chủ cũ", "0922222222", RoleCode.PET_OWNER, List.of(RoleCode.PET_OWNER), "LOCKED")));
 
-        for (long ownerId : new long[]{3L, 4L}) {
+        for (UUID ownerId : List.of(uid(3), uid(4))) {
             assertThatThrownBy(() -> service.create(new CreateAppointmentRequest(
                     PET, ownerId, TOMORROW, LocalTime.of(14, 0), "Khám", BookingChannel.WALK_IN)))
                     .isInstanceOf(AppException.class)
@@ -310,7 +316,7 @@ class AppointmentServiceImplTest {
 
     @Test
     void create_byOtherRoles_isForbidden() {
-        loginAs(3L, RoleCode.VETERINARIAN);
+        loginAs(uid(3), RoleCode.VETERINARIAN);
 
         assertThatThrownBy(() -> service.create(
                 new CreateAppointmentRequest(PET, null, TOMORROW, LocalTime.of(9, 0), "Khám", null)))
@@ -921,11 +927,11 @@ class AppointmentServiceImplTest {
         return captor.getValue();
     }
 
-    private static Appointment appointment(Long id, long ownerId, AppointmentStatus status, LocalDate date, LocalTime start) {
+    private static Appointment appointment(Long id, UUID ownerId, AppointmentStatus status, LocalDate date, LocalTime start) {
         return Appointment.builder()
                 .id(id)
                 .appointmentCode("APT-TEST-" + id)
-                .petId(ownerId == OTHER_OWNER ? PET + 1 : PET)   // chủ nuôi suy ra từ thú cưng (appointments không còn owner_id)
+                .petId(OTHER_OWNER.equals(ownerId) ? PET + 1 : PET)   // chủ nuôi suy ra từ thú cưng (appointments không còn owner_id)
                 .appointmentDate(date)
                 .startTime(start)
                 .reason("Khám")
@@ -934,8 +940,8 @@ class AppointmentServiceImplTest {
                 .build();
     }
 
-    private static void loginAs(long userId, RoleCode role) {
+    private static void loginAs(UUID userId, RoleCode role) {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
-                String.valueOf(userId), null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
+                userId.toString(), null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
     }
 }

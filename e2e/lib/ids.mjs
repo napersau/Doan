@@ -69,3 +69,9 @@ export async function seedIds() {
 
 /** Câu con SQL lấy id thuốc theo mã (để truy vấn đối chiếu không phụ thuộc kiểu khóa). */
 export const medicineIdSql = (code) => `(SELECT id FROM pet_clinic_billing_pharmacy_db.medicines WHERE code='${code}')`;
+
+/**
+ * Biểu thức SQL cho một id người dùng (UUID dạng chuỗi) so với cột BINARY(16): `doctor_id = ${uuidSql(id)}`.
+ * Từ bước 2.1 mọi cột tham chiếu người dùng là BINARY(16), nên không thể viết `doctor_id = 2` như v3.
+ */
+export const uuidSql = (id) => `UNHEX(REPLACE('${id}','-',''))`;

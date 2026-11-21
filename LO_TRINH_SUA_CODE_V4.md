@@ -10,9 +10,9 @@
 
 | Phase | Trạng thái | Ghi chú |
 |---|---|---|
-| Phase 0 Chuẩn bị (không đổi hành vi) | ✅ 0.1–0.4 xong (20/11) | Bước tiếp theo: **2.1** (tài khoản v4 + id người dùng UUID, bước lớn – dùng nhánh `feature/v4-2.1`) |
+| Phase 0 Chuẩn bị (không đổi hành vi) | ✅ 0.1–0.4 xong (20/11) | Bước tiếp theo: **2.2** (quản lý nhân sự & hồ sơ) |
 | Phase 1 Outbox + consumer chống trùng | ✅ 1.1–1.5 xong (20/11) | 1.1 làm trước Phase 0 theo yêu cầu; 1.2 cần 0.1 xong trước (thêm bảng vào `db/schema_current.sql`) |
-| Phase 2 auth-service v4 + id người dùng UUID | ⬜ | |
+| Phase 2 auth-service v4 + id người dùng UUID | 🟨 2.1 xong (21/11, kiểm tra cấp service) | Chưa chạy Docker + e2e toàn hệ thống: làm ở cuối Phase 2 (D12) |
 | Phase 3 Danh mục dịch vụ + bảng giá có lịch sử | ⬜ | |
 | Phase 4 Thú cưng, lịch hẹn, đợt khám (UUID + tách 3 bảng) | ⬜ | |
 | Phase 5 Thuốc v4 + đơn thuốc về clinical + hóa đơn nháp | ⬜ | |
@@ -39,19 +39,33 @@
 
 ## 2. "Điều kiện xong" của MỘT bước (Definition of Done)
 
+> **Quy trình rút gọn (người dùng yêu cầu 21/11/2026, quyết định D12):** dựng cả hệ thống Docker + chạy 5 bộ e2e sau MỖI bước quá lâu
+> (≈ 15–20 phút). Nên mỗi bước chỉ kiểm tra **ở cấp service đã sửa** (dưới đây, ≈ vài phút); kiểm tra toàn hệ thống chạy **cuối mỗi Phase**
+> (và khi người dùng yêu cầu). Vì vậy một bước `[x]` nghĩa là "đạt kiểm tra cấp service", còn lỗi liên service chỉ lộ ra ở lần chạy toàn hệ thống cuối Phase.
+
+**Mỗi bước (nhanh):**
 ```bash
 export JAVA_HOME="C:/Program Files/Java/jdk-21.0.6"
-cd vetclinic-backend && mvn -o clean install                 # 1. mọi unit test xanh (ghi số test vào "Kết quả")
-cd ../fe && npm run build && CI=true npm test -- --watchAll=false   # 2. build sạch, 22+ test xanh
-cd .. && docker compose down -v && docker compose up -d --build     # 3. từ CSDL sạch (db/schema_current.sql)
-docker compose ps                                              #    11 container healthy (12 từ Phase 6 có Redis, 13 từ Phase 7)
-bash e2e/run_all.sh                                            # 4. 5 bộ e2e xanh (đã sửa theo bước)
-git add -A ':!update.md' && git commit                         # 5. commit "v4 <bước>: ..." (không commit update.md)
-git push origin develop                                        # 6. push lên GitHub sau mỗi bước (yêu cầu của người dùng 20/11)
+cd vetclinic-backend
+mvn -o -pl <module sửa> install                     # 1. unit test CHỈ của module đã sửa (thêm common-library đứng trước nếu đổi common; không cần `clean`)
+cd .. && bash scripts/service_check.sh <module>     # 2. service có DB đã sửa: chạy jar với MySQL thật (Hibernate validate khớp lược đồ; auth còn đăng nhập thật)
+cd fe && CI=true npm test -- --watchAll=false       # 3. nếu đổi FE: test FE (nhanh); `npm run build` chỉ khi đổi cấu trúc/import lớn
+cd .. && git add -A ':!update.md' && git commit     # 4. commit "v4 <bước>: ..." (không commit update.md)
+git push origin develop                             # 5. push lên GitHub sau mỗi bước
 ```
-- Bước nào thêm nghiệp vụ mới thì thêm kiểm tra e2e cho nghiệp vụ đó (lấy kịch bản `curl` của Task tương ứng trong `docs/LICH_TRINH_XAY_DUNG_MA_NGUON_VA_HUONG_DAN_TEST.md`).
+- `scripts/service_check.sh` cần jar: `mvn -o -pl <module> install -DskipTests` (đã có sau bước 1). MySQL tạm `vetclinic-check-mysql` (cổng 3399) nạp `db/schema_current.sql` + `db/seed_current.sql`; `--reset` để nạp lại khi đổi lược đồ/seed.
+- Bước nào thêm nghiệp vụ mới thì thêm test (unit + kiểm tra MySQL thật) cho nghiệp vụ đó; kiểm tra e2e viết sẵn trong `e2e/` nhưng chạy ở cuối Phase.
+
+**Cuối mỗi Phase (đầy đủ, bắt buộc trước khi đổi Phase sang ✅):**
+```bash
+cd vetclinic-backend && mvn -o clean install                          # toàn bộ unit test (nếu IDE làm lỗi `target/`, build trên bản sao không có target/)
+cd ../fe && npm run build && CI=true npm test -- --watchAll=false
+cd .. && docker compose down -v && docker compose up -d --build        # từ CSDL sạch (db/schema_current.sql)
+docker compose ps                                                      # mọi container healthy
+bash e2e/run_all.sh                                                    # 5 bộ e2e xanh
+```
 - e2e để lại dữ liệu → muốn chạy lại phải `down -v` (bình thường, không phải lỗi).
-- Bước lớn (2.1, 4.2, 5.2, 6.2) được phép commit nháp trên nhánh phụ `feature/v4-<bước>` khi chưa xanh, nhưng **chỉ merge vào `develop` khi đủ 5 điều kiện**.
+- Bước lớn (2.1, 4.2, 5.2, 6.2) làm trên nhánh phụ `feature/v4-<bước>` với các commit nháp theo lớp; khi xong **squash-merge vào `develop` thành 1 commit** `v4 <bước>: ...`.
 
 ---
 
@@ -88,6 +102,7 @@ Phase 8  Feign 2s + Circuit Breaker, khớp schema đích, seed v4, e2e EX-17…
 | D9 | `QueueTicketIssuedEvent`, `PatientCalledEvent` | Gửi thẳng (không qua outbox) đúng Kiến trúc §5.2; mọi sự kiện khác qua outbox |
 | D10 | notification-service không có CSDL | Giữ chống trùng bằng `ProcessedEvents` trong bộ nhớ như hiện tại (docs không có bảng cho notification) |
 | D11 | UUID dữ liệu demo | Dịch vụ/thuốc/admin: đúng UUID trong `docs/schema_init.sql` (`@s_exam`, `@m_amox`, `@u_admin`...). Tài khoản demo: `019a9442-d810-7000-8000-0000000000NN` (NN = id cũ: `bs_tien`=02 … `khach_lan`=08, chủ nuôi bổ sung 09–13); thú cưng: `019a9442-d820-7000-8000-0000000000NN` (Lu=01, Milo=02, …) theo Lộ trình Task 1.2.3 |
+| D12 | Thời gian kiểm tra mỗi bước | Người dùng yêu cầu 21/11/2026: mỗi bước chỉ test ở cấp service (unit test module + `scripts/service_check.sh` với MySQL thật + FE `npm test`); Docker toàn hệ thống + e2e chạy cuối mỗi Phase. Đánh đổi: lỗi liên service (đường dẫn Feign, header, JSON giữa hai service, script e2e) chỉ lộ ra ở lần chạy cuối Phase |
 
 ---
 
@@ -130,13 +145,14 @@ Chưa đổi kiểu id, chưa đổi tên sự kiện: chỉ thay "gửi sau com
 
 ## PHASE 2 — auth-service v4 + id người dùng UUID ở mọi service (Lộ trình Task 2.1–2.4)
 
-- [ ] **2.1 Tài khoản v4 và id người dùng UUID (bước lớn – dùng nhánh `feature/v4-2.1`).**
+- [x] **2.1 Tài khoản v4 và id người dùng UUID (bước lớn – dùng nhánh `feature/v4-2.1`).**
   - **DB:** phần auth của `db/schema_current.sql` = đúng 9 bảng docs (`roles` SMALLINT, `users` UUID, `user_roles`, `user_profiles`, `staff_profiles`, `veterinarian_profiles`, `pet_owner_profiles`, `refresh_tokens.token_hash`, `outbox_events`). Seed: `db/seed_current.sql` viết lại phần auth theo D11 (7 tài khoản demo + 5 chủ nuôi; Bác sĩ có `veterinarian_profiles`, KTV có `room_number`).
   - **auth-service:** entity `Role`(Short), `User`(UUID v7, `@ManyToMany` roles), các profile `@MapsId`; login (kiểm `ACTIVE`, `AUTH_1107`), refresh lưu SHA-256, register tạo `users + user_roles(PET_OWNER) + user_profiles + pet_owner_profiles`; JWT: `userId` chuỗi UUID, `roles` **danh sách**, `fullName`, `roomNumber`; `/me` đọc profile; API nội bộ đổi theo D5 (`/internal/users/active-doctors/count`, `/internal/users/{id}`, `/internal/users/doctors?status=ACTIVE`, `/internal/users?ids=`).
   - **common-library + Gateway:** Gateway xóa rồi gắn `X-User-Id` (UUID) và `X-User-Roles` (phân tách dấu phẩy); `HeaderAuthenticationFilter` gắn `ROLE_<mỗi vai trò>`; `SecurityUtils.getCurrentUserId()` trả `UUID`, thêm `getCurrentRoles()`; STOMP (notification) đọc `roles` danh sách.
   - **Mọi cột tham chiếu người dùng → `BINARY(16)` / `UUID`** (chỉ đổi kiểu cột, chưa đổi cấu trúc bảng khác): appointment `appointment_status_histories.changed_by_user_id`; clinical `pets.owner_id`, `pet_visits.doctor_id/receptionist_id`, `pet_visit_status_histories.changed_by_user_id`, `visit_service_detail_histories.changed_by_user_id`, `lab_test_results.performed_by`, `imaging_results.performed_by`, `service_invoices.cashier_id`, `queue_tickets.doctor_id/issued_by`; billing `prescriptions.doctor_id` (nếu có), `medicine_invoices.cashier_id`, `inventory_transactions.created_by`. Sửa entity, DTO, Feign client, record sự kiện (`actorUserId`, `doctorId`, `ownerId`... → `UUID`), notification (gửi STOMP theo userId chuỗi).
   - **FE:** `session` lưu `roles` (mảng); `RequireRole` khớp khi giao với vai trò được phép khác rỗng; mọi id người dùng là chuỗi. **e2e:** sửa `lib/ids.mjs` (id người dùng lấy từ login / API).
   - Kiểm thêm: token rotation, khóa 5 lần sai (`AUTH_1112`), refresh dùng lại vẫn đúng.
+  - **Kết quả (21/11/2026) – kiểm tra cấp service (D12), CHƯA chạy Docker toàn hệ thống + e2e (làm ở cuối Phase 2):** **DB:** `db/schema_current.sql` phần auth = đúng 9 bảng docs (`roles` SMALLINT/VARCHAR, `users` UUIDv7 `BINARY(16)`, `user_roles`, `user_profiles`, `staff_profiles`, `veterinarian_profiles`, `pet_owner_profiles`, `refresh_tokens.token_hash CHAR(64)`, `outbox_events`); 13 cột tham chiếu người dùng ở appointment/clinical/billing → `BINARY(16)`; biến `@u_admin` (docs) + seed viết lại theo D11 (13 tài khoản, 7 hồ sơ nhân sự, 3 hồ sơ bác sĩ, 6 hồ sơ khách, thú cưng trỏ `owner_id` UUID); nạp sạch trên MySQL 8 thật. **common-library:** `SecurityUtils.getCurrentUserId()` trả `UUID`, thêm `getCurrentRoles()`/`hasRole()` (`getCurrentRole()` = vai trò đứng đầu theo thứ tự `RoleCode`); `HeaderAuthenticationFilter` nạp `ROLE_<mỗi vai trò>` từ `X-User-Roles` (phân tách dấu phẩy) và coi `X-User-Id` không phải UUID là chưa đăng nhập; `actorUserId`/`ownerId`/`doctorId` của mọi sự kiện là `UUID`. **Gateway:** xóa rồi gắn `X-User-Id`/`X-User-Roles` từ claim `userId`/`roles` (token v3 chỉ có `role` bị 401). **auth-service:** entity `Role`(Short), `User`(UUID v7, `@ManyToMany` roles), `UserProfile`/`StaffProfile`/`PetOwnerProfile` (`@MapsId`); `UserMapper` viết tay; JWT `userId` UUID + `roles` danh sách + `fullName` + `roomNumber`; refresh token chỉ lưu SHA-256, `lastLoginAt`; tạo tài khoản ghi `users + user_roles + user_profiles` + hồ sơ nhân sự (mã `NVxxxx`) hoặc khách (mã `KHxxxx`, kênh `ONLINE`/`AT_CLINIC`); `UserResponse`/`UserSummaryResponse` thêm `roles` (giữ `role` = vai trò chính); API nội bộ theo D5 (`/internal/users/active-doctors/count`, `/{id}`, `/doctors?status=`, `?ids=`). **Các service khác:** UUID cho mọi id người dùng (entity, DTO, Feign `AuthClient` + đường dẫn D5, sự kiện); chỗ kiểm tra "là Bác sĩ/chủ nuôi" dùng `roles().contains(...)`; notification: `JwtTokenVerifier` đọc `roles`, STOMP cấp quyền theo từng vai trò, lịch sử thông báo gộp mọi vai trò. **FE:** `normalizeUser` luôn có `roles`, `rolesOf`/`hasAnyRole` (`accessPolicy.js`), `RequireRole` khớp theo giao tập vai trò, STOMP đăng ký kênh từng vai trò, `LoginPage` quay lại trang cũ nếu một vai trò khớp khu vực. **e2e:** `lib/ids.mjs` tra id người dùng qua API (đã trả UUID) + `uuidSql(id)` cho SQL. **Lỗi chạy thật bắt được nhờ rà kỹ:** `DoctorStatusServiceImpl` ép `(Long) row[0]` trên kết quả JPQL nay là `UUID` (sẽ ném `ClassCastException` lúc chạy dù biên dịch qua) – đã sửa + test. **Kiểm chứng:** unit test (từng module) common-library **31**, api-gateway **5** (mới), auth **42**, appointment **72**, clinical **182**, billing **59**, notification **50** = **441**; FE build sạch + **30** test; `scripts/service_check.sh` (script mới) cho auth/appointment/clinical/billing: khởi động với MySQL thật, Hibernate `validate` khớp lược đồ; auth đăng nhập thật bằng `bs_tien` → JWT `userId=019a9442-d810-7000-8000-000000000002`, `roles=["VETERINARIAN"]`, `roomNumber=P101`. **Hạn chế đã biết:** (1) `veterinarian_profiles` đã có bảng + seed nhưng chưa có entity, và `POST /users` tạo Bác sĩ chưa bắt buộc hồ sơ chuyên môn (`AUTH_1108` làm ở 2.2); (2) hiện chưa API nào cấp nhiều vai trò cho một người, nên chỗ còn phân nhánh theo `getCurrentRole()` (ADMIN đứng đầu) sẽ coi Bác sĩ kiêm Admin là Admin cho tới khi 2.2/3.x chuyển sang `roles`; (3) email giờ UNIQUE ở `user_profiles`: trùng email trả `SYS_1001` (không có mã riêng trong 49 mã); (4) token cũ của v3 (claim `role`) không còn dùng được: đăng nhập lại. **Lưu ý vận hành phiên:** `target/` và `node_modules/` bị dọn khi khôi phục cây làm việc; build lại bằng `mvn -o -pl <module> install -DskipTests` và `cd fe && npm ci`.
 - [ ] **2.2 Quản lý nhân sự & hồ sơ (Task 2.4).** `POST /api/v1/staff` (1 giao dịch: users + roles + user_profiles + staff_profiles [+ veterinarian_profiles, thiếu → `AUTH_1108`]), `GET /api/v1/staff`, `/staff/{id}`, `/staff/doctors`, `PUT /api/v1/users/{id}/profile`, `PUT /api/v1/staff/{id}/vet-profile`, `PUT /api/v1/users/{id}/roles`, `POST /api/v1/users/{id}/lock|unlock|deactivate` (không xóa cứng, thu hồi refresh token), `GET /api/v1/roles`; Lễ tân tạo khách (`pet_owner_profiles`, `AT_CLINIC`). Gateway route `/api/v1/users/**`, `/staff/**`, `/roles/**`. FE: trang Admin "Tài khoản & nhân sự" (hồ sơ nhân sự + chuyên môn), trang Lễ tân tạo khách, trang hồ sơ cá nhân. Xóa API cũ không còn dùng (`/users/{id}/status`, `/role`) khi FE đã chuyển.
 - [ ] **2.3 Sự kiện của auth qua outbox.** `UserProfileUpdatedEvent` (`user.profile_updated`) khi đổi họ tên/SĐT; `UserStatusChangedEvent` (`user.status_changed`) khi lock/unlock/deactivate. Thêm record + routing key vào `common-library`. Consumer làm ở 4.1, 4.4, 6.3, 7.1; ở bước này notification nhận `UserStatusChangedEvent` để báo Lễ tân.
 

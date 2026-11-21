@@ -1,5 +1,6 @@
 package com.vetclinic.appointment.entity;
 
+import java.util.UUID;
 import com.vetclinic.appointment.constant.AppointmentStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -47,7 +48,7 @@ public class AppointmentStatusHistory {
     private AppointmentStatus toStatus;
 
     @Column(name = "changed_by_user_id")
-    private Long changedByUserId;
+    private UUID changedByUserId;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;

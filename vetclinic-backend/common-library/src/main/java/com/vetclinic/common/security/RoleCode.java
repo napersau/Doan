@@ -1,7 +1,7 @@
 package com.vetclinic.common.security;
 
 /**
- * Khớp 100% với ENUM roles.code trong pet_clinic_auth_db.
+ * Khớp 100% với roles.code (VARCHAR, bảng danh mục) trong pet_clinic_auth_db. Thứ tự khai báo = thứ tự ưu tiên khi cần chọn một vai trò "chính".
  */
 public enum RoleCode {
     ADMIN,

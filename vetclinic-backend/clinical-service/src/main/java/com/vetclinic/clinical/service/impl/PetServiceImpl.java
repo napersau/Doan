@@ -70,14 +70,14 @@ public class PetServiceImpl implements PetService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    private record Actor(Long id, RoleCode role) {
+    private record Actor(UUID id, RoleCode role) {
     }
 
     /** Không @Transactional: lời gọi OpenFeign phải nằm ngoài transaction (quy chuẩn §9.1). */
     @Override
     public PetResponse create(CreatePetRequest request) {
         Actor actor = currentActor();
-        Long ownerId = switch (actor.role()) {
+        UUID ownerId = switch (actor.role()) {
             // Chủ nuôi: ownerId lấy từ token, không bao giờ tin vào body
             case PET_OWNER -> actor.id();
             case RECEPTIONIST -> {
@@ -160,9 +160,9 @@ public class PetServiceImpl implements PetService {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponse<PetResponse> search(Long ownerId, String keyword, int page, int size) {
+    public PageResponse<PetResponse> search(UUID ownerId, String keyword, int page, int size) {
         Actor actor = currentActor();
-        Long effectiveOwner = actor.role() == RoleCode.PET_OWNER ? actor.id() : ownerId;
+        UUID effectiveOwner = actor.role() == RoleCode.PET_OWNER ? actor.id() : ownerId;
 
         Specification<Pet> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -227,7 +227,7 @@ public class PetServiceImpl implements PetService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<PetSummaryResponse> getSummariesByOwner(Long ownerId) {
+    public List<PetSummaryResponse> getSummariesByOwner(UUID ownerId) {
         if (ownerId == null) {
             return List.of();
         }
@@ -253,13 +253,13 @@ public class PetServiceImpl implements PetService {
                 SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED)));
     }
 
-    private void assertActivePetOwner(Long ownerId) {
+    private void assertActivePetOwner(UUID ownerId) {
         ApiResponse<UserSummaryResponse> response = authClient.getUser(ownerId);
         UserSummaryResponse owner = response == null ? null : response.getData();
         if (owner == null) {
             throw new AppException(ErrorCode.USER_NOT_FOUND);
         }
-        if (owner.role() != RoleCode.PET_OWNER) {
+        if (!owner.roles().contains(RoleCode.PET_OWNER)) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Người dùng được chọn không phải chủ thú cưng");
         }
         if (!"ACTIVE".equals(owner.status())) {

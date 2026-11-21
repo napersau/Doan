@@ -11,13 +11,13 @@ import java.util.UUID;
 public record PatientCalledEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,
+        UUID actorUserId,
         String action,           // CALLED = mời vào phòng (giá trị duy nhất hiện nay)
         String station,          // DOCTOR_ROOM | LAB | IMAGING
         Long visitId,
         String visitCode,
         Long petId,
-        Long doctorId,           // Bác sĩ của hàng đợi (null nếu gọi ở Lab/CĐHA cho ca chưa có bác sĩ)
+        UUID doctorId,           // Bác sĩ của hàng đợi (null nếu gọi ở Lab/CĐHA cho ca chưa có bác sĩ)
         Long ticketId,           // phiếu xếp hàng được gọi (queue_tickets.id)
         Integer ticketNo,        // số in trên phiếu (đánh lại từ 1 mỗi ngày theo loại hàng đợi)
         String roomNumber        // số phòng hiển thị cho khách (users.room_number của bác sĩ/KTV), có thể null

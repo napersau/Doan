@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.request;
 
+import java.util.UUID;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Size;
@@ -15,6 +16,6 @@ public record CheckInRequest(
         Long appointmentId,
         @Size(max = 2000, message = "Triệu chứng tối đa 2000 ký tự") String initialSymptoms,
         @JsonProperty("isEmergency") @JsonAlias("emergency") Boolean emergency,
-        Long doctorId
+        UUID doctorId
 ) {
 }

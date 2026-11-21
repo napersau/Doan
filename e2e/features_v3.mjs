@@ -5,7 +5,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { API, APPT, AUTH, BILL, CLIN, PHARM, ROOT, RUN, brief, call, check, finish, login, loginRes, run, sleep, sql, step } from './lib/api.mjs';
-import { seedIds } from './lib/ids.mjs';
+import { seedIds, uuidSql } from './lib/ids.mjs';
 
 const WebSocket = createRequire(path.join(ROOT, 'fe', 'package.json'))('ws');
 const WS_URL = process.env.WS_URL || API.replace(/^http/, 'ws') + '/ws';
@@ -92,7 +92,7 @@ async function main() {
   // Chạy lại cần dọn đợt khám dở dang của bác sĩ bs_tien / bs_an / bs_mai. Việc này HỦY ca thật đang có trong CSDL nên chỉ làm khi đặt E2E_CLEAN=1
   // (chỉ dùng trên CSDL thử; trên CSDL đang demo thủ công thì reset bằng `docker compose down -v` thay vì chạy lại).
   if (process.env.E2E_CLEAN === '1') {
-    sql(`UPDATE pet_clinic_clinical_db.pet_visits SET status='CANCELLED' WHERE doctor_id IN (${[ID.user.bs_tien, DOC3, DOC4].join(',')}) AND status IN ('WAITING','IN_PROGRESS','RESULTS_READY','WAITING_RESULTS')`);
+    sql(`UPDATE pet_clinic_clinical_db.pet_visits SET status='CANCELLED' WHERE doctor_id IN (${[ID.user.bs_tien, DOC3, DOC4].map(uuidSql).join(',')}) AND status IN ('WAITING','IN_PROGRESS','RESULTS_READY','WAITING_RESULTS')`);
   } else {
     console.log('  (không dọn ca dở dang; nếu bác sĩ bs_tien / bs_an / bs_mai còn ca đang khám, chạy lại với E2E_CLEAN=1 hoặc reset CSDL)');
   }
