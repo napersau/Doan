@@ -12,6 +12,9 @@ import java.util.List;
 
 public final class UserSpecifications {
 
+    /** Ký tự thoát của LIKE (một dấu gạch chéo ngược). */
+    private static final char LIKE_ESCAPE = (char) 92;
+
     private UserSpecifications() {
     }
 
@@ -38,6 +41,28 @@ public final class UserSpecifications {
                         cb.like(profile.get("phoneNumber"), like, '\\')));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
+        };
+    }
+
+    /**
+     * Danh sách NHÂN SỰ: chỉ tài khoản có hồ sơ nhân sự; từ khóa tìm thêm theo mã nhân viên và số phòng.
+     * Dùng cho {@code GET /api/v1/staff} (Admin).
+     */
+    public static Specification<User> staff(RoleCode role, UserStatus status, String keyword) {
+        return (root, query, cb) -> {
+            Join<Object, Object> staff = root.join("staffProfile");
+            Predicate base = filter(role, status, null).toPredicate(root, query, cb);
+            if (keyword == null || keyword.isBlank()) {
+                return base;
+            }
+            String like = "%" + escapeLike(keyword.trim().toLowerCase()) + "%";
+            Join<Object, Object> profile = root.join("profile");
+            return cb.and(base, cb.or(
+                    cb.like(cb.lower(profile.get("fullName")), like, LIKE_ESCAPE),
+                    cb.like(cb.lower(root.get("username")), like, LIKE_ESCAPE),
+                    cb.like(profile.get("phoneNumber"), like, LIKE_ESCAPE),
+                    cb.like(cb.lower(staff.get("employeeCode")), like, LIKE_ESCAPE),
+                    cb.like(cb.lower(staff.get("roomNumber")), like, LIKE_ESCAPE)));
         };
     }
 

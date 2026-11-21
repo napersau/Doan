@@ -1,5 +1,6 @@
 package com.vetclinic.auth.entity;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -74,4 +75,8 @@ public class StaffProfile {
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
+
+    /** Hồ sơ chuyên môn thú y; null nếu nhân sự không có chứng chỉ (bắt buộc với vai trò VETERINARIAN). */
+    @OneToOne(mappedBy = "staff", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private VeterinarianProfile vetProfile;
 }

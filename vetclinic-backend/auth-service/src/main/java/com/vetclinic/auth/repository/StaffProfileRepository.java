@@ -14,6 +14,10 @@ public interface StaffProfileRepository extends JpaRepository<StaffProfile, UUID
 
     boolean existsByRoomNumberAndUserIdNot(String roomNumber, UUID userId);
 
+    boolean existsByCitizenId(String citizenId);
+
+    boolean existsByCitizenIdAndUserIdNot(String citizenId, UUID userId);
+
     /** Số thứ tự kế tiếp của mã nhân viên NVxxxx. UNIQUE(employee_code) là chốt chặn nếu hai Admin tạo đồng thời. */
     @Query(value = "SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, 3) AS UNSIGNED)), 0) + 1 FROM staff_profiles", nativeQuery = true)
     long nextEmployeeNumber();

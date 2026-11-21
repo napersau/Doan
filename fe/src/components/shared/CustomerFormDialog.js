@@ -28,7 +28,7 @@ export default function CustomerFormDialog({ customer, onClose, onSaved }) {
     const body = { fullName: form.fullName.trim(), phoneNumber: form.phoneNumber.trim(), email: blankToNull(form.email), address: blankToNull(form.address) };
     try {
       if (customer) {
-        const saved = await usersApi.update(customer.id, body);
+        const saved = await usersApi.updateProfile(customer.id, body);
         onSaved(saved);
       } else {
         const password = temporaryPassword();

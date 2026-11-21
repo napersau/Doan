@@ -24,6 +24,9 @@ public final class EventRouting {
     public static final String VISIT_COMPLETED = "visit.completed";
     public static final String PHARMACY_MEDICINE_INVOICE_PAID = "pharmacy.medicine_invoice_paid";
     public static final String PHARMACY_LOW_STOCK = "pharmacy.low_stock";
+    // Thêm 21/11/2026 (v4.0, bước 2.2): auth phát khi hồ sơ / trạng thái tài khoản đổi
+    public static final String USER_PROFILE_UPDATED = "user.profile_updated";
+    public static final String USER_STATUS_CHANGED = "user.status_changed";
 
     public static String queueName(String serviceName, String routingKey) {
         return serviceName + "." + routingKey;

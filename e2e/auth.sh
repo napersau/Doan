@@ -46,27 +46,29 @@ post /api/v1/auth/refresh "{\"refreshToken\":\"$RT3\"}" | show
 echo; echo "== B. QUAN LY TAI KHOAN =="
 R=$(post /api/v1/auth/login '{"username":"admin","password":"Admin@123"}'); AT=$(echo "$R" | jget "['data']['accessToken']")
 echo "9. admin tao bac si (phong p01 -> P01):"
-post /api/v1/auth/users '{"username":"bs.nguyen","password":"BacSi@123","fullName":"BS Nguyen Van A","phoneNumber":"0911111111","roomNumber":"p01","roleCode":"VETERINARIAN"}' "$AT" \
-  | python -c "import sys,json; d=json.load(sys.stdin); x=d.get('data') or {}; print('   ',d['status'],d.get('errorCode') or '',d['message'],'| room=',x.get('roomNumber'),'role=',x.get('role'))"
-echo "10. trung SDT:"; post /api/v1/auth/users '{"username":"khac","password":"BacSi@123","fullName":"X","phoneNumber":"0911111111","roleCode":"VETERINARIAN"}' "$AT" | show
-echo "11. trung so phong:"; post /api/v1/auth/users '{"username":"bs.tran","password":"BacSi@123","fullName":"BS Tran","phoneNumber":"0922222222","roomNumber":"P01","roleCode":"VETERINARIAN"}' "$AT" | show
-echo "12. mat khau yeu / SDT sai dinh dang:"; post /api/v1/auth/users '{"password":"123","fullName":"X","phoneNumber":"12345","roleCode":"RECEPTIONIST"}' "$AT" | show
-echo "13. admin tao le tan:"; post /api/v1/auth/users '{"username":"letan1","password":"LeTan@123","fullName":"Le Tan 1","phoneNumber":"0933333333","roleCode":"RECEPTIONIST"}' "$AT" | show
+post /api/v1/staff '{"username":"bs.nguyen","password":"BacSi@123","fullName":"BS Nguyen Van A","phoneNumber":"0911111111","roomNumber":"p01","roleCodes":["VETERINARIAN"],"vetProfile":{"licenseNumber":"CC-AUTH-01","licenseIssuedDate":"2020-01-01","licenseIssuedBy":"Cuc Thu y","academicDegree":"Bac si thu y"}}' "$AT" \
+  | python -c "import sys,json; d=json.load(sys.stdin); x=d.get('data') or {}; print('   ',d['status'],d.get('errorCode') or '',d['message'],'| room=',x.get('roomNumber'),'roles=',x.get('roles'),'ma NV=',x.get('employeeCode'))"
+echo "10. trung SDT:"; post /api/v1/staff '{"username":"khac","password":"BacSi@123","fullName":"X","phoneNumber":"0911111111","roleCodes":["RECEPTIONIST"]}' "$AT" | show
+echo "11. trung so phong:"; post /api/v1/staff '{"username":"bs.tran","password":"BacSi@123","fullName":"BS Tran","phoneNumber":"0922222222","roomNumber":"P01","roleCodes":["VETERINARIAN"],"vetProfile":{"licenseNumber":"CC-AUTH-02","licenseIssuedDate":"2020-01-01","licenseIssuedBy":"Cuc Thu y","academicDegree":"Bac si thu y"}}' "$AT" | show
+echo "11b. bac si thieu ho so chuyen mon (AUTH_1108):"; post /api/v1/staff '{"username":"bs.thieu","password":"BacSi@123","fullName":"BS Thieu","phoneNumber":"0966666666","roomNumber":"P09","roleCodes":["VETERINARIAN"]}' "$AT" | show
+echo "12. mat khau yeu / SDT sai dinh dang:"; post /api/v1/staff '{"password":"123","fullName":"X","phoneNumber":"12345","roleCodes":["RECEPTIONIST"]}' "$AT" | show
+echo "13. admin tao le tan:"; post /api/v1/staff '{"username":"letan1","password":"LeTan@123","fullName":"Le Tan 1","phoneNumber":"0933333333","roleCodes":["RECEPTIONIST"]}' "$AT" | show
 BAT=$(post /api/v1/auth/login '{"username":"bs.nguyen","password":"BacSi@123"}' | jget "['data']['accessToken']")
 echo "14. bac si liet ke user (phai 403):"; getauth /api/v1/auth/users "$BAT" | show
 LAT=$(post /api/v1/auth/login '{"username":"letan1","password":"LeTan@123"}' | jget "['data']['accessToken']")
 echo "15. le tan tao chu nuoi (username mac dinh = SDT):"
 post /api/v1/auth/users '{"password":"ChuNuoi@1","fullName":"Chu Nuoi A","phoneNumber":"0944444444","roleCode":"PET_OWNER"}' "$LAT" \
   | python -c "import sys,json; d=json.load(sys.stdin); x=d.get('data') or {}; print('   ',d['status'],d.get('errorCode') or '',d['message'],'| username=',x.get('username'))"
-echo "16. le tan thu tao bac si (phai 403):"; post /api/v1/auth/users '{"username":"hack","password":"BacSi@123","fullName":"X","phoneNumber":"0955555555","roleCode":"VETERINARIAN"}' "$LAT" | show
+echo "16. le tan thu tao bac si (phai 403):"; post /api/v1/staff '{"username":"hack","password":"BacSi@123","fullName":"X","phoneNumber":"0955555555","roleCodes":["RECEPTIONIST"]}' "$LAT" | show
 echo "17. le tan tim khach theo SDT (ep loc PET_OWNER):"
 getauth "/api/v1/auth/users?keyword=0944" "$LAT" | python -c "import sys,json; d=json.load(sys.stdin)['data']; print('    tim 0944 -> tong=',d['totalElements'],[(i['username'],i['role']) for i in d['items']])"
 getauth "/api/v1/auth/users?keyword=0911" "$LAT" | python -c "import sys,json; d=json.load(sys.stdin)['data']; print('    tim SDT cua bac si -> tong=',d['totalElements'],'(phai 0)')"
-echo "18. admin tu khoa minh (phai bi chan):"; post /api/v1/auth/users/1/status '{"status":"LOCKED"}' "$AT" | show
-BSID=$(getauth "/api/v1/auth/users?keyword=bs.nguyen" "$AT" | jget "['data']['items'][0]['id']")
+ADMINID=$(getauth /api/v1/auth/me "$AT" | jget "['data']['id']")
+echo "18. admin tu khoa minh (phai bi chan):"; post /api/v1/users/$ADMINID/lock '{}' "$AT" | show
+BSID=$(getauth "/api/v1/staff?keyword=bs.nguyen" "$AT" | jget "['data']['items'][0]['id']")
 BRT=$(post /api/v1/auth/login '{"username":"bs.nguyen","password":"BacSi@123"}' | jget "['data']['refreshToken']")
 echo "19. admin khoa bac si -> dang nhap bi tu choi, refresh token cu bi thu hoi:"
-post /api/v1/auth/users/$BSID/status '{"status":"LOCKED"}' "$AT" | show
+post /api/v1/users/$BSID/lock '{}' "$AT" | show
 post /api/v1/auth/login '{"username":"bs.nguyen","password":"BacSi@123"}' | show
 post /api/v1/auth/refresh "{\"refreshToken\":\"$BRT\"}" | show
 echo "   me() voi access token cu cua bac si da bi khoa:"; getauth /api/v1/auth/me "$BAT" | show
@@ -87,5 +89,5 @@ echo; echo "== D. ENDPOINT NOI BO =="
 echo "   qua Gateway (phai khong toi duoc): HTTP $(curl -s -o /dev/null -w '%{http_code}' $G/internal/auth/doctors/active-count -H "Authorization: Bearer $AT")"
 echo "   trong mang Docker, khong header:"
 docker compose exec -T api-gateway curl -s http://auth-service:8081/internal/auth/doctors/active-count; echo
-docker compose exec -T api-gateway curl -s "http://auth-service:8081/internal/auth/users?ids=1,$BSID" \
+docker compose exec -T api-gateway curl -s "http://auth-service:8081/internal/auth/users?ids=$ADMINID,$BSID" \
   | python -c "import sys,json; print('   ',[(u['fullName'],u['role'],u['roomNumber']) for u in json.load(sys.stdin)['data']])"

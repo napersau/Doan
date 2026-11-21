@@ -17,15 +17,34 @@ export const authApi = {
   changePassword: (body) => api.post(`${AUTH}/change-password`, body),
 };
 
+const USERS = '/api/v1/users';
+const STAFF = '/api/v1/staff';
+
+// Tài khoản (khách hàng và hồ sơ chung): tra cứu / tạo KHÁCH ở /auth/users; hồ sơ, vai trò, khóa ở /users/{id}/...
 export const usersApi = {
   list: (query) => api.get(`${AUTH}/users`, query),
-  doctors: () => api.get(`${AUTH}/users/doctors`),
   get: (id) => api.get(`${AUTH}/users/${id}`),
   create: (body) => api.post(`${AUTH}/users`, body),
-  update: (id, body) => api.put(`${AUTH}/users/${id}`, body),
-  changeStatus: (id, status) => api.post(`${AUTH}/users/${id}/status`, { status }),
-  changeRole: (id, roleCode) => api.post(`${AUTH}/users/${id}/role`, { roleCode }),
+  updateProfile: (id, body) => api.put(`${USERS}/${id}/profile`, body),
+  setRoles: (id, roleCodes) => api.put(`${USERS}/${id}/roles`, { roleCodes }),
+  lock: (id) => api.post(`${USERS}/${id}/lock`),
+  unlock: (id) => api.post(`${USERS}/${id}/unlock`),
+  deactivate: (id) => api.post(`${USERS}/${id}/deactivate`),
   resetPassword: (id, newPassword) => api.post(`${AUTH}/users/${id}/reset-password`, { newPassword }),
+};
+
+// Nhân sự (Admin): tài khoản + hồ sơ nhân sự + hồ sơ chuyên môn Bác sĩ
+export const staffApi = {
+  list: (query) => api.get(STAFF, query),
+  doctors: (status) => api.get(`${STAFF}/doctors`, status ? { status } : undefined),
+  get: (id) => api.get(`${STAFF}/${id}`),
+  create: (body) => api.post(STAFF, body),
+  update: (id, body) => api.put(`${STAFF}/${id}`, body),
+  saveVetProfile: (id, body) => api.put(`${STAFF}/${id}/vet-profile`, body),
+};
+
+export const rolesApi = {
+  list: () => api.get('/api/v1/roles'),
 };
 
 export const catalogApi = {

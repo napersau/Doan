@@ -94,21 +94,24 @@ async function main() {
     const staffPhone = `0971${RUN}`;
     await b.login('admin', PASSWORD);
     await b.goto('/admin/users');
-    await attempt('tạo bác sĩ mới có số phòng qua giao diện', async () => {
-      await b.click('+ Thêm nhân sự'); await b.fill('Vai trò', 'Bác sĩ thú y'); await b.fill('Họ và tên', `BS UI ${RUN}`); await b.fill('Số điện thoại', staffPhone);
+    await attempt('tạo bác sĩ mới có số phòng và hồ sơ chuyên môn qua giao diện', async () => {
+      // Vai trò mặc định đã chọn sẵn "Bác sĩ thú y"; Bác sĩ bắt buộc có hồ sơ chuyên môn (AUTH_1108)
+      await b.click('+ Thêm nhân sự'); await b.fill('Họ và tên', `BS UI ${RUN}`); await b.fill('Số điện thoại', staffPhone);
       await b.fill('Số phòng làm việc', `U${RUN.slice(-3)}`); await b.click('Tạo ngẫu nhiên');
-      await b.click('Tạo tài khoản', 'button[type=submit]').catch(async () => { await b.click('Thêm', 'button[type=submit]'); });
+      await b.fill('Số chứng chỉ hành nghề', `UI-${RUN}`); await b.fill('Cơ quan cấp', 'Cục Thú y');
+      await b.fill('Ngày cấp', '2020-01-01'); await b.fill('Học vị', 'Bác sĩ thú y');
+      await b.click('Tạo nhân sự', 'button[type=submit]');
       await b.waitFor('!document.querySelector("dialog[open]")', 10000);
-      const found = await api('GET', `/api/v1/auth/users?keyword=${staffPhone}`, undefined, await apiLogin('admin'));
-      return found.data?.items?.some((u) => u.role === 'VETERINARIAN' && u.roomNumber === `U${RUN.slice(-3)}`);
+      const found = await api('GET', `/api/v1/staff?keyword=${staffPhone}`, undefined, await apiLogin('admin'));
+      return found.data?.items?.some((u) => u.roles?.includes('VETERINARIAN') && u.roomNumber === `U${RUN.slice(-3)}` && u.vetProfile?.licenseNumber === `UI-${RUN}`);
     });
     await attempt('tìm nhân sự và khóa tài khoản', async () => {
-      await b.fill('Tìm tài khoản', staffPhone);
+      await b.fill('Tìm nhân sự', staffPhone);
       await b.waitFor(`document.body.innerText.includes(${JSON.stringify(`BS UI ${RUN}`)})`, 8000);
       await b.clickRow(`BS UI ${RUN}`, 'Khóa'); await b.click('Xác nhận', 'button[type=submit]');
-      return b.waitFor(`[...document.querySelectorAll('tr')].some((r) => r.innerText.includes(${JSON.stringify(`BS UI ${RUN}`)}) && r.innerText.includes('Mở khóa'))`, 10000);
+      return b.waitFor(`[...document.querySelectorAll('tr')].some((r) => r.innerText.includes(${JSON.stringify(`BS UI ${RUN}`)}) && r.innerText.includes('Kích hoạt'))`, 10000);
     });
-    await attempt('mở khóa lại', async () => { await b.clickRow(`BS UI ${RUN}`, 'Mở khóa'); await b.click('Xác nhận', 'button[type=submit]'); return b.waitFor(`[...document.querySelectorAll('tr')].some((r) => r.innerText.includes(${JSON.stringify(`BS UI ${RUN}`)}) && r.innerText.includes('Khóa') && !r.innerText.includes('Mở khóa'))`, 10000); });
+    await attempt('kích hoạt lại', async () => { await b.clickRow(`BS UI ${RUN}`, 'Kích hoạt'); await b.click('Xác nhận', 'button[type=submit]'); return b.waitFor(`[...document.querySelectorAll('tr')].some((r) => r.innerText.includes(${JSON.stringify(`BS UI ${RUN}`)}) && r.innerText.includes('Khóa') && !r.innerText.includes('Kích hoạt'))`, 10000); });
     await b.goto('/admin/species');
     await attempt('thêm loài mới', async () => { await b.click('+ Thêm loài'); await b.fill('Mã loài', `UI${RUN}`); await b.fill('Tên loài', `Loài UI ${RUN}`); await b.click('Thêm loài', 'button[type=submit]'); return b.hasText(`Đã lưu loài Loài UI ${RUN}`, 10000); });
     await b.goto('/admin/services');

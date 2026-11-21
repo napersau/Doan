@@ -44,13 +44,17 @@ const PASSWORD = 'Smoke@1234';
 async function prepareAccounts() {
   const login = await api('POST', '/api/v1/auth/login', { username: 'admin', password: 'Admin@123' });
   const token = login.body.data.accessToken;
-  for (const account of Object.values(STAFF)) {
-    const created = await api('POST', '/api/v1/auth/users', { ...account, password: PASSWORD, username: account.phoneNumber }, token);
+  for (const { roleCode, ...account } of Object.values(STAFF)) {
+    // Nhân sự tạo qua POST /api/v1/staff (v4.0); Bác sĩ bắt buộc có hồ sơ chuyên môn (AUTH_1108)
+    const vetProfile = roleCode === 'VETERINARIAN'
+      ? { licenseNumber: `SMOKE-${account.phoneNumber}`, licenseIssuedDate: '2020-01-01', licenseIssuedBy: 'Cục Thú y', academicDegree: 'Bác sĩ thú y' }
+      : undefined;
+    const created = await api('POST', '/api/v1/staff', { ...account, roleCodes: [roleCode], password: PASSWORD, username: account.phoneNumber, vetProfile }, token);
     if (created.status >= 300) {
-      // đã tồn tại từ lần chạy trước: đặt lại mật khẩu và mở khóa
-      const found = await api('GET', `/api/v1/auth/users?keyword=${account.phoneNumber}`, undefined, token);
+      // đã tồn tại từ lần chạy trước: đặt lại mật khẩu và mở khóa (mở khóa tài khoản đang ACTIVE trả 400: bỏ qua)
+      const found = await api('GET', `/api/v1/staff?keyword=${account.phoneNumber}`, undefined, token);
       const user = found.body.data?.items?.[0];
-      if (user) { await api('POST', `/api/v1/auth/users/${user.id}/reset-password`, { newPassword: PASSWORD }, token); await api('POST', `/api/v1/auth/users/${user.id}/status`, { status: 'ACTIVE' }, token); }
+      if (user) { await api('POST', `/api/v1/auth/users/${user.id}/reset-password`, { newPassword: PASSWORD }, token); await api('POST', `/api/v1/users/${user.id}/unlock`, undefined, token); }
     }
   }
 }

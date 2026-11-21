@@ -71,5 +71,7 @@ print('JWT claims:', {k:c[k] for k in ('userId','roles','fullName','roomNumber',
 assert c['roles']==['VETERINARIAN'], 'roles phải là danh sách'
 assert len(c['userId'])==36, 'userId phải là UUID'
 print('OK: đăng nhập seed thật, JWT mang userId UUID + roles danh sách')" || exit 1
+  # Bước 2.2: nhân sự, hồ sơ, vai trò, khóa/mở khóa, outbox (chạy thật trên MySQL tạm)
+  PYTHONIOENCODING=utf-8 python scripts/auth_staff_check.py "$PORT" "$CONTAINER" || exit 1
 fi
 exit 0
