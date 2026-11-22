@@ -14,7 +14,7 @@ RESET=${2:-}
 CONTAINER=vetclinic-check-mysql
 MYSQL_PORT=3399
 case "$MODULE" in
-  auth-service) PORT=18081;; appointment-service) PORT=18082;; clinical-service) PORT=18083;; billing-pharmacy-service) PORT=18084;; *) PORT=18090;;
+  auth-service) PORT=18081;; appointment-service) PORT=18082;; clinical-service) PORT=18083;; billing-pharmacy-service) PORT=18084;; reporting-service) PORT=18086;; *) PORT=18090;;
 esac
 JAVA="${JAVA_HOME:-C:/Program Files/Java/jdk-21.0.6}/bin/java"
 LOG="${TMPDIR:-/tmp}/service-check-$MODULE.log"

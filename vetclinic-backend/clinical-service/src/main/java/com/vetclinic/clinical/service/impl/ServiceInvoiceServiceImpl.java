@@ -225,7 +225,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
             // T10: mọi hóa đơn PAID / CANCELLED / REFUNDED -> hoàn tất ca, người đổi trạng thái = thu ngân; ca COMPLETED do khách bỏ về thì giữ nguyên
             support.transition(visit, VisitStatus.COMPLETED, cashierId, "Đã thu đủ hóa đơn dịch vụ, hoàn tất đợt khám");
             outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new VisitCompletedEvent(UuidV7.generate(clock), clock.instant(), cashierId, visit.getId(),
-                    visit.getVisitCode(), visit.getPet().getId(), false));
+                    visit.getVisitCode(), visit.getPet().getId(), false, visit.getDoctorId(), visit.getDoctorNameSnapshot()));
         }
         return buildStatement(visit);
     }
@@ -234,7 +234,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
         ClinicService service = detail.getService();
         var queueType = service.getCategory().queueTypeOrNull();
         return new ServiceInvoicePaidEvent.Line(invoice.getId(), invoice.getInvoiceCode(), detail.getId(), service.getId(), service.getCode(),
-                service.getName(), service.getCategory().getCode(), queueType == null ? null : queueType.name(), detail.getQuantity(),
+                service.getName(), service.getCategory().getCode(), service.getCategory().getName(), queueType == null ? null : queueType.name(), detail.getQuantity(),
                 invoice.getUnitPrice(), invoice.getVatRate(), invoice.getDiscountAmount(),
                 InvoiceAmounts.payable(detail.getQuantity(), invoice.getUnitPrice(), invoice.getVatRate(), invoice.getDiscountAmount()));
     }

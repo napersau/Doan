@@ -227,7 +227,8 @@ public class VisitServiceImpl implements VisitService {
         // khi xử lý VisitCheckedInEvent bên dưới; ca thường chờ thu phí khám -> ServiceInvoicePaidEvent
         // Ghi vào outbox cùng giao dịch; OutboxRelay gửi sang RabbitMQ sau khi commit: appointment-service sẽ chuyển lịch hẹn sang CHECKED_IN
         outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new VisitCheckedInEvent(UuidV7.generate(clock), now, receptionistId, visit.getId(),
-                visit.getVisitCode(), pet.getId(), appointmentId, emergency, doctorId));
+                visit.getVisitCode(), pet.getId(), appointmentId, emergency, doctorId, pet.getName(), pet.getSpecies().getCode(), pet.getOwnerId(),
+                pet.getOwnerNameSnapshot(), doctorName));
         return assembler.detail(visit);   // kèm phí khám vừa lập và phiếu (ca cấp cứu) để màn hình tiếp đón hiển thị
     }
 
@@ -705,7 +706,7 @@ public class VisitServiceImpl implements VisitService {
         support.transition(visit, VisitStatus.COMPLETED, actor.id(),
                 "Khách bỏ về: đóng ca, lưu kết quả vào bệnh án và ghi nợ viện phí (EX-11)");
         outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new VisitCompletedEvent(UuidV7.generate(clock), clock.instant(), actor.id(), visit.getId(),
-                visit.getVisitCode(), visit.getPet().getId(), true));
+                visit.getVisitCode(), visit.getPet().getId(), true, visit.getDoctorId(), visit.getDoctorNameSnapshot()));
         return assembler.detail(visit);
     }
 

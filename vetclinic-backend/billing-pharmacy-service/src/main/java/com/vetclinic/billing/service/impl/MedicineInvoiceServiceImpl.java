@@ -288,7 +288,10 @@ public class MedicineInvoiceServiceImpl implements MedicineInvoiceService {
         // Transactional Outbox: ghi cùng giao dịch trừ kho + thu tiền; OutboxRelay gửi sang RabbitMQ sau khi commit
         outboxWriter.write(AGGREGATE_INVOICE, saved.getId(), new MedicineInvoicePaidEvent(UuidV7.generate(clock), clock.instant(), cashierId,
                 saved.getId(), saved.getInvoiceCode(), saved.getPrescriptionId(), saved.getVisitId(),
-                MedicineInvoiceAmounts.payable(saved.getItems(), saved.getDiscountAmount())));
+                MedicineInvoiceAmounts.payable(saved.getItems(), saved.getDiscountAmount()), saved.getDiscountAmount(), saved.getPaidAt(),
+                saved.getItems().stream().map(i -> new MedicineInvoicePaidEvent.Line(i.getMedicine().getId(), i.getMedicine().getCode(),
+                        i.getMedicine().getName(), i.getMedicine().getCategory().getCode(), i.getMedicine().getCategory().getName(),
+                        i.getQuantity(), i.getUnitPrice(), i.getVatRate())).toList()));
         touched.forEach(medicine -> stockAlerts.publishIfLow(medicine, cashierId));
         return assembler.toResponse(saved);
     }

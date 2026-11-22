@@ -36,6 +36,7 @@ public record ServiceInvoicePaidEvent(
             String serviceCode,
             String serviceName,
             String category,
+            String categoryName,     // tên nhóm dịch vụ (reporting ghi vào doanh thu theo nhóm; null với tin nhắn cũ)
             String queueType,
             int quantity,
             BigDecimal unitPrice,
@@ -43,6 +44,13 @@ public record ServiceInvoicePaidEvent(
             BigDecimal discountAmount,
             BigDecimal payableAmount
     ) {
+
+        /** Dạng cũ trước bước 7.1 (chưa có tên nhóm). */
+        public Line(UUID invoiceId, String invoiceCode, UUID visitServiceDetailId, UUID serviceId, String serviceCode, String serviceName, String category,
+                    String queueType, int quantity, BigDecimal unitPrice, BigDecimal vatRate, BigDecimal discountAmount, BigDecimal payableAmount) {
+            this(invoiceId, invoiceCode, visitServiceDetailId, serviceId, serviceCode, serviceName, category, null, queueType, quantity, unitPrice, vatRate,
+                    discountAmount, payableAmount);
+        }
     }
 
     @Override

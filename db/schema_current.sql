@@ -1071,3 +1071,102 @@ INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, not
 --   SELECT id, medicine_id, quantity,
 --          SUM(quantity) OVER (PARTITION BY medicine_id ORDER BY created_at, id) AS balance_after
 --   FROM pet_clinic_billing_pharmacy_db.inventory_transactions;
+
+-- ==============================================================================
+-- PHẦN 5: PET_CLINIC_REPORTING_DB (REPORTING-SERVICE :8086) - 5 BẢNG (CQRS READ MODEL)
+-- ==============================================================================
+-- Chỉ được ghi bởi các listener sự kiện của reporting-service; các service khác không đọc / ghi.
+-- Bảng phẳng, phi chuẩn hóa CÓ CHỦ ĐÍCH (đã chứa tên, nhóm, số tiền) để báo cáo chỉ cần 1 truy vấn,
+-- không JOIN chéo service, không gọi API hàng loạt. Có thể dựng lại bằng cách phát lại sự kiện.
+CREATE DATABASE IF NOT EXISTS pet_clinic_reporting_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE pet_clinic_reporting_db;
+
+-- 48. VISIT_FACTS (MỘT DÒNG / ĐỢT KHÁM)
+-- Tạo khi nhận VisitCheckedInEvent; cập nhật khi VisitCompletedEvent / VisitCancelledEvent / đổi tên.
+CREATE TABLE IF NOT EXISTS visit_facts (
+    visit_id BINARY(16) PRIMARY KEY,
+    visit_code VARCHAR(50) NOT NULL,
+    business_date DATE NOT NULL,
+    checked_in_at TIMESTAMP NOT NULL,
+    completed_at TIMESTAMP NULL,
+    current_status VARCHAR(20) NOT NULL,
+    is_emergency BOOLEAN NOT NULL,
+    pet_id BINARY(16) NOT NULL,
+    pet_name VARCHAR(100) NOT NULL,
+    species_code VARCHAR(30) NOT NULL,
+    owner_id BINARY(16) NOT NULL,
+    owner_name VARCHAR(150) NOT NULL,
+    doctor_id BINARY(16) NULL,
+    doctor_name VARCHAR(150) NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_vf_date ON visit_facts(business_date, current_status);
+CREATE INDEX idx_vf_doctor ON visit_facts(doctor_id, business_date);
+
+-- 49. REVENUE_FACTS (MỘT DÒNG / DÒNG TIỀN ĐÃ THU HOẶC ĐÃ HOÀN)
+-- revenue_type: SERVICE | MEDICINE. entry_type: SALE | REFUND (REFUND mang số tiền âm).
+CREATE TABLE IF NOT EXISTS revenue_facts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    revenue_type VARCHAR(20) NOT NULL,
+    entry_type VARCHAR(20) NOT NULL,
+    source_invoice_id BINARY(16) NOT NULL,
+    invoice_code VARCHAR(50) NOT NULL,
+    item_id BINARY(16) NOT NULL, -- service_id hoặc medicine_id
+    item_code VARCHAR(50) NOT NULL,
+    item_name VARCHAR(150) NOT NULL,
+    category_code VARCHAR(30) NOT NULL,
+    category_name VARCHAR(100) NOT NULL,
+    visit_id BINARY(16) NOT NULL,
+    doctor_id BINARY(16) NULL,
+    doctor_name VARCHAR(150) NULL,
+    cashier_id BINARY(16) NULL,
+    business_date DATE NOT NULL,
+    occurred_at TIMESTAMP NOT NULL, -- paid_at hoặc thời điểm hoàn tiền
+    quantity INT NOT NULL,
+    amount_before_vat DECIMAL(14, 2) NOT NULL,
+    vat_amount DECIMAL(14, 2) NOT NULL,
+    discount_amount DECIMAL(14, 2) NOT NULL,
+    net_amount DECIMAL(14, 2) NOT NULL,
+    CONSTRAINT uq_rf_line UNIQUE (source_invoice_id, item_id, entry_type)
+);
+CREATE INDEX idx_rf_date ON revenue_facts(business_date, revenue_type, category_code);
+CREATE INDEX idx_rf_doctor ON revenue_facts(doctor_id, business_date);
+
+-- 50. DAILY_REVENUE_SUMMARIES (TỔNG HỢP DOANH THU THEO NGÀY / LOẠI / NHÓM)
+-- Cập nhật cộng dồn trong cùng giao dịch với INSERT revenue_facts (INSERT ... ON DUPLICATE KEY UPDATE).
+CREATE TABLE IF NOT EXISTS daily_revenue_summaries (
+    business_date DATE NOT NULL,
+    revenue_type VARCHAR(20) NOT NULL,
+    category_code VARCHAR(30) NOT NULL,
+    category_name VARCHAR(100) NOT NULL,
+    line_count INT NOT NULL DEFAULT 0,
+    amount_before_vat DECIMAL(16, 2) NOT NULL DEFAULT 0,
+    vat_amount DECIMAL(16, 2) NOT NULL DEFAULT 0,
+    discount_amount DECIMAL(16, 2) NOT NULL DEFAULT 0,
+    net_amount DECIMAL(16, 2) NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (business_date, revenue_type, category_code)
+);
+
+-- 51. DOCTOR_DAILY_PERFORMANCES (HIỆU SUẤT BÁC SĨ THEO NGÀY)
+CREATE TABLE IF NOT EXISTS doctor_daily_performances (
+    business_date DATE NOT NULL,
+    doctor_id BINARY(16) NOT NULL,
+    doctor_name VARCHAR(150) NOT NULL,
+    completed_visits INT NOT NULL DEFAULT 0,
+    cancelled_visits INT NOT NULL DEFAULT 0,
+    emergency_visits INT NOT NULL DEFAULT 0,
+    service_net_revenue DECIMAL(16, 2) NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (business_date, doctor_id)
+);
+
+-- 52. PROCESSED_EVENTS (cấu trúc như mục 13)
+-- reporting nhận: VisitCheckedInEvent, VisitCompletedEvent, VisitCancelledEvent, ServiceInvoicePaidEvent,
+-- ServiceInvoiceRefundedEvent, MedicineInvoicePaidEvent, UserProfileUpdatedEvent, PetUpdatedEvent.
+CREATE TABLE IF NOT EXISTS processed_events (
+    event_id BINARY(16) NOT NULL,
+    consumer VARCHAR(100) NOT NULL,
+    processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_id, consumer)
+);
