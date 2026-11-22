@@ -6,11 +6,12 @@ import { mapFieldErrors } from '../../api/client';
 import useAction from '../../hooks/useAction';
 import useAsync from '../../hooks/useAsync';
 import { blankToNull, formatNumber } from '../../lib/format';
+import { sameId } from '../../lib/ids';
 
 function ItemDialog({ item, species, onClose, onSaved }) {
   const editing = Boolean(item);
   const [form, setForm] = useState({ code: item?.code || '', name: item?.name || '', unit: item?.unit || '', description: item?.description || '' });
-  const [ranges, setRanges] = useState(() => Object.fromEntries(species.map((s) => { const r = item?.ranges?.find((x) => x.speciesId === s.id); return [s.id, { min: r?.minValue ?? '', max: r?.maxValue ?? '' }]; })));
+  const [ranges, setRanges] = useState(() => Object.fromEntries(species.map((s) => { const r = item?.ranges?.find((x) => sameId(x.speciesId, s.id)); return [s.id, { min: r?.minValue ?? '', max: r?.maxValue ?? '' }]; })));
   const [errors, setErrors] = useState({});
   const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
   const submit = async () => {
@@ -57,7 +58,7 @@ function Items({ items, species, onChanged }) {
     <Panel flush>
       <Table caption="Chỉ số xét nghiệm" empty="Chưa có chỉ số nào." rows={items} columns={[
         { title: 'Chỉ số', render: (row) => <><strong>{row.name}</strong><small>{row.code} · {row.unit}</small></> },
-        ...species.map((s) => ({ title: `Tham chiếu ${s.name}`, render: (row) => { const r = row.ranges.find((x) => x.speciesId === s.id); return r ? `${formatNumber(r.minValue, 2)} – ${formatNumber(r.maxValue, 2)}` : <span className="ui-muted">Chưa có</span>; } })),
+        ...species.map((s) => ({ title: `Tham chiếu ${s.name}`, render: (row) => { const r = row.ranges.find((x) => sameId(x.speciesId, s.id)); return r ? `${formatNumber(r.minValue, 2)} – ${formatNumber(r.maxValue, 2)}` : <span className="ui-muted">Chưa có</span>; } })),
         { title: '', align: 'right', render: (row) => <Button className="small" onClick={() => setDialog({ item: row })}>Sửa</Button> }]} />
     </Panel>
     {dialog && <ItemDialog item={dialog.item} species={species} onClose={() => setDialog(null)} onSaved={(saved) => { setNotice({ type: 'success', text: `Đã lưu chỉ số ${saved.name}.` }); onChanged(); }} />}
@@ -72,13 +73,13 @@ function ServiceMapping({ items }) {
   const [selected, setSelected] = useState([]);
   const action = useAction();
   useEffect(() => { if (mapping.data) setSelected(mapping.data.map((item) => item.id)); }, [mapping.data]);
-  const toggle = (id) => setSelected(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const toggle = (id) => setSelected(selected.some((x) => sameId(x, id)) ? selected.filter((x) => !sameId(x, id)) : [...selected, id]);
   return <Panel title="Chỉ số theo dịch vụ xét nghiệm" subtitle="Dịch vụ chưa chọn chỉ số nào sẽ gồm TẤT CẢ chỉ số. Chọn một số chỉ số để giới hạn biểu mẫu nhập của kỹ thuật viên.">
     <div className="ui-stack" style={{ gap: 14 }}>
       <Notice notice={action.notice} onClose={action.clear} />
       <Field label="Dịch vụ xét nghiệm"><Select value={serviceId} onChange={(event) => setServiceId(event.target.value)}><option value="">Chọn dịch vụ</option>{labServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</Select></Field>
       {serviceId && <AsyncView state={mapping}>{() => <>
-        <div className="ui-grid">{items.map((item) => <label className="ui-check" key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={() => toggle(item.id)} />{item.name} <span className="ui-muted">({item.code})</span></label>)}</div>
+        <div className="ui-grid">{items.map((item) => <label className="ui-check" key={item.id}><input type="checkbox" checked={selected.some((x) => sameId(x, item.id))} onChange={() => toggle(item.id)} />{item.name} <span className="ui-muted">({item.code})</span></label>)}</div>
         <div><Button variant="primary" busy={action.busy} onClick={async () => { if (await action.run(() => catalogApi.setServiceLabItems(serviceId, selected), selected.length ? 'Đã lưu danh sách chỉ số của dịch vụ.' : 'Đã lưu: dịch vụ gồm tất cả chỉ số.')) mapping.refresh(); }}>Lưu</Button></div></>}</AsyncView>}
     </div>
   </Panel>;

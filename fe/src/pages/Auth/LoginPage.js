@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PasswordInput from '../../components/auth/PasswordInput';
 import { useAuth } from '../../contexts/AuthContext';
-import { getRoleHome } from '../../constants/accessPolicy';
+import { getRoleHome, rolesOf } from '../../constants/accessPolicy';
 import AuthLayout from '../../layouts/AuthLayout';
 import '../../styles/auth.css';
 
@@ -26,11 +26,12 @@ export default function LoginPage() {
       return;
     }
     const role = result.user.role;
+    const roles = rolesOf(result.user);
     const returnTo = location.state?.from;
     const areas = { '/admin/': 'ADMIN', '/reception/': 'RECEPTIONIST', '/vet/': 'VETERINARIAN', '/lab/': 'LAB_TECHNICIAN', '/imaging/': 'IMAGING_TECHNICIAN' };
     const area = typeof returnTo === 'string' ? Object.keys(areas).find((prefix) => returnTo.startsWith(prefix)) : null;
     const allowedReturn = typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//')
-      && (area ? areas[area] === role : returnTo === '/portal/profile' || !returnTo.startsWith('/portal/') || role === 'PET_OWNER');
+      && (area ? roles.includes(areas[area]) : returnTo === '/portal/profile' || !returnTo.startsWith('/portal/') || roles.includes('PET_OWNER'));
     navigate(allowedReturn ? returnTo : getRoleHome(role), { replace: true });
   };
 

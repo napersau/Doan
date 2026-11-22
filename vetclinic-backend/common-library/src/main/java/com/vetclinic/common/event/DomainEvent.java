@@ -8,13 +8,13 @@ import java.util.UUID;
  * thời điểm phát sinh và người thao tác (ghi vào bảng *_status_histories ở phía consumer).
  * actorUserId = null nghĩa là hệ thống tự động (scheduler).
  */
-public interface DomainEvent {
+public interface DomainEvent extends BaseEvent {
 
     UUID eventId();
 
     Instant occurredAt();
 
-    Long actorUserId();
+    UUID actorUserId();
 
     String routingKey();
 }

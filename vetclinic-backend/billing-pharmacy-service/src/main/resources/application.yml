@@ -33,6 +33,8 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:vetclinic}
     password: ${RABBITMQ_PASSWORD:vetclinic_dev}
+    connection-timeout: 5000ms          # RabbitMQ mất kết nối: relay outbox thử lại sớm thay vì treo 60 giây (mặc định)
+    publisher-confirm-type: correlated   # OutboxRelay chờ RabbitMQ xác nhận mới đánh dấu PUBLISHED
     listener:
       simple:
         default-requeue-rejected: false   # Hết retry -> đẩy sang DLQ, không requeue vô hạn
@@ -70,7 +72,3 @@ management:
 vetclinic:
   billing:
     zone: Asia/Ho_Chi_Minh          # Múi giờ vận hành phòng khám (năm trong mã hóa đơn)
-    # Chưa có quyết định thuế suất từ nhóm (CLAUDE.md §8) -> mặc định 0%
-    vat:
-      service-rate: 0.00
-      medicine-rate: 0.00

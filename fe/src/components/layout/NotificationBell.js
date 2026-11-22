@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { formatDateTime } from '../../lib/format';
 
@@ -16,6 +17,7 @@ export function NotificationList({ items, empty = 'Chưa có thông báo nào.' 
 /** Chuông thông báo + khung nổi cho thông báo mới (CRITICAL giữ lâu hơn). `allPath` là trang xem toàn bộ (nếu có). */
 export default function NotificationBell({ allPath }) {
   const { items, unread, connection, markAllRead, toast, dismissToast } = useNotifications();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const root = useRef(null);
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function NotificationBell({ allPath }) {
     </div>}
     {toast && <div className={`notify-toast ${toast.severity === 'CRITICAL' ? 'critical' : ''}`} role="alert">
       <strong>{toast.title}</strong><span>{toast.body}</span>
-      {toast.data?.action === 'INVITE_PATIENT' && <Link className="notify-action" to="/vet/today" onClick={dismissToast}>Mời bệnh nhân vào phòng</Link>}
+      {user?.role === 'VETERINARIAN' && ['RESULTS_READY', 'VISIT_CHECKED_IN'].includes(toast.type) && <Link className="notify-action" to="/vet/today" onClick={dismissToast}>Mở hàng đợi của tôi</Link>}
       <button type="button" aria-label="Đóng thông báo" onClick={dismissToast}>×</button>
     </div>}
   </div>;

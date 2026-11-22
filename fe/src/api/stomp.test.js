@@ -45,6 +45,16 @@ describe('connectNotifications', () => {
     close();
   });
 
+  test('người có nhiều vai trò đăng ký kênh của TỪNG vai trò', () => {
+    const close = connectNotifications({ roles: ['VETERINARIAN', 'ADMIN'], onMessage() {}, WebSocketImpl: FakeSocket });
+    const socket = FakeSocket.last;
+    socket.onopen();
+    socket.onmessage({ data: 'CONNECTED\nversion:1.2\n\n\u0000' });
+    const destinations = socket.sent.map((item) => /destination:(\S+)/.exec(item)?.[1]).filter(Boolean);
+    expect(destinations).toEqual(expect.arrayContaining(['/user/queue/notifications', '/topic/role/VETERINARIAN', '/topic/role/ADMIN']));
+    close();
+  });
+
   test('chưa đăng nhập thì không mở kết nối', () => {
     clearSession(); FakeSocket.last = null;
     const close = connectNotifications({ role: 'ADMIN', onMessage() {}, WebSocketImpl: FakeSocket });

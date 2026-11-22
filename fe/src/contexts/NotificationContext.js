@@ -2,32 +2,31 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { notificationsApi } from '../api/endpoints';
 import { connectNotifications } from '../api/stomp';
 import { useAuth } from './AuthContext';
+import { sameId } from '../lib/ids';
+import { rolesOf } from '../constants/accessPolicy';
 
 const NotificationContext = createContext(null);
 const MAX_ITEMS = 100;
-const seenKey = (userId) => `vetclinic_notifications_seen_${userId}`;
-
-function readSeen(userId) {
-  try { return localStorage.getItem(seenKey(userId)) || ''; } catch { return ''; }
-}
 
 /**
  * Thông báo thời gian thực: nạp danh sách gần nhất (GET /notifications) rồi nhận thông báo mới qua WebSocket STOMP.
- * Backend lưu trong bộ nhớ nên danh sách có thể trống sau khi dịch vụ khởi động lại; "đã đọc" chỉ lưu ở trình duyệt này.
+ * Backend lưu trong bộ nhớ nên danh sách có thể trống sau khi dịch vụ khởi động lại. Trạng thái "đã đọc" do backend giữ riêng từng người
+ * (trường `read`, POST /notifications/{id}/read).
  */
 export function NotificationProvider({ children }) {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [connection, setConnection] = useState('idle');
-  const [seenAt, setSeenAt] = useState('');
   const [toast, setToast] = useState(null);
   const listeners = useRef(new Set());
+  const itemsRef = useRef([]);
+  itemsRef.current = items;
   const userId = user?.id;
-  const role = user?.role;
+  const rolesKey = rolesOf(user).join(',');   // chuỗi ổn định để effect không chạy lại khi mảng đổi tham chiếu
 
   const push = useCallback((incoming, live) => {
     setItems((current) => {
-      if (current.some((item) => item.id === incoming.id)) return current;
+      if (current.some((item) => sameId(item.id, incoming.id))) return current;
       return [incoming, ...current].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, MAX_ITEMS);
     });
     if (live) {
@@ -39,12 +38,11 @@ export function NotificationProvider({ children }) {
   useEffect(() => {
     setItems([]); setToast(null);
     if (!userId) { setConnection('idle'); return undefined; }
-    setSeenAt(readSeen(userId));
     let alive = true;
     notificationsApi.list(50).then((list) => { if (alive) (list || []).forEach((item) => push(item, false)); }).catch(() => {});
-    const close = connectNotifications({ role, onMessage: (message) => push(message, true), onState: setConnection });
+    const close = connectNotifications({ roles: rolesKey ? rolesKey.split(',') : [], onMessage: (message) => push(message, true), onState: setConnection });
     return () => { alive = false; close(); };
-  }, [userId, role, push]);
+  }, [userId, rolesKey, push]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -53,13 +51,15 @@ export function NotificationProvider({ children }) {
   }, [toast]);
 
   const markAllRead = useCallback(() => {
-    const now = new Date().toISOString();
-    setSeenAt(now);
-    try { localStorage.setItem(seenKey(userId), now); } catch { /* chỉ mất trạng thái đã đọc */ }
-  }, [userId]);
+    const unreadItems = itemsRef.current.filter((item) => !item.read);
+    if (!unreadItems.length) return;
+    setItems((current) => current.map((item) => (item.read ? item : { ...item, read: true })));
+    // Báo backend (tối đa 30 thông báo mỗi lần); lỗi mạng chỉ làm mất trạng thái đã đọc phía máy chủ
+    unreadItems.slice(0, 30).forEach((item) => { notificationsApi.markRead(item.id).catch(() => {}); });
+  }, []);
 
   const subscribe = useCallback((listener) => { listeners.current.add(listener); return () => listeners.current.delete(listener); }, []);
-  const unread = useMemo(() => items.filter((item) => !seenAt || String(item.createdAt) > seenAt).length, [items, seenAt]);
+  const unread = useMemo(() => items.filter((item) => !item.read).length, [items]);
   const value = useMemo(() => ({ items, unread, connection, markAllRead, subscribe, toast, dismissToast: () => setToast(null) }), [items, unread, connection, markAllRead, subscribe, toast]);
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;
 }

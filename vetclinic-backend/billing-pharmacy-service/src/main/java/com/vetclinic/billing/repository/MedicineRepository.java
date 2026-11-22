@@ -1,33 +1,35 @@
 package com.vetclinic.billing.repository;
 
 import com.vetclinic.billing.entity.Medicine;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Danh mục thuốc. Tồn kho KHÔNG nằm ở đây: bảng {@code medicine_stocks} có repository riêng ({@link MedicineStockRepository}) với các câu UPDATE
+ * nguyên tử. Các truy vấn đọc kèm nhóm + dòng tồn kho bằng entity graph để danh sách không bị N+1.
+ */
 @Repository
-public interface MedicineRepository extends JpaRepository<Medicine, Long>, JpaSpecificationExecutor<Medicine> {
+public interface MedicineRepository extends JpaRepository<Medicine, UUID>, JpaSpecificationExecutor<Medicine> {
 
     boolean existsByCodeIgnoreCase(String code);
 
-    /**
-     * Trừ kho nguyên tử (quy chuẩn §8.1): điều kiện tồn kho nằm ngay trong câu UPDATE nên hai giao dịch đồng thời không
-     * thể cùng trừ vượt số còn lại. Trả 0 dòng = không đủ hàng (hoặc thuốc không tồn tại).
-     *
-     * Cố ý KHÔNG clearAutomatically: nó sẽ tách rời đơn thuốc đang xử lý khỏi persistence context. Thay vào đó nơi gọi
-     * dùng EntityManager.refresh(medicine) để đọc lại tồn kho thật, không bao giờ tin giá trị cũ trong entity.
-     */
-    @Modifying(flushAutomatically = true)
-    @Query("update Medicine m set m.stockQuantity = m.stockQuantity - :quantity "
-            + "where m.id = :id and m.stockQuantity >= :quantity")
-    int deductStock(@Param("id") Long id, @Param("quantity") int quantity);
+    @Override
+    @EntityGraph(attributePaths = {"category", "stock"})
+    Page<Medicine> findAll(Specification<Medicine> spec, Pageable pageable);
 
-    /** Nhập kho / cân chỉnh (delta có thể âm). Không cho tồn kho âm: trả 0 dòng nếu sẽ âm hoặc thuốc không tồn tại. */
-    @Modifying(flushAutomatically = true)
-    @Query("update Medicine m set m.stockQuantity = m.stockQuantity + :delta "
-            + "where m.id = :id and m.stockQuantity + :delta >= 0")
-    int addStock(@Param("id") Long id, @Param("delta") int delta);
+    @EntityGraph(attributePaths = {"category", "stock"})
+    Optional<Medicine> findWithCategoryAndStockById(UUID id);
+
+    @EntityGraph(attributePaths = {"category", "stock"})
+    List<Medicine> findWithCategoryAndStockByIdIn(Collection<UUID> ids);
 }

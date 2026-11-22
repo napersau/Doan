@@ -19,11 +19,12 @@ export function parseFrames(raw) {
 export const frame = (command, headers = {}) => `${command}\n${Object.entries(headers).map(([key, value]) => `${key}:${value}`).join('\n')}\n\n${NULL}`;
 
 /**
- * Kết nối và đăng ký kênh riêng + kênh theo vai trò. Tự nối lại với độ trễ tăng dần khi mất kết nối; mỗi lần nối lại dùng
+ * Kết nối và đăng ký kênh riêng + kênh của TỪNG vai trò (một người có thể kiêm nhiều vai trò). Tự nối lại với độ trễ tăng dần khi mất kết nối; mỗi lần nối lại dùng
  * Access Token hiện tại (refresh trước nếu backend từ chối vì token hết hạn).
  * Trả về hàm đóng kết nối.
  */
-export function connectNotifications({ role, onMessage, onState = () => {}, WebSocketImpl = WebSocket }) {
+export function connectNotifications({ roles, role, onMessage, onState = () => {}, WebSocketImpl = WebSocket }) {
+  const roleList = Array.isArray(roles) && roles.length ? roles : (role ? [role] : []);
   let socket = null; let closed = false; let attempt = 0; let timer = null;
 
   const open = () => {
@@ -38,7 +39,7 @@ export function connectNotifications({ role, onMessage, onState = () => {}, WebS
         if (item.command === 'CONNECTED') {
           connected = true; attempt = 0; onState('connected');
           socket.send(frame('SUBSCRIBE', { id: 'sub-user', destination: '/user/queue/notifications' }));
-          socket.send(frame('SUBSCRIBE', { id: 'sub-role', destination: `/topic/role/${role}` }));
+          roleList.forEach((code) => socket.send(frame('SUBSCRIBE', { id: `sub-role-${code}`, destination: `/topic/role/${code}` })));
         } else if (item.command === 'MESSAGE') {
           try { onMessage(JSON.parse(item.body)); } catch { /* bỏ qua thông báo hỏng */ }
         } else if (item.command === 'ERROR' && !connected) {

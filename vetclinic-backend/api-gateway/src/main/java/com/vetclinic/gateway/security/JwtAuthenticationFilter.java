@@ -21,14 +21,17 @@ import org.springframework.web.util.pattern.PathPatternParser;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Cổng bảo vệ duy nhất của hệ thống:
- * 1. Luôn xóa X-User-Id / X-User-Role do client tự gửi (chống giả mạo quyền).
+ * 1. Luôn xóa X-User-Id / X-User-Roles do client tự gửi (chống giả mạo quyền).
  * 2. Path public -> cho qua không gắn header.
- * 3. Path còn lại -> bắt buộc JWT hợp lệ, gắn header nội bộ từ claims; sai/hết hạn -> 401 ngay tại Gateway.
+ * 3. Path còn lại -> bắt buộc JWT hợp lệ, gắn header nội bộ từ claims (userId UUID, roles danh sách); sai/hết hạn -> 401 ngay tại Gateway.
  */
 @Component
 public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
@@ -51,7 +54,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         ServerHttpRequest.Builder requestBuilder = exchange.getRequest().mutate()
                 .headers(headers -> {
                     headers.remove(SecurityConstants.HEADER_USER_ID);
-                    headers.remove(SecurityConstants.HEADER_USER_ROLE);
+                    headers.remove(SecurityConstants.HEADER_USER_ROLES);
                 });
         ServerHttpRequest request = requestBuilder.build();
 
@@ -65,14 +68,14 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         }
 
         Object userId = claims.get().get(SecurityConstants.CLAIM_USER_ID);
-        Object role = claims.get().get(SecurityConstants.CLAIM_ROLE);
-        if (userId == null || role == null) {
+        String roles = rolesOf(claims.get().get(SecurityConstants.CLAIM_ROLES));
+        if (userId == null || roles.isEmpty()) {
             return unauthorized(exchange.getResponse());
         }
 
         ServerHttpRequest authenticated = request.mutate()
                 .header(SecurityConstants.HEADER_USER_ID, String.valueOf(userId))
-                .header(SecurityConstants.HEADER_USER_ROLE, String.valueOf(role))
+                .header(SecurityConstants.HEADER_USER_ROLES, roles)
                 .build();
         return chain.filter(exchange.mutate().request(authenticated).build());
     }
@@ -80,6 +83,15 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     @Override
     public int getOrder() {
         return -100; // Chạy sớm nhất, trước các filter định tuyến
+    }
+
+    /** Claim roles là danh sách (JWT v4.0); đưa vào header dạng chuỗi phân tách dấu phẩy. Claim thiếu / rỗng -> chuỗi rỗng. */
+    static String rolesOf(Object claim) {
+        if (!(claim instanceof Collection<?> roles)) {
+            return "";
+        }
+        return roles.stream().filter(Objects::nonNull).map(String::valueOf).map(String::trim).filter(r -> !r.isEmpty())
+                .collect(Collectors.joining(SecurityConstants.ROLES_SEPARATOR));
     }
 
     private boolean isPublic(ServerHttpRequest request) {

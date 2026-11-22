@@ -1,18 +1,21 @@
 package com.vetclinic.billing.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.billing.constant.InventoryTransactionType;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
+/** quantity có dấu (+ nhập / - xuất). Tồn sau giao dịch không lưu: nếu cần thì cộng dồn quantity theo thứ tự. */
 public record InventoryTransactionResponse(
         Long id,
-        Long medicineId,
+        UUID medicineId,
         InventoryTransactionType transactionType,
         int quantity,
-        int balanceAfter,
-        Long referenceId,
+        BigDecimal unitCost,
+        UUID medicineInvoiceId,
         String notes,
-        Long createdBy,
+        UUID createdBy,
         Instant createdAt
 ) {
 }

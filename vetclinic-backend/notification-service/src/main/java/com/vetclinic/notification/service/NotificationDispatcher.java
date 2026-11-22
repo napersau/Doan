@@ -1,5 +1,6 @@
 package com.vetclinic.notification.service;
 
+import java.util.UUID;
 import com.vetclinic.common.security.RoleCode;
 import com.vetclinic.notification.model.NotificationMessage;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +25,7 @@ public class NotificationDispatcher {
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationHistory history;
 
-    public void toUser(Long userId, NotificationMessage message) {
+    public void toUser(UUID userId, NotificationMessage message) {
         history.addForUser(userId, message);
         messagingTemplate.convertAndSendToUser(String.valueOf(userId), USER_DESTINATION, message);
         log.debug("Thông báo {} -> người dùng {}", message.type(), userId);

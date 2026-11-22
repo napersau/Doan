@@ -1,6 +1,7 @@
 package com.vetclinic.clinical.repository;
 
-import com.vetclinic.clinical.constant.ServiceCategory;
+import java.util.UUID;
+import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import jakarta.persistence.LockModeType;
@@ -16,41 +17,39 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface VisitServiceDetailRepository extends JpaRepository<VisitServiceDetail, Long> {
+public interface VisitServiceDetailRepository extends JpaRepository<VisitServiceDetail, UUID> {
 
     /** Khóa dòng chỉ định. KHÔNG fetch join dịch vụ: tránh khóa lây sang bảng danh mục services dùng chung. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from VisitServiceDetail d where d.id = :id")
-    Optional<VisitServiceDetail> findByIdForUpdate(@Param("id") Long id);
+    Optional<VisitServiceDetail> findByIdForUpdate(@Param("id") UUID id);
 
     @EntityGraph(attributePaths = "service")
-    List<VisitServiceDetail> findByVisitIdOrderByIdAsc(Long visitId);
+    List<VisitServiceDetail> findByVisitIdOrderByIdAsc(UUID visitId);
+
+    /** Dịch vụ XN / CĐHA đang thực hiện của một phòng (theo queue_type của nhóm dịch vụ): tìm phiếu IN_SERVICE của phòng, vì phiếu đang phục vụ đã rời hàng đợi chờ trên Redis. */
+    @Query("select d from VisitServiceDetail d where d.status = com.vetclinic.clinical.constant.ServiceDetailStatus.IN_PROGRESS "
+            + "and d.service.category.queueType = :queueType")
+    List<VisitServiceDetail> findInProgressByQueueType(@Param("queueType") String queueType);
 
     @EntityGraph(attributePaths = "service")
-    List<VisitServiceDetail> findByVisitIdInOrderByIdAsc(Collection<Long> visitIds);
+    List<VisitServiceDetail> findByVisitIdInOrderByIdAsc(Collection<UUID> visitIds);
 
     @EntityGraph(attributePaths = "service")
-    List<VisitServiceDetail> findByVisitIdAndStatusOrderByIdAsc(Long visitId, ServiceDetailStatus status);
+    List<VisitServiceDetail> findByVisitIdAndStatusOrderByIdAsc(UUID visitId, ServiceDetailStatus status);
 
-    @EntityGraph(attributePaths = "service")
-    @Query("select d from VisitServiceDetail d where d.service.category = :category and d.status in :statuses "
-            + "order by d.createdAt asc, d.id asc")
-    List<VisitServiceDetail> findQueue(@Param("category") ServiceCategory category,
-                                       @Param("statuses") Collection<ServiceDetailStatus> statuses);
+    /** Số chỉ định của đợt khám thuộc loại (tại phòng / cận lâm sàng) và đang ở một trong các trạng thái. Loại suy ra từ {@code service_categories.queue_type}. */
+    default long countByVisitAndKindAndStatuses(UUID visitId, ServiceKind kind, Collection<ServiceDetailStatus> statuses) {
+        return countByVisitAndInRoomAndStatuses(visitId, kind == ServiceKind.IN_ROOM, statuses);
+    }
 
     @Query("select count(d) from VisitServiceDetail d where d.visitId = :visitId "
-            + "and d.service.category in :categories and d.status in :statuses")
-    long countByVisitAndCategoriesAndStatuses(@Param("visitId") Long visitId,
-                                              @Param("categories") Collection<ServiceCategory> categories,
-                                              @Param("statuses") Collection<ServiceDetailStatus> statuses);
+            + "and ((:inRoom = true and d.service.category.queueType is null) "
+            + "or (:inRoom = false and d.service.category.queueType in ('LABORATORY', 'IMAGING'))) "
+            + "and d.status in :statuses")
+    long countByVisitAndInRoomAndStatuses(@Param("visitId") UUID visitId, @Param("inRoom") boolean inRoom,
+                                          @Param("statuses") Collection<ServiceDetailStatus> statuses);
 
     @Query("select count(d) > 0 from VisitServiceDetail d where d.visitId = :visitId and d.service.code = :code")
-    boolean existsByVisitAndServiceCode(@Param("visitId") Long visitId, @Param("code") String code);
-
-    /** Báo cáo vận hành: số đợt khám (check-in trong [start, end)) có ít nhất một chỉ định thuộc nhóm đã chọn và chưa bị hủy. */
-    @Query("select count(distinct d.visitId) from VisitServiceDetail d, PetVisit v where v.id = d.visitId "
-            + "and d.service.category in :categories and d.status <> com.vetclinic.clinical.constant.ServiceDetailStatus.CANCELLED "
-            + "and v.checkedInAt >= :start and v.checkedInAt < :end")
-    long countVisitsWithCategoriesBetween(@Param("categories") Collection<com.vetclinic.clinical.constant.ServiceCategory> categories,
-                                          @Param("start") java.time.Instant start, @Param("end") java.time.Instant end);
+    boolean existsByVisitAndServiceCode(@Param("visitId") UUID visitId, @Param("code") String code);
 }

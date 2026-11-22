@@ -9,6 +9,7 @@ import { mapFieldErrors } from '../../api/client';
 import useAction from '../../hooks/useAction';
 import useAsync from '../../hooks/useAsync';
 import { formatDate, todayIso } from '../../lib/format';
+import { sameId } from '../../lib/ids';
 import { APPOINTMENT_STATUS } from '../../lib/labels';
 
 const SUGGESTIONS = ['Khám tổng quát định kỳ', 'Tiêm phòng', 'Tẩy giun', 'Bỏ ăn, mệt mỏi', 'Nôn hoặc tiêu chảy', 'Ngứa, rụng lông, bệnh ngoài da'];
@@ -25,7 +26,7 @@ export default function BookingPage() {
   const [addingPet, setAddingPet] = useState(false);
   const action = useAction();
   const items = pets.data?.items || [];
-  const selectedPet = items.find((pet) => String(pet.id) === String(petId));
+  const selectedPet = items.find((pet) => sameId(pet.id, petId));
 
   const submit = async (event) => {
     event.preventDefault();
@@ -36,7 +37,7 @@ export default function BookingPage() {
     if (!reason.trim()) found.reason = 'Mô tả ngắn lý do khám hoặc triệu chứng.';
     setErrors(found);
     if (Object.keys(found).length) return;
-    const result = await action.run(() => appointmentsApi.create({ petId: Number(petId), appointmentDate: date, startTime, reason: reason.trim() }).catch((problem) => { setErrors(mapFieldErrors(problem, { appointmentDate: 'date' })); throw problem; }));
+    const result = await action.run(() => appointmentsApi.create({ petId, appointmentDate: date, startTime, reason: reason.trim() }).catch((problem) => { setErrors(mapFieldErrors(problem, { appointmentDate: 'date' })); throw problem; }));
     if (result) { setCreated(result); setStartTime(''); setReason(''); }
   };
 

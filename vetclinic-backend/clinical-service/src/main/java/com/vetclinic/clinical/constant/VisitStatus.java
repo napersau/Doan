@@ -23,10 +23,11 @@ public enum VisitStatus {
         TRANSITIONS.put(WAITING, EnumSet.of(IN_PROGRESS, CANCELLED));
         // GĐ1 -> chỉ định CLS | chốt ngay (khám nhẹ, tiêm phòng) | hủy / chuyển viện. GĐ2 chốt -> WAITING_PAYMENT
         TRANSITIONS.put(IN_PROGRESS, EnumSet.of(WAITING_RESULTS, WAITING_PAYMENT, CANCELLED));
-        TRANSITIONS.put(WAITING_RESULTS, EnumSet.of(RESULTS_READY, CANCELLED));
-        // Gọi lại vào phòng (GĐ2) | khách bỏ về hẳn (EX-11) đóng ca và ghi nợ
+        // T06 đủ kết quả -> RESULTS_READY | T12 khách bỏ về giữa chừng (EX-11) -> COMPLETED + công nợ. Không còn hủy ở trạng thái này
+        TRANSITIONS.put(WAITING_RESULTS, EnumSet.of(RESULTS_READY, COMPLETED));
+        // T07 bắt đầu GĐ 2 | T08 khách bỏ về hẳn (EX-11): đóng ca và ghi nợ
         TRANSITIONS.put(RESULTS_READY, EnumSet.of(IN_PROGRESS, COMPLETED));
-        // Thu tiền xong | Admin mở lại đợt khám để điều chỉnh chuyên môn (T12, hóa đơn PENDING bị hủy, chưa thu tiền)
+        // T10 thu đủ tiền | T14 "Mở lại hồ sơ" (bác sĩ phụ trách hoặc Admin) để điều chỉnh chuyên môn
         TRANSITIONS.put(WAITING_PAYMENT, EnumSet.of(COMPLETED, IN_PROGRESS));
         TRANSITIONS.put(COMPLETED, EnumSet.noneOf(VisitStatus.class));
         TRANSITIONS.put(CANCELLED, EnumSet.noneOf(VisitStatus.class));

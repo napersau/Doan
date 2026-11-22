@@ -1,7 +1,6 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AuthClient;
-import com.vetclinic.clinical.client.BillingClient;
 import com.vetclinic.clinical.constant.VisitStatus;
 import com.vetclinic.clinical.dto.response.MedicalHistoryEntry;
 import com.vetclinic.clinical.dto.response.PrescriptionSummary;
@@ -12,6 +11,7 @@ import com.vetclinic.clinical.entity.PetVisit;
 import com.vetclinic.clinical.repository.PetRepository;
 import com.vetclinic.clinical.repository.PetVisitRepository;
 import com.vetclinic.clinical.service.MedicalHistoryService;
+import com.vetclinic.clinical.service.PrescriptionService;
 import com.vetclinic.clinical.service.VisitAssembler;
 import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.dto.PageResponse;
@@ -27,16 +27,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.UUID;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
  * Không @Transactional ở mức class: phần đọc CSDL chạy trong TransactionTemplate chỉ-đọc, còn các lời gọi OpenFeign
- * (tên bác sĩ từ auth, đơn thuốc từ billing) nằm NGOÀI transaction. Hai nguồn ngoài chỉ làm giàu: lỗi thì để null, không
+ * (tên bác sĩ từ auth) nằm NGOÀI transaction. Hai nguồn ngoài chỉ làm giàu: lỗi thì để null, không
  * làm hỏng bệnh án.
  */
 @Slf4j
@@ -49,31 +49,31 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
     private final PetVisitRepository visitRepository;
     private final VisitAssembler assembler;
     private final AuthClient authClient;
-    private final BillingClient billingClient;
+    private final PrescriptionService prescriptionService;
     private final TransactionTemplate readTx;
 
     public MedicalHistoryServiceImpl(PetRepository petRepository, PetVisitRepository visitRepository,
-                                     VisitAssembler assembler, AuthClient authClient, BillingClient billingClient,
+                                     VisitAssembler assembler, AuthClient authClient, PrescriptionService prescriptionService,
                                      PlatformTransactionManager transactionManager) {
         this.petRepository = petRepository;
         this.visitRepository = visitRepository;
         this.assembler = assembler;
         this.authClient = authClient;
-        this.billingClient = billingClient;
+        this.prescriptionService = prescriptionService;
         this.readTx = new TransactionTemplate(transactionManager);
         this.readTx.setReadOnly(true);
     }
 
     @Override
-    public PageResponse<MedicalHistoryEntry> history(Long petId, int page, int size) {
-        Long actorId = SecurityUtils.getCurrentUserId();
+    public PageResponse<MedicalHistoryEntry> history(UUID petId, int page, int size) {
+        UUID actorId = SecurityUtils.getCurrentUserId();
         RoleCode role = SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
         boolean owner = role == RoleCode.PET_OWNER;
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
                 Sort.by(Sort.Direction.DESC, "checkedInAt").and(Sort.by(Sort.Direction.DESC, "id")));
 
         Page<VisitResponse> visits = readTx.execute(status -> {
-            Pet pet = petRepository.findWithSpeciesById(petId).orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
+            Pet pet = petRepository.findWithSpeciesByIdAndDeletedAtIsNull(petId).orElseThrow(() -> new AppException(ErrorCode.PET_NOT_FOUND));
             if (owner && !pet.getOwnerId().equals(actorId)) {
                 throw new AppException(ErrorCode.PET_NOT_FOUND);   // không lộ sự tồn tại của hồ sơ người khác
             }
@@ -84,31 +84,32 @@ public class MedicalHistoryServiceImpl implements MedicalHistoryService {
             return found.map(assembler::detail);
         });
 
-        List<Long> visitIds = visits.getContent().stream().map(VisitResponse::id).toList();
-        Map<Long, PrescriptionSummary> prescriptions = prescriptionsOf(visitIds);
-        Map<Long, String> doctorNames = doctorNamesOf(visits.getContent().stream().map(VisitResponse::doctorId)
-                .filter(Objects::nonNull).collect(Collectors.toSet()));
+        List<UUID> visitIds = visits.getContent().stream().map(VisitResponse::id).toList();
+        Map<UUID, PrescriptionSummary> prescriptions = prescriptionsOf(visitIds);
+        // Tên Bác sĩ lấy từ bản chụp trên đợt khám (không gọi auth-service); chỉ ca cũ chưa có bản chụp mới phải tra
+        Map<UUID, String> doctorNames = doctorNamesOf(visits.getContent().stream()
+                .filter(v -> v.doctorId() != null && v.doctorName() == null).map(VisitResponse::doctorId)
+                .collect(Collectors.toSet()));
 
         return PageResponse.of(visits.getContent(), visits.getNumber(), visits.getSize(), visits.getTotalElements(),
                 visits.getTotalPages(), visits.isLast(), v -> new MedicalHistoryEntry(v,
-                        v.doctorId() == null ? null : doctorNames.get(v.doctorId()), prescriptions.get(v.id())));
+                        v.doctorName() != null ? v.doctorName() : v.doctorId() == null ? null : doctorNames.get(v.doctorId()), prescriptions.get(v.id())));
     }
 
-    private Map<Long, PrescriptionSummary> prescriptionsOf(List<Long> visitIds) {
+    /** Đơn thuốc nằm cùng CSDL clinical (từ 5.2): đọc thẳng, không còn gọi billing. Lỗi thì bệnh án vẫn trả được, chỉ thiếu đơn. */
+    private Map<UUID, PrescriptionSummary> prescriptionsOf(List<UUID> visitIds) {
         if (visitIds.isEmpty()) {
             return Map.of();
         }
         try {
-            ApiResponse<List<PrescriptionSummary>> response = billingClient.getPrescriptions(visitIds);
-            List<PrescriptionSummary> list = response == null || response.getData() == null ? List.of() : response.getData();
-            return list.stream().collect(Collectors.toMap(PrescriptionSummary::visitId, Function.identity(), (a, b) -> a));
+            return prescriptionService.summariesByVisit(visitIds);
         } catch (RuntimeException e) {
-            log.warn("Không lấy được đơn thuốc từ billing-pharmacy-service: {}", e.getMessage());
+            log.warn("Không đọc được đơn thuốc của bệnh án: {}", e.getMessage());
             return Map.of();
         }
     }
 
-    private Map<Long, String> doctorNamesOf(Set<Long> doctorIds) {
+    private Map<UUID, String> doctorNamesOf(Set<UUID> doctorIds) {
         if (doctorIds.isEmpty()) {
             return Map.of();
         }

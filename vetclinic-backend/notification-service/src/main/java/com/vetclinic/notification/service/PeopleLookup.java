@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
 import java.util.Optional;
 
 /**
@@ -26,7 +27,7 @@ public class PeopleLookup {
     private final AuthClient authClient;
     private final ClinicalClient clinicalClient;
 
-    public UserSummary requireUser(Long userId) {
+    public UserSummary requireUser(UUID userId) {
         ApiResponse<UserSummary> response = authClient.getUser(userId);
         if (response == null || response.getData() == null) {
             throw new AppException(ErrorCode.USER_NOT_FOUND);
@@ -34,7 +35,7 @@ public class PeopleLookup {
         return response.getData();
     }
 
-    public Optional<UserSummary> findUser(Long userId) {
+    public Optional<UserSummary> findUser(UUID userId) {
         try {
             return Optional.of(requireUser(userId));
         } catch (RuntimeException e) {
@@ -43,7 +44,7 @@ public class PeopleLookup {
         }
     }
 
-    public Optional<VisitSummary> findVisit(Long visitId) {
+    public Optional<VisitSummary> findVisit(UUID visitId) {
         try {
             ApiResponse<VisitSummary> response = clinicalClient.getVisit(visitId);
             return response == null ? Optional.empty() : Optional.ofNullable(response.getData());

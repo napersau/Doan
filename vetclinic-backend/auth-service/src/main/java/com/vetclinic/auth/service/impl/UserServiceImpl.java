@@ -5,17 +5,26 @@ import com.vetclinic.auth.dto.request.ChangePasswordRequest;
 import com.vetclinic.auth.dto.request.CreateUserRequest;
 import com.vetclinic.auth.dto.request.RegisterRequest;
 import com.vetclinic.auth.dto.request.UpdateProfileRequest;
-import com.vetclinic.auth.dto.request.UpdateUserRequest;
+import com.vetclinic.auth.dto.request.UpdateUserProfileRequest;
+import com.vetclinic.auth.dto.response.RoleResponse;
 import com.vetclinic.auth.dto.response.UserResponse;
 import com.vetclinic.auth.dto.response.UserSummaryResponse;
+import com.vetclinic.auth.constant.Gender;
+import com.vetclinic.auth.constant.RegisteredChannel;
+import com.vetclinic.auth.entity.PetOwnerProfile;
 import com.vetclinic.auth.entity.Role;
+import com.vetclinic.auth.entity.StaffProfile;
 import com.vetclinic.auth.entity.User;
+import com.vetclinic.auth.entity.UserProfile;
 import com.vetclinic.auth.mapper.UserMapper;
+import com.vetclinic.auth.repository.PetOwnerProfileRepository;
 import com.vetclinic.auth.repository.RefreshTokenRepository;
 import com.vetclinic.auth.repository.RoleRepository;
+import com.vetclinic.auth.repository.UserProfileRepository;
 import com.vetclinic.auth.repository.UserRepository;
 import com.vetclinic.auth.repository.UserSpecifications;
 import com.vetclinic.auth.service.AccountRules;
+import com.vetclinic.auth.service.UserEventPublisher;
 import com.vetclinic.auth.service.UserService;
 import com.vetclinic.common.dto.PageResponse;
 import com.vetclinic.common.exception.AppException;
@@ -32,27 +41,35 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+
+import static com.vetclinic.auth.service.AccountRules.blankToNull;
+import static com.vetclinic.auth.service.AccountRules.hasText;
+import static com.vetclinic.auth.service.AccountRules.requireEncodablePassword;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
-    /** Chỉ các vai trò làm việc tại phòng cố định mới có số phòng. */
-    private static final Set<RoleCode> ROOM_ROLES =
-            EnumSet.of(RoleCode.VETERINARIAN, RoleCode.LAB_TECHNICIAN, RoleCode.IMAGING_TECHNICIAN);
     private static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_BATCH_IDS = 200;
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final UserProfileRepository userProfileRepository;
+    private final PetOwnerProfileRepository petOwnerProfileRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserMapper userMapper;
+    private final UserEventPublisher events;
 
     // ------------------------------------------------------------------ người dùng hiện tại
 
@@ -70,8 +87,9 @@ public class UserServiceImpl implements UserService {
     public UserResponse updateMe(UpdateProfileRequest request) {
         User user = findCurrentUser();
         AccountRules.assertUsable(user);
-        applyProfile(user, request.fullName(), request.phoneNumber(), request.email(), request.address());
-        return userMapper.toResponse(saveAndFlush(user));
+        applyProfile(user, new UpdateUserProfileRequest(request.fullName(), request.phoneNumber(), request.email(),
+                request.address(), null, null));
+        return userMapper.toResponse(user);
     }
 
     @Override
@@ -96,60 +114,70 @@ public class UserServiceImpl implements UserService {
         log.info("Người dùng userId={} đã đổi mật khẩu, thu hồi toàn bộ phiên", user.getId());
     }
 
-    // ------------------------------------------------------------------ quản lý tài khoản
+    // ------------------------------------------------------------------ khách hàng
 
     @Override
     @Transactional
     public UserResponse create(CreateUserRequest request) {
-        RoleCode actorRole = currentRole();
-        // Lễ tân chỉ được tạo tài khoản chủ nuôi (UC-18); chỉ ADMIN mới tạo nhân sự
-        if (actorRole == RoleCode.RECEPTIONIST && request.roleCode() != RoleCode.PET_OWNER) {
-            throw new AppException(ErrorCode.ACCESS_DENIED);
+        if (request.roleCode() != RoleCode.PET_OWNER) {
+            // Nhân sự phải kèm hồ sơ nhân sự (và hồ sơ chuyên môn với Bác sĩ) nên chỉ tạo được qua POST /api/v1/staff của Admin
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA,
+                    "Chỉ tạo được tài khoản khách hàng ở đây; tài khoản nhân sự tạo qua POST /api/v1/staff");
         }
-        log.info("Tạo tài khoản: role={}, bởi userId={}", request.roleCode(), SecurityUtils.getCurrentUserId());
-        return userMapper.toResponse(persistNewUser(request));
+        currentRole();   // phải đăng nhập (đã chặn vai trò ở @PreAuthorize)
+        log.info("Tạo tài khoản khách hàng bởi userId={}", SecurityUtils.getCurrentUserId());
+        return userMapper.toResponse(persistNewOwner(request, RegisteredChannel.AT_CLINIC));
     }
 
     @Override
     @Transactional
     public UserResponse register(RegisterRequest request) {
-        User user = persistNewUser(new CreateUserRequest(null, request.password(), request.fullName(), request.phoneNumber(),
-                request.email(), request.address(), null, RoleCode.PET_OWNER));
+        User user = persistNewOwner(new CreateUserRequest(null, request.password(), request.fullName(), request.phoneNumber(),
+                request.email(), request.address(), null, RoleCode.PET_OWNER), RegisteredChannel.ONLINE);
         log.info("Chủ nuôi tự đăng ký: userId={}", user.getId());
         return userMapper.toResponse(user);
     }
 
-    /** Dùng chung cho tạo bởi nhân viên và tự đăng ký; việc kiểm tra quyền người gọi nằm ở nơi gọi. */
-    private User persistNewUser(CreateUserRequest request) {
+    /** Một giao dịch ghi {@code users + user_roles(PET_OWNER) + user_profiles + pet_owner_profiles}. */
+    private User persistNewOwner(CreateUserRequest request, RegisteredChannel channel) {
         requireEncodablePassword(request.password());
 
         String phone = request.phoneNumber().trim();
         String username = hasText(request.username()) ? request.username().trim() : phone;
+        String email = blankToNull(request.email());
         // Kiểm tra SĐT trước: khi tên đăng nhập mặc định là SĐT thì "trùng SĐT" là thông báo đúng với người dùng
-        if (userRepository.existsByPhoneNumber(phone)) {
+        if (userProfileRepository.existsByPhoneNumber(phone)) {
             throw new AppException(ErrorCode.PHONE_NUMBER_ALREADY_EXISTS);
         }
         if (userRepository.existsByUsername(username)) {
             throw new AppException(ErrorCode.USERNAME_ALREADY_EXISTS);
         }
-        String room = normalizeRoom(request.roomNumber(), request.roleCode());
-        if (room != null && userRepository.existsByRoomNumber(room)) {
-            throw new AppException(ErrorCode.ROOM_NUMBER_ALREADY_ASSIGNED);
+        if (email != null && userProfileRepository.existsByEmailIgnoreCase(email)) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Email đã được sử dụng cho tài khoản khác");
+        }
+        if (hasText(request.roomNumber())) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Khách hàng không có số phòng làm việc");
         }
 
-        Role role = roleRepository.findByCode(request.roleCode())
-                .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_FOUND));
+        Role role = roleRepository.findByCode(RoleCode.PET_OWNER).orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_FOUND));
         User user = User.builder()
-                .role(role)
                 .username(username)
                 .passwordHash(passwordEncoder.encode(request.password()))
-                .fullName(request.fullName().trim())
-                .phoneNumber(phone)
-                .email(blankToNull(request.email()))
-                .address(blankToNull(request.address()))
-                .roomNumber(room)
                 .status(UserStatus.ACTIVE)
                 .build();
+        user.getRoles().add(role);
+        user.setProfile(UserProfile.builder()
+                .user(user)
+                .fullName(request.fullName().trim())
+                .phoneNumber(phone)
+                .email(email)
+                .address(blankToNull(request.address()))
+                .build());
+        user.setPetOwnerProfile(PetOwnerProfile.builder()
+                .user(user)
+                .customerCode(String.format("KH%04d", petOwnerProfileRepository.nextCustomerNumber()))
+                .registeredChannel(channel)
+                .build());
         return saveAndFlush(user);
     }
 
@@ -157,11 +185,11 @@ public class UserServiceImpl implements UserService {
     @Transactional(readOnly = true)
     public PageResponse<UserResponse> search(RoleCode role, UserStatus status, String keyword, int page, int size) {
         // Lễ tân chỉ tra cứu được khách hàng (FR-08), không xem danh sách nhân sự
-        if (currentRole() == RoleCode.RECEPTIONIST) {
+        if (!actsAsAdmin()) {
             role = RoleCode.PET_OWNER;
         }
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
-                Sort.by(Sort.Direction.DESC, "id"));
+                Sort.by(Sort.Direction.DESC, "id"));   // UUIDv7 xếp được theo thời gian: mới nhất trước
         Page<User> result = userRepository.findAll(UserSpecifications.filter(role, status, keyword), pageable);
         return PageResponse.of(result.getContent(), result.getNumber(), result.getSize(), result.getTotalElements(),
                 result.getTotalPages(), result.isLast(), userMapper::toResponse);
@@ -169,62 +197,88 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserResponse getById(Long id) {
+    public UserResponse getById(UUID id) {
         return userMapper.toResponse(findById(id));
     }
 
-    @Override
-    @Transactional
-    public UserResponse update(Long id, UpdateUserRequest request) {
-        User user = findById(id);
-        applyProfile(user, request.fullName(), request.phoneNumber(), request.email(), request.address());
-
-        if (request.roomNumber() != null) {
-            String room = normalizeRoom(request.roomNumber(), user.getRole().getCode());
-            if (room != null && userRepository.existsByRoomNumberAndIdNot(room, user.getId())) {
-                throw new AppException(ErrorCode.ROOM_NUMBER_ALREADY_ASSIGNED);
-            }
-            user.setRoomNumber(room);
-        }
-        return userMapper.toResponse(saveAndFlush(user));
-    }
+    // ------------------------------------------------------------------ hồ sơ, vai trò, trạng thái
 
     @Override
     @Transactional
-    public UserResponse changeRole(Long id, RoleCode newRole) {
-        if (id.equals(SecurityUtils.getCurrentUserId())) {
-            throw new AppException(ErrorCode.CANNOT_MODIFY_OWN_ACCOUNT);
-        }
+    public UserResponse updateProfile(UUID id, UpdateUserProfileRequest request) {
+        boolean admin = actsAsAdmin();
         User user = findById(id);
-        RoleCode oldRole = user.getRole().getCode();
-        if (oldRole == RoleCode.PET_OWNER || newRole == RoleCode.PET_OWNER) {
-            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Không đổi vai trò giữa chủ nuôi và nhân sự");
+        // Lễ tân chỉ sửa hồ sơ khách hàng tại quầy, không đụng tới hồ sơ nhân sự
+        if (!admin && !UserMapper.rolesOf(user).equals(List.of(RoleCode.PET_OWNER))) {
+            throw new AppException(ErrorCode.ACCESS_DENIED);
         }
-        if (oldRole == newRole) {
-            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Tài khoản đã có vai trò này");
-        }
-        user.setRole(roleRepository.findByCode(newRole).orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_FOUND)));
-        if (!ROOM_ROLES.contains(newRole)) {
-            user.setRoomNumber(null);   // vai trò mới không có phòng cố định
-        }
-        saveAndFlush(user);
-        // Access Token cũ vẫn mang vai trò cũ tối đa 30 phút; Refresh Token bị thu hồi nên phiên kế tiếp phải đăng nhập lại
-        refreshTokenRepository.revokeAllUserTokens(user.getId());
-        log.info("Đổi vai trò userId={}: {} -> {} bởi userId={}", id, oldRole, newRole, SecurityUtils.getCurrentUserId());
+        applyProfile(user, request);
         return userMapper.toResponse(user);
     }
 
     @Override
     @Transactional
-    public void resetPassword(Long id, String newPassword) {
-        RoleCode actorRole = currentRole();
+    public UserResponse setRoles(UUID id, Set<RoleCode> roleCodes) {
+        if (id.equals(SecurityUtils.getCurrentUserId())) {
+            throw new AppException(ErrorCode.CANNOT_MODIFY_OWN_ACCOUNT);
+        }
+        User user = findById(id);
+        List<RoleCode> oldRoles = UserMapper.rolesOf(user);
+        Set<RoleCode> newRoles = EnumSet.noneOf(RoleCode.class);
+        newRoles.addAll(roleCodes);
+        if (oldRoles.contains(RoleCode.PET_OWNER) || newRoles.contains(RoleCode.PET_OWNER)) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Không đổi vai trò giữa chủ nuôi và nhân sự");
+        }
+        if (new LinkedHashSet<>(oldRoles).equals(newRoles)) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Tài khoản đã có đúng các vai trò này");
+        }
+        StaffProfile staff = user.getStaffProfile();
+        if (staff == null) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Tài khoản không có hồ sơ nhân sự");
+        }
+        if (newRoles.contains(RoleCode.VETERINARIAN) && staff.getVetProfile() == null) {
+            throw new AppException(ErrorCode.VET_PROFILE_REQUIRED);   // phải bổ sung hồ sơ chuyên môn trước khi gán vai trò Bác sĩ
+        }
+
+        List<Role> roles = new ArrayList<>();
+        for (RoleCode code : newRoles) {
+            roles.add(roleRepository.findByCode(code).orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_FOUND)));
+        }
+        user.getRoles().clear();
+        user.getRoles().addAll(roles);
+
+        RoleCode oldPrimary = oldRoles.isEmpty() ? null : oldRoles.get(0);
+        RoleCode newPrimary = newRoles.stream().min(Comparator.naturalOrder()).orElseThrow();
+        if (oldPrimary != newPrimary) {   // vai trò chính đổi thì chức danh / bộ phận đi theo
+            staff.setPositionTitle(roles.stream().filter(r -> r.getCode() == newPrimary).findFirst().orElseThrow().getName());
+            staff.setDepartment(AccountRules.departmentOf(newPrimary));
+        }
+        boolean roomCleared = false;
+        if (newRoles.stream().noneMatch(AccountRules.ROOM_ROLES::contains) && staff.getRoomNumber() != null) {
+            staff.setRoomNumber(null);   // không còn vai trò nào có phòng cố định
+            roomCleared = true;
+        }
+        saveAndFlush(user);
+        if (roomCleared) {
+            events.profileUpdated(user);
+        }
+        // Access Token cũ vẫn mang vai trò cũ tối đa 30 phút; Refresh Token bị thu hồi nên phiên kế tiếp phải đăng nhập lại
+        refreshTokenRepository.revokeAllUserTokens(user.getId());
+        log.info("Đổi vai trò userId={}: {} -> {} bởi userId={}", id, oldRoles, newRoles, SecurityUtils.getCurrentUserId());
+        return userMapper.toResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public void resetPassword(UUID id, String newPassword) {
+        boolean admin = actsAsAdmin();
         if (id.equals(SecurityUtils.getCurrentUserId())) {
             throw new AppException(ErrorCode.CANNOT_MODIFY_OWN_ACCOUNT);
         }
         requireEncodablePassword(newPassword);
         User user = findById(id);
         // Lễ tân chỉ đặt lại mật khẩu cho chủ nuôi tại quầy, không đụng tới tài khoản nhân sự
-        if (actorRole == RoleCode.RECEPTIONIST && user.getRole().getCode() != RoleCode.PET_OWNER) {
+        if (!admin && !UserMapper.rolesOf(user).equals(List.of(RoleCode.PET_OWNER))) {
             throw new AppException(ErrorCode.ACCESS_DENIED);
         }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
@@ -235,25 +289,62 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public UserResponse changeStatus(Long id, UserStatus status) {
+    public UserResponse lock(UUID id) {
+        return transition(id, UserStatus.LOCKED);
+    }
+
+    @Override
+    @Transactional
+    public UserResponse unlock(UUID id) {
+        return transition(id, UserStatus.ACTIVE);
+    }
+
+    @Override
+    @Transactional
+    public UserResponse deactivate(UUID id) {
+        return transition(id, UserStatus.INACTIVE);
+    }
+
+    /** Khóa / mở khóa / ngừng sử dụng: kiểm tra chuyển hợp lệ, thu hồi phiên khi rời ACTIVE, ghi sự kiện cùng giao dịch. */
+    private UserResponse transition(UUID id, UserStatus to) {
         if (id.equals(SecurityUtils.getCurrentUserId())) {
             throw new AppException(ErrorCode.CANNOT_MODIFY_OWN_ACCOUNT);
         }
         User user = findById(id);
-        user.setStatus(status);
-        userRepository.save(user);
-        if (status != UserStatus.ACTIVE) {
+        UserStatus from = user.getStatus();
+        if (from == to) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Tài khoản đã ở trạng thái này");
+        }
+        if (to == UserStatus.LOCKED && from != UserStatus.ACTIVE) {
+            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Chỉ khóa được tài khoản đang hoạt động");
+        }
+        user.setStatus(to);
+        saveAndFlush(user);
+        if (to != UserStatus.ACTIVE) {
             // flushAutomatically ghi trạng thái mới trước; Access Token còn lại tự hết hạn trong tối đa 30 phút
             refreshTokenRepository.revokeAllUserTokens(user.getId());
         }
-        log.info("Đổi trạng thái tài khoản userId={} -> {} bởi userId={}", id, status, SecurityUtils.getCurrentUserId());
+        events.statusChanged(user, from, to);
+        log.info("Đổi trạng thái tài khoản userId={}: {} -> {} bởi userId={}", id, from, to, SecurityUtils.getCurrentUserId());
         return userMapper.toResponse(user);
     }
 
     @Override
     @Transactional(readOnly = true)
+    public List<RoleResponse> listRoles() {
+        return roleRepository.findAll(Sort.by("id")).stream().map(userMapper::toRole).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<UserSummaryResponse> getActiveDoctors() {
-        return userRepository.findByRoleCodeAndStatusOrderByFullNameAsc(RoleCode.VETERINARIAN, UserStatus.ACTIVE)
+        return getDoctors(UserStatus.ACTIVE);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UserSummaryResponse> getDoctors(UserStatus status) {
+        return userRepository.findByRoleAndStatus(RoleCode.VETERINARIAN, status == null ? UserStatus.ACTIVE : status)
                 .stream().map(userMapper::toSummary).toList();
     }
 
@@ -261,32 +352,32 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserSummaryResponse getSummary(Long id) {
+    public UserSummaryResponse getSummary(UUID id) {
         return userMapper.toSummary(findById(id));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<UserSummaryResponse> getSummaries(List<Long> ids) {
+    public List<UserSummaryResponse> getSummaries(List<UUID> ids) {
         if (ids == null || ids.isEmpty()) {
             return List.of();
         }
         if (ids.size() > MAX_BATCH_IDS) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Tối đa " + MAX_BATCH_IDS + " id mỗi lần tra cứu");
         }
-        return userRepository.findByIdIn(ids).stream().map(userMapper::toSummary).toList();
+        return userRepository.findDetailedByIdIn(ids).stream().map(userMapper::toSummary).toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public long countActiveDoctors() {
-        return userRepository.countByRoleCodeAndStatus(RoleCode.VETERINARIAN, UserStatus.ACTIVE);
+        return userRepository.countByRoleAndStatus(RoleCode.VETERINARIAN, UserStatus.ACTIVE);
     }
 
     // ------------------------------------------------------------------ helper
 
-    private User findById(Long id) {
-        return userRepository.findWithRoleById(id)
+    private User findById(UUID id) {
+        return userRepository.findDetailedById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
     }
 
@@ -298,46 +389,60 @@ public class UserServiceImpl implements UserService {
         return SecurityUtils.getCurrentRole().orElseThrow(() -> new AppException(ErrorCode.UNAUTHORIZED));
     }
 
-    /** Cập nhật các trường hồ sơ có gửi lên (null = giữ nguyên) và kiểm tra trùng SĐT. */
-    private void applyProfile(User user, String fullName, String phoneNumber, String email, String address) {
-        if (fullName != null) {
-            if (fullName.isBlank()) {
+    /** Có vai trò nào đó (nếu không đăng nhập thì ném UNAUTHORIZED) và vai trò đó có ADMIN hay không. */
+    private boolean actsAsAdmin() {
+        currentRole();
+        return SecurityUtils.hasRole(RoleCode.ADMIN);
+    }
+
+    /**
+     * Cập nhật các trường hồ sơ có gửi lên (null = giữ nguyên), kiểm tra trùng SĐT / email, ghi xuống DB và phát
+     * {@code UserProfileUpdatedEvent} (outbox, cùng giao dịch) nếu họ tên / SĐT / email thật sự đổi.
+     */
+    private void applyProfile(User user, UpdateUserProfileRequest request) {
+        UserProfile profile = user.getProfile();
+        String before = signature(profile);
+        if (request.fullName() != null) {
+            if (request.fullName().isBlank()) {
                 throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Họ tên không được để trống");
             }
-            user.setFullName(fullName.trim());
+            profile.setFullName(request.fullName().trim());
         }
-        if (phoneNumber != null) {
-            String phone = phoneNumber.trim();
-            if (!phone.equals(user.getPhoneNumber())) {
-                if (userRepository.existsByPhoneNumberAndIdNot(phone, user.getId())) {
+        if (request.phoneNumber() != null) {
+            String phone = request.phoneNumber().trim();
+            if (!phone.equals(profile.getPhoneNumber())) {
+                if (userProfileRepository.existsByPhoneNumberAndUserIdNot(phone, user.getId())) {
                     throw new AppException(ErrorCode.PHONE_NUMBER_ALREADY_EXISTS);
                 }
-                user.setPhoneNumber(phone);
+                profile.setPhoneNumber(phone);
             }
         }
-        if (email != null) {
-            user.setEmail(blankToNull(email));
+        if (request.email() != null) {
+            String newEmail = blankToNull(request.email());
+            if (newEmail != null && !newEmail.equalsIgnoreCase(profile.getEmail())
+                    && userProfileRepository.existsByEmailIgnoreCaseAndUserIdNot(newEmail, user.getId())) {
+                throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Email đã được sử dụng cho tài khoản khác");
+            }
+            profile.setEmail(newEmail);
         }
-        if (address != null) {
-            user.setAddress(blankToNull(address));
+        if (request.address() != null) {
+            profile.setAddress(blankToNull(request.address()));
+        }
+        if (request.gender() != null) {
+            profile.setGender(Gender.parse(request.gender()));
+        }
+        if (request.dateOfBirth() != null) {
+            profile.setDateOfBirth(request.dateOfBirth());
+        }
+        saveAndFlush(user);
+        if (!Objects.equals(before, signature(profile))) {
+            events.profileUpdated(user);
         }
     }
 
-    /** Trả về số phòng viết hoa, hoặc null nếu để trống. Chỉ Bác sĩ / KTV mới được có số phòng. */
-    private static String normalizeRoom(String roomNumber, RoleCode role) {
-        if (!hasText(roomNumber)) {
-            return null;
-        }
-        if (!ROOM_ROLES.contains(role)) {
-            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Chỉ Bác sĩ / Kỹ thuật viên mới có số phòng làm việc");
-        }
-        return roomNumber.trim().toUpperCase(Locale.ROOT);
-    }
-
-    private static void requireEncodablePassword(String rawPassword) {
-        if (AccountRules.exceedsBcryptLimit(rawPassword)) {
-            throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Mật khẩu tối đa 72 byte");
-        }
+    /** Phần của hồ sơ mà các service khác sao chép (snapshot); khác nhau thì phải báo bằng sự kiện. */
+    private static String signature(UserProfile profile) {
+        return profile.getFullName() + "|" + profile.getPhoneNumber() + "|" + profile.getEmail();
     }
 
     private User saveAndFlush(User user) {
@@ -345,15 +450,7 @@ public class UserServiceImpl implements UserService {
             return userRepository.saveAndFlush(user);
         } catch (DataIntegrityViolationException e) {
             // Hai request đồng thời cùng qua bước kiểm tra trùng; ràng buộc UNIQUE của DB là chốt chặn cuối
-            throw new AppException(ErrorCode.USERNAME_ALREADY_EXISTS, "Tên đăng nhập hoặc số điện thoại đã tồn tại");
+            throw new AppException(ErrorCode.USERNAME_ALREADY_EXISTS, "Tên đăng nhập, số điện thoại hoặc email đã tồn tại");
         }
-    }
-
-    private static boolean hasText(String value) {
-        return value != null && !value.isBlank();
-    }
-
-    private static String blankToNull(String value) {
-        return hasText(value) ? value.trim() : null;
     }
 }

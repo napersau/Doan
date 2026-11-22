@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import StaffLayout from '../../layouts/StaffLayout';
-import { AsyncView, Badge, Button, Field, FormDialog, Input, Notice, PageHead, Pager, Panel, Select, Table, Textarea } from '../../components/ui';
-import { visitsApi } from '../../api/endpoints';
+import { AsyncView, Badge, Button, ConfirmDialog, Field, FormDialog, Input, Notice, PageHead, Pager, Panel, Select, Table, Textarea } from '../../components/ui';
+import { queueTicketsApi, visitsApi } from '../../api/endpoints';
 import useAsync from '../../hooks/useAsync';
 import useDebounced from '../../hooks/useDebounced';
 import { formatDateTime } from '../../lib/format';
@@ -35,7 +35,7 @@ export default function VisitsPage() {
   const done = (text) => { setDialog(null); setNotice({ type: 'success', text }); list.refresh(); };
   const reset = (setter) => (event) => { setter(event.target.value); setPage(0); };
   return <StaffLayout area="admin" title="Đợt khám">
-    <PageHead eyebrow="GIÁM SÁT" title="Đợt khám">Tra cứu mọi đợt khám. Quản trị viên là người duy nhất mở lại ca đã chốt nhưng chưa thu tiền (khi bác sĩ cần chỉnh sửa hồ sơ).</PageHead>
+    <PageHead eyebrow="GIÁM SÁT" title="Đợt khám" actions={<Button onClick={() => setDialog({ type: 'rebuild' })}>Dựng lại hàng đợi</Button>}>Tra cứu mọi đợt khám. Quản trị viên là người duy nhất mở lại ca đã chốt nhưng chưa thu tiền (khi bác sĩ cần chỉnh sửa hồ sơ). Nút "Dựng lại hàng đợi" dùng khi hàng đợi trên Redis bị mất hoặc thiếu phiếu.</PageHead>
     <Notice notice={notice} onClose={() => setNotice(null)} />
     <div className="ui-toolbar">
       <Input aria-label="Mã đợt khám" placeholder="Mã đợt khám (VIS-…)" value={keyword} onChange={reset(setKeyword)} />
@@ -48,7 +48,7 @@ export default function VisitsPage() {
           <Table caption="Đợt khám" rows={data.items} columns={[
             { title: 'Mã ca', render: (row) => <><strong>{row.visitCode}</strong><small>{formatDateTime(row.checkedInAt)}</small></> },
             { title: 'Thú cưng', render: (row) => <>{row.petName}{row.emergency && <span className="ui-emergency"> · CẤP CỨU</span>}<small>{row.speciesName}</small></> },
-            { title: 'Chẩn đoán', render: (row) => row.diagnosis || '—' },
+            { title: 'Lý do đến khám', render: (row) => row.reasonForVisit || '—' },
             { title: 'Trạng thái', render: (row) => <Badge map={VISIT_STATUS} value={row.status} /> },
             { title: '', align: 'right', render: (row) => <div className="ui-actions" style={{ justifyContent: 'flex-end' }}>
               {row.status === 'WAITING_PAYMENT' && <Button className="small danger" onClick={() => setDialog({ type: 'reopen', visit: row })}>Mở lại</Button>}
@@ -59,5 +59,13 @@ export default function VisitsPage() {
     </Panel>
     {dialog?.type === 'reopen' && <ReopenDialog visit={dialog.visit} onClose={() => setDialog(null)} onDone={done} />}
     {dialog?.type === 'history' && <HistoryDialog visit={dialog.visit} onClose={() => setDialog(null)} />}
+    {dialog?.type === 'rebuild' && <ConfirmDialog title="Dựng lại hàng đợi" confirmLabel="Dựng lại" onClose={() => setDialog(null)} onConfirm={async () => {
+      const result = await queueTicketsApi.rebuild();
+      done(result?.ran === false ? 'Đang có lần dựng khác chạy, thử lại sau ít giây.'
+        : `Đã dựng lại hàng đợi từ MySQL: bổ sung ${result?.doctorTickets ?? 0} phiếu Bác sĩ, ${result?.roomTickets ?? 0} phiếu phòng (${result?.alreadyIssued ?? 0} phiếu đã có, không phát lại).`);
+    }}>
+      Phát lại các phiếu xếp hàng còn thiếu trên Redis theo dữ liệu trong MySQL (ca đã nộp phí khám, ca cấp cứu, ca đã có kết quả, dịch vụ XN / CĐHA đã thu tiền), đúng thứ tự giờ thu tiền.
+      Phiếu đã có không bị phát trùng. Số phiếu mới tiếp nối sau lịch sử trong ngày; khách đã cầm số cũ có thể được cấp số mới.
+    </ConfirmDialog>}
   </StaffLayout>;
 }

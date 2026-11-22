@@ -3,21 +3,21 @@ package com.vetclinic.clinical.service;
 import com.vetclinic.clinical.constant.DoctorStatus;
 import com.vetclinic.clinical.dto.response.DoctorStatusResponse;
 
+import java.util.UUID;
 import java.util.List;
 
 /**
- * Trạng thái phục vụ tức thời của Bác sĩ, TÍNH ĐỘNG từ các ca khám, không lưu cột trạng thái (state machine SM-02):
+ * Trạng thái phục vụ tức thời của Bác sĩ, TÍNH ĐỘNG từ các ca khám, không lưu cột trạng thái (state machine SM-02, FR-22):
  * <ul>
- *   <li>BUSY: đang có ca IN_PROGRESS, hoặc đã được phân công một ca WAITING (chưa vào phòng).
- *       Vế thứ hai bổ sung so với công thức trong tài liệu, nếu không hai Lễ tân có thể cùng phân công một bác sĩ.</li>
- *   <li>AVAILABLE_PRIORITY_CALLBACK: rảnh nhưng có ca RESULTS_READY chưa bị tạm hoãn (Khóa ưu tiên, EX-05).</li>
- *   <li>AVAILABLE: rảnh hoàn toàn.</li>
+ *   <li>BUSY: đang có ca IN_PROGRESS (khám GĐ 1 hoặc GĐ 2).</li>
+ *   <li>AVAILABLE: ngược lại. Ca WAITING đã gán KHÔNG làm Bác sĩ bận; không còn "Khóa ưu tiên".</li>
  * </ul>
+ * Trạng thái chỉ để hiển thị và chặn Bác sĩ gọi thêm người khi đang khám (BR-12); KHÔNG dùng để chặn Lễ tân phân công.
  */
 public interface DoctorStatusService {
 
-    DoctorStatus statusOf(Long doctorId);
+    DoctorStatus statusOf(UUID doctorId);
 
-    /** Bảng điều phối của Lễ tân: mọi Bác sĩ đang ACTIVE kèm số phòng và trạng thái. */
+    /** Bảng trạng thái Bác sĩ: mọi Bác sĩ đang ACTIVE kèm số phòng, trạng thái và số ca đang chờ. */
     List<DoctorStatusResponse> board();
 }

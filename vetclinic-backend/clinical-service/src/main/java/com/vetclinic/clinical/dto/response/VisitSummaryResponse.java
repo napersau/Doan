@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.dto.response;
 
+import java.util.UUID;
 import com.vetclinic.clinical.constant.VisitStatus;
 
 /**
@@ -7,12 +8,12 @@ import com.vetclinic.clinical.constant.VisitStatus;
  * bằng mã ca khám, tên thú cưng.
  */
 public record VisitSummaryResponse(
-        Long id,
+        UUID id,
         String visitCode,
         VisitStatus status,
-        Long petId,
+        UUID petId,
         String petName,
-        Long ownerId,
-        Long doctorId
+        UUID ownerId,
+        UUID doctorId
 ) {
 }

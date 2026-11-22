@@ -14,11 +14,11 @@ import java.util.UUID;
 public record AppointmentStatusChangedEvent(
         UUID eventId,
         Instant occurredAt,
-        Long actorUserId,        // null = hệ thống (tự hủy lịch PENDING quá hạn, tự quét NO_SHOW)
-        Long appointmentId,
+        UUID actorUserId,        // null = hệ thống (tự hủy lịch PENDING quá hạn, tự quét NO_SHOW)
+        UUID appointmentId,
         String appointmentCode,
-        Long ownerId,
-        Long petId,
+        UUID ownerId,
+        UUID petId,
         LocalDate appointmentDate,
         LocalTime startTime,
         String status,           // trạng thái SAU thay đổi

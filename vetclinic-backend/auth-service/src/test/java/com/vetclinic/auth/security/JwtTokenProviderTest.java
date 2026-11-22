@@ -2,6 +2,8 @@ package com.vetclinic.auth.security;
 
 import com.vetclinic.auth.config.JwtProperties;
 import com.vetclinic.auth.entity.Role;
+import com.vetclinic.auth.entity.StaffProfile;
+import com.vetclinic.auth.entity.UserProfile;
 import com.vetclinic.auth.entity.User;
 import com.vetclinic.common.security.RoleCode;
 import io.jsonwebtoken.Claims;
@@ -14,6 +16,9 @@ import org.junit.jupiter.api.Test;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.UUID;
+import java.util.List;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -38,10 +43,12 @@ class JwtTokenProviderTest {
 
         assertThat(jws.getHeader().getAlgorithm()).isEqualTo("HS256");
         Claims claims = jws.getPayload();
-        assertThat(claims.getSubject()).isEqualTo("7");
-        assertThat(claims.get("userId", String.class)).isEqualTo("7"); // chuỗi, không phải số
-        assertThat(claims.get("role", String.class)).isEqualTo("VETERINARIAN");
+        assertThat(claims.getSubject()).isEqualTo(USER_ID.toString());
+        assertThat(claims.get("userId", String.class)).isEqualTo(USER_ID.toString()); // UUID dạng chuỗi
+        assertThat(claims.get("roles", List.class)).containsExactly("VETERINARIAN");   // DANH SÁCH vai trò
+        assertThat(claims).doesNotContainKey("role");
         assertThat(claims.get("username", String.class)).isEqualTo("bs.nguyen");
+        assertThat(claims.get("fullName", String.class)).isEqualTo("Nguyễn Văn Tiến");
         assertThat(claims.get("roomNumber", String.class)).isEqualTo("P01");
         assertThat(claims.getExpiration().getTime() - claims.getIssuedAt().getTime())
                 .isBetween(1_799_000L, 1_801_000L);
@@ -50,11 +57,35 @@ class JwtTokenProviderTest {
     @Test
     void accessToken_withoutRoom_omitsRoomClaim() {
         User user = vet();
-        user.setRoomNumber(null);
+        user.getStaffProfile().setRoomNumber(null);
 
         Claims claims = Jwts.parser().verifyWith(key).build()
                 .parseSignedClaims(provider.generateAccessToken(user)).getPayload();
 
+        assertThat(claims).doesNotContainKey("roomNumber");
+    }
+
+    @Test
+    void accessToken_carriesEveryRoleOfTheUser_inDeclarationOrder() {
+        User user = vet();
+        user.getRoles().add(Role.builder().id((short) 1).code(RoleCode.ADMIN).name("Quản trị viên").build());
+
+        Claims claims = Jwts.parser().verifyWith(key).build()
+                .parseSignedClaims(provider.generateAccessToken(user)).getPayload();
+
+        assertThat(claims.get("roles", List.class)).containsExactly("ADMIN", "VETERINARIAN");
+    }
+
+    @Test
+    void accessToken_ofAPetOwner_hasNoRoomClaim() {
+        User owner = User.builder().id(USER_ID).username("0912000008").build();
+        owner.getRoles().add(Role.builder().id((short) 6).code(RoleCode.PET_OWNER).name("Chủ thú cưng").build());
+        owner.setProfile(UserProfile.builder().user(owner).fullName("Hoàng Thị Lan").phoneNumber("0912000008").build());
+
+        Claims claims = Jwts.parser().verifyWith(key).build()
+                .parseSignedClaims(provider.generateAccessToken(owner)).getPayload();
+
+        assertThat(claims.get("roles", List.class)).containsExactly("PET_OWNER");
         assertThat(claims).doesNotContainKey("roomNumber");
     }
 
@@ -73,12 +104,14 @@ class JwtTokenProviderTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    private static final UUID USER_ID = UUID.fromString("019a9442-d810-7000-8000-000000000002");
+
     private static User vet() {
-        return User.builder()
-                .id(7L)
-                .role(Role.builder().id(2L).code(RoleCode.VETERINARIAN).name("Bác sĩ").build())
-                .username("bs.nguyen")
-                .roomNumber("P01")
-                .build();
+        User user = User.builder().id(USER_ID).username("bs.nguyen").build();
+        user.getRoles().add(Role.builder().id((short) 2).code(RoleCode.VETERINARIAN).name("Bác sĩ").build());
+        user.setProfile(UserProfile.builder().user(user).fullName("Nguyễn Văn Tiến").phoneNumber("0902000002").build());
+        user.setStaffProfile(StaffProfile.builder().user(user).employeeCode("NV0002").positionTitle("Bác sĩ thú y")
+                .roomNumber("P01").hireDate(LocalDate.of(2026, 1, 2)).build());
+        return user;
     }
 }

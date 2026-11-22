@@ -12,10 +12,11 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * EX-01 / FR-17: tự động chuyển NO_SHOW các lịch hẹn CONFIRMED mà khách không đến, để trả suất cho khách vãng lai.
- * Quá giờ KẾT THÚC khung hẹn + noShowGraceMinutes mà chưa check-in là vắng mặt.
+ * Quá giờ BẮT ĐẦU khung hẹn + noShowGraceMinutes (30 phút) mà chưa check-in là vắng mặt.
  *
  * Khác code mẫu trong quy chuẩn (§11.3): quét theo (ngày, giờ) thay vì chỉ "hôm nay" nên lịch của các ngày trước còn sót
  * (service tắt qua đêm / cuối tuần) cũng được xử lý; mỗi lịch hẹn một transaction riêng nên một lỗi không kéo cả mẻ
@@ -33,15 +34,16 @@ public class AppointmentNoShowScheduler {
 
     @Scheduled(cron = "${vetclinic.booking.no-show-cron}", zone = "${vetclinic.booking.zone}")
     public void scanAndMarkNoShowAppointments() {
+        // Hạn vắng mặt = giờ BẮT ĐẦU khung + noShowGraceMinutes (30 phút, EX-01 / FR-17): lịch bắt đầu trước (now - 30 phút) là quá hạn
         LocalDateTime cutoff = LocalDateTime.now(clock).minusMinutes(properties.noShowGraceMinutes());
-        List<Long> ids = appointmentRepository.findIdsEndedBefore(
+        List<UUID> ids = appointmentRepository.findIdsStartedBefore(
                 AppointmentStatus.CONFIRMED, cutoff.toLocalDate(), cutoff.toLocalTime());
         if (ids.isEmpty()) {
             return;
         }
 
         int marked = 0;
-        for (Long id : ids) {
+        for (UUID id : ids) {
             try {
                 if (appointmentService.markNoShowBySystem(id)) {
                     marked++;

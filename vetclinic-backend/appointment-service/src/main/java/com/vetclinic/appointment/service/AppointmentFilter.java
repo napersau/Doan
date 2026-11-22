@@ -1,5 +1,6 @@
 package com.vetclinic.appointment.service;
 
+import java.util.UUID;
 import com.vetclinic.appointment.constant.AppointmentStatus;
 
 import java.time.LocalDate;
@@ -10,8 +11,8 @@ import java.time.LocalDate;
  * @param sortBy "createdAt" (thời gian gửi yêu cầu, dùng cho hàng chờ duyệt UC-17) hoặc mặc định theo giờ hẹn
  */
 public record AppointmentFilter(
-        Long ownerId,
-        Long petId,
+        UUID ownerId,
+        UUID petId,
         String code,
         LocalDate fromDate,
         LocalDate toDate,

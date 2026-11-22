@@ -2,8 +2,9 @@
 #   docker compose up -d --build
 # Chế độ dev (mở port MySQL/RabbitMQ/Eureka/Mailpit để chạy service trong IDE):
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-# Reset CSDL (bắt buộc sau khi sửa docs/schema_init.sql):
+# Reset CSDL (bắt buộc sau khi sửa docs/schema_init.sql hoặc docs/seed_demo_data.sql):
 #   docker compose down -v
+# MySQL nạp lược đồ đích v4.0 docs/schema_init.sql rồi dữ liệu demo docs/seed_demo_data.sql (từ bước 8.2 của lộ trình v4; không còn thư mục db/).
 #
 # Chỉ api-gateway public port ra ngoài: service con tin header X-User-* do Gateway gắn,
 # nên mở port của chúng = cho phép giả mạo quyền.
@@ -57,11 +58,14 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       # Script chỉ chạy khi volume còn trống -> sửa schema thì phải `docker compose down -v`
+      # Lược đồ đích v4.0 (5 CSDL, 52 bảng)
       - ./docs/schema_init.sql:/docker-entrypoint-initdb.d/01-schema_init.sql:ro
+      # Dữ liệu demo cố định cho mọi kiểm thử; chạy sau 01-schema_init.sql
+      - ./docs/seed_demo_data.sql:/docker-entrypoint-initdb.d/02-seed_demo_data.sql:ro
     healthcheck:
-      # Ping qua TCP (127.0.0.1) và kiểm tra bảng cuối cùng của script: trong lúc init, MySQL chỉ mở socket,
-      # nên `mysqladmin ping` sẽ báo healthy quá sớm khi schema chưa tạo xong.
-      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD -e 'SELECT 1 FROM pet_clinic_billing_pharmacy_db.invoice_items LIMIT 1' >/dev/null 2>&1"]
+      # Ping qua TCP (127.0.0.1) và kiểm tra dữ liệu của script cuối cùng (02-seed_demo_data.sql: bảng pets có >= 2 dòng):
+      # trong lúc init, MySQL chỉ mở socket, nên `mysqladmin ping` sẽ báo healthy quá sớm khi schema/seed chưa nạp xong.
+      test: ["CMD-SHELL", "n=$$(mysql -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD -N -e 'SELECT COUNT(*) FROM pet_clinic_clinical_db.pets' 2>/dev/null); [ \"$${n:-0}\" -ge 2 ]"]
       <<: *healthcheck-timing
     networks: [vetclinic-net]
 
@@ -76,6 +80,21 @@ services:
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       <<: *healthcheck-timing
+    networks: [vetclinic-net]
+
+  # Hàng đợi phiếu xếp hàng (Quy chuẩn v4.0 mục 9.3): chỉ clinical-service nối, không publish port ra máy host.
+  # AOF everysec: mất tối đa ~1 giây phiếu khi Redis sập; mất hẳn dữ liệu thì QueueRebuildJob dựng lại từ MySQL (bước 6.3).
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     networks: [vetclinic-net]
 
   mailpit:
@@ -124,6 +143,8 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
+      reporting-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
       <<: *healthcheck-timing
@@ -152,7 +173,6 @@ services:
     image: vetclinic/appointment-service:latest
     environment:
       <<: *spring-env
-      BOOKING_VERIFY_PET: ${BOOKING_VERIFY_PET:-true}
       BOOKING_NO_SHOW_CRON: ${BOOKING_NO_SHOW_CRON:-0 */15 7-21 * * *}
       BOOKING_PENDING_EXPIRY_CRON: ${BOOKING_PENDING_EXPIRY_CRON:-0 5,20,35,50 7-21 * * *}
     depends_on: *depends-on-infra
@@ -169,12 +189,17 @@ services:
     image: vetclinic/clinical-service:latest
     environment:
       <<: *spring-env
-      IMAGING_DIR: /app/uploads/imaging
+      # Thư mục gốc của kho tệp (file_key dạng imaging/yyyy/MM/<uuid>.jpg nằm dưới đây); khóa ký URL tạm: STORAGE_SECRET, mặc định dùng JWT_SECRET
+      STORAGE_ROOT: /app/uploads
+      STORAGE_SECRET: ${STORAGE_SECRET:-${JWT_SECRET}}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     volumes:
-      - imaging-data:/app/uploads/imaging
-      # Ảnh CĐHA mẫu cho dữ liệu demo trong schema_init.sql (file_url = seed/...); chỉ đọc
-      - ./docs/demo-images:/app/uploads/imaging/seed:ro
-    depends_on: *depends-on-infra
+      - imaging-data:/app/uploads
+    depends_on:
+      <<: *depends-on-infra
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health"]
       <<: *healthcheck-timing
@@ -216,6 +241,21 @@ services:
       test: ["CMD", "curl", "-fsS", "http://localhost:8085/actuator/health"]
       <<: *healthcheck-timing
 
+  # Mô hình đọc báo cáo (CQRS, bước 7.1): chỉ NHẬN sự kiện RabbitMQ và ghi pet_clinic_reporting_db; API báo cáo + route Gateway ở bước 7.2
+  reporting-service:
+    <<: *spring-service
+    build:
+      context: ./vetclinic-backend
+      args:
+        MODULE: reporting-service
+    image: vetclinic/reporting-service:latest
+    environment:
+      <<: *spring-env
+    depends_on: *depends-on-infra
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8086/actuator/health"]
+      <<: *healthcheck-timing
+
   # Giao diện web (React + nginx). Trình duyệt gọi API qua Gateway ở http://localhost:8080 (CORS_ALLOWED_ORIGINS phải có origin này).
   frontend:
     build:
@@ -237,6 +277,7 @@ volumes:
   mysql-data:
   rabbitmq-data:
   imaging-data:
+  redis-data:
 
 networks:
   vetclinic-net:

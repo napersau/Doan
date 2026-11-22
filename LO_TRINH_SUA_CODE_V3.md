@@ -5,6 +5,25 @@
 
 ---
 
+## ▶ TRẠNG THÁI HIỆN TẠI (cập nhật sau MỖI phase/bước — Claude đọc mục này trước khi làm tiếp)
+
+| Phase | Trạng thái | Ghi chú |
+|---|---|---|
+| **Phase 0** Chuẩn bị | ✅ **ĐÃ XONG** (12/11/2026) | Chi tiết ở mục Phase 0 bên dưới; kết quả đo thực tế ghi kèm từng bước |
+| **Phase 1** `common-library` | ✅ **ĐÃ XONG** (12/11/2026) | 1.1 đánh số lại `ErrorCode`, 1.2 thêm 7 event mới + 9 routing key chuẩn; 288 test vẫn pass |
+| **Phase 2** `appointment-service` | ✅ **ĐÃ XONG** (12/11/2026) | Khối A + B xong; 68 test pass + chạy thật trên schema v3.0 |
+| Phase 3 `clinical-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (3.B1–3.B14); 183 unit test clinical; **đã chạy kiểm chứng thật trên MySQL** (luồng chính + đẩy lùi Lab + T11/T12/T14 + thu tiền T10 + công nợ + báo cáo doanh thu: 100% đạt, phát hiện và sửa 1 lỗi lazy ở `skip` phòng Lab) | |
+| Phase 4 `billing-pharmacy-service` | ✅ **ĐÃ XONG (12/11/2026)** — Khối A + Khối B (4.B1–4.B6); 56 unit test billing (+183 clinical vẫn đạt); **đã chạy kiểm chứng thật trên MySQL** (kê đơn + `stockWarnings`, khóa đơn `PHARM_1411`, lập/sửa/hủy hóa đơn thuốc, thu tiền + trừ kho nguyên tử, EX-15 rollback rồi sửa hóa đơn thu lại, EX-16 kể cả 3 yêu cầu song song, nhập/cân chỉnh kho, mở lại hồ sơ T14, báo cáo doanh thu thuốc, bệnh án ghép đơn: 65/65 đạt) | |
+| Phase 5 `notification-service` | ✅ **ĐÃ XONG (12/11/2026)** — 5.1–5.5; 45 unit test notification (+ appointment 68, clinical 183, billing 56 vẫn đạt); **đã chạy kiểm chứng thật** với RabbitMQ + Mailpit + 5 service (gọi số / đẩy lùi / có kết quả / hoàn tất / bán thuốc / tồn kho thấp / đặt lịch / duyệt / vắng mặt, 5 loại email, `POST /{id}/read`, 9 queue + DLQ rỗng) | |
+| Phase 6 Gateway + FE | ✅ **ĐÃ XONG (12/11/2026)** — 6.1 + 6.2①–⑧; `npm run build` sạch (CI=true), 22 test FE đạt; **chạy kiểm chứng thật bằng Chrome headless qua Gateway :8080** (`e2e/fe_smoke_v3.mjs`, 69/69 đạt, 0 lỗi console/mạng) | |
+| Phase 7 Dọn dẹp + kiểm thử cuối | ✅ **ĐÃ XONG (12/11/2026)** — 7.1–7.6; **385 unit test đạt** (28+68+188+56+45); `docker compose up -d --build` từ CSDL sạch → 11 container `healthy`; e2e v3 trên chính stack Docker: backend 45/45, notification 25/25, giao diện (Chrome headless) 69/69 | **MIGRATION v2 → v3.0 HOÀN TẤT** — còn lại việc không chặn demo, xem ghi chú sau Phase 7 |
+
+**Quy ước:** `[x]` = đã làm **và đã kiểm tra**; `[ ]` = chưa làm. Phase chỉ đổi sang ✅ khi mọi bước của nó là `[x]`. Branch làm việc: `develop` (mốc quay lại: tag `v2-baseline`). Mỗi bước = 1 commit.
+
+**Môi trường dev đã dùng (để tái lập):** JDK 21 (`export JAVA_HOME="C:/Program Files/Java/jdk-21.0.6"`; máy mặc định là JDK 22); MySQL của Docker chạy ở cổng **3307** vì máy host đã có `mysqld` chiếm 3306 → bật hạ tầng bằng `MYSQL_HOST_PORT=3307 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mysql-server rabbitmq-broker mailpit` và chạy service trong IDE/jar với `DB_PORT=3307 DB_HOST=localhost DB_USERNAME=root DB_PASSWORD=<MYSQL_ROOT_PASSWORD trong .env> RABBITMQ_HOST=localhost TZ=UTC` (+ `JWT_SECRET`). **Quên `DB_PORT=3307` thì service sẽ nối nhầm vào MySQL của máy host.**
+
+---
+
 ## 0. Kết luận: KHÔNG viết lại từ đầu
 
 | Module | Dòng main | Mức phải đụng | Ghi chú |
@@ -54,18 +73,22 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ## PHASE 0 — Chuẩn bị (không đụng logic)
 
-- [ ] **0.1** `git init`, commit nguyên trạng, tag `v2-baseline`.
-- [ ] **0.2** Sửa `docs/schema_init.sql` (nhóm đồng ý): thêm `SET NAMES utf8mb4;` đầu file; thay hash BCrypt(12) của `admin` cho đúng `Admin@123`. (CLAUDE.md §10 #1)
-- [ ] **0.3** Viết `seed_demo_data.sql` theo bảng ID cố định Task 1.2.3 (id 2–8 + 2 thú cưng) — mọi `curl` kiểm thử đều dùng ID này.
-- [ ] **0.4** `docker compose down -v` → chỉ chạy `mysql-server rabbitmq-broker mailpit service-registry` (file dev) → chạy truy vấn kiểm tra của Task 1.2: **25 bảng, 2 view, 25 FK**.
-- [ ] **0.5** Ghi lại baseline: `mvn clean install -DskipTests` thành công; số test (288).
-- [ ] **0.6 (xác nhận chạy thật):** khởi động riêng `auth-service` trên schema mới, đăng nhập `admin` → **phải chạy ngay không sửa gì**. Đây là bằng chứng cho phương pháp sửa dần.
+> **PHASE 0 = ✅ ĐÃ XONG ngày 12/11/2026.**
+
+- [x] **0.1** `git init`, commit nguyên trạng (729 file, không có `.env`), tag `v2-baseline`, tạo nhánh `develop`. Thêm `build/`, `__pycache__/` vào `.gitignore`.
+- [x] **0.2** Sửa `docs/schema_init.sql`: thêm `SET NAMES utf8mb4;`; hash cũ xác nhận **không khớp** `Admin@123`, đã thay bằng hash BCrypt(12) mới (đã `checkpw`). → CLAUDE.md §10 #1 **đã đóng**.
+- [x] **0.3** Tạo `docs/seed_demo_data.sql` (id 2–8 + thú cưng #1 Lu, #2 Milo; **mật khẩu chung mọi tài khoản demo = `Admin@123`**), mount vào `docker-compose.yml` làm `02-seed_demo_data.sql`. → CLAUDE.md §10 #2 **đã đóng** (phần ~100 dòng mở rộng vẫn là việc của Khởi, Phase 7).
+- [x] **0.4** `down -v` (không có volume nào trước đó) → dựng hạ tầng → kiểm tra thật: **25 bảng (3+2+14+6), 2 view, 25 FK, tồn kho = SUM(quantity) (200/50/40/100), tiếng Việt lưu đúng**. Phát sinh 2 lỗi nền đã sửa: (a) healthcheck MySQL trong `docker-compose.yml` trỏ vào bảng `invoice_items` đã bỏ ở v3.0 → MySQL không bao giờ `healthy`; đổi sang kiểm tra bảng `pets` có ≥ 2 dòng (đợi cả schema lẫn seed); (b) cổng 3306 bị `mysqld` của máy host chiếm → `docker-compose.dev.yml` dùng biến `MYSQL_HOST_PORT` (mặc định 3306).
+- [x] **0.5** `mvn clean install -DskipTests` (JDK 21): **BUILD SUCCESS** 8/8 module (~2 phút). Baseline `mvn test`: **288 test, 0 lỗi** (auth 28 · appointment 54 · clinical 103 · billing 68 · notification 35).
+- [x] **0.6** Chạy riêng `auth-service` (jar v2, không sửa code) trên schema v3.0: khởi động ~28 giây, `POST /api/v1/auth/login` `admin`/`Admin@123` → `200`, có access + refresh token. **Phương pháp sửa dần được xác nhận.**
 
 ---
 
 ## PHASE 1 — `common-library` (làm một lần, các module khác dùng chung)
 
-- [ ] **1.1 Đánh số lại `ErrorCode` theo Quy chuẩn §5.1** (một commit, vì mã trùng số nhưng khác nghĩa):
+> **PHASE 1 = ✅ ĐÃ XONG ngày 12/11/2026.** Kết quả thực tế ghi ở cuối mục Phase 1. Báo Linh: FE hiện **không** tham chiếu các mã đã đổi (tìm `fe/src` = 0 chỗ), chỉ `e2e/*` (v2, bị bỏ ở 7.5) có.
+
+- [x] **1.1 Đánh số lại `ErrorCode` theo Quy chuẩn §5.1** (một commit, vì mã trùng số nhưng khác nghĩa) — **đã làm**, bảng dưới là kế hoạch ban đầu; thực tế: mã v2-only được giữ tạm ở số mới (`DOCTOR_PRIORITY_LOCKED`→`CLIN_1323`, `INVALID_PRESCRIPTION_STATUS`→`PHARM_1415`, `BILL_1413–1415` giữ nguyên) để code v2 còn biên dịch; `CLIN_1312` bỏ trống có chủ ý; **xóa các mã v2-only ở 3.A3 / 4.A2**:
 
   | Mã | Code hiện tại | Theo docs v3.0 | Việc |
   |---|---|---|---|
@@ -86,8 +109,9 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
   | `PHARM_1411` | `MEDICINE_CODE_ALREADY_EXISTS` | `PRESCRIPTION_LOCKED` | mã thuốc trùng → số mới |
 
   Quy tắc: số của docs thắng; mã chỉ có trong code thì dời xuống số tiếp theo trong nhóm (CLAUDE.md §5.1). Báo FE (Linh) bảng này ngay.
-- [ ] **1.2 Thêm event mới, CHƯA xóa event cũ:** `AppointmentBookedEvent`, `AppointmentNoShowEvent`, `PatientCalledEvent`, `ParaclinicalResultsReadyEvent`, `VisitCompletedEvent`, `MedicineInvoicePaidEvent`, `MedicineLowStockEvent` + routing key trong `EventRouting` (`appointment.booked`, `appointment.no_show`, `visit.patient_called`, `visit.results_ready`, `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`). `VisitCheckedInEvent` và `AppointmentStatusChangedEvent` giữ, chỉ thêm trường nếu cần (`doctorId`).
-- [ ] **1.3** Đổi `InventoryTransactionType`/`PaymentStatus` nằm ở billing (xem 4.A), không ở common.
+- [x] **1.2 Thêm event mới, CHƯA xóa event cũ** — **đã làm** (7 record + 9 routing key, khớp Kiến trúc §5.2; `VisitCheckedInEvent` **chưa** thêm `doctorId`: làm ở 3.B1 khi cần để khỏi vỡ constructor sớm; event/key v2 còn nguyên, xóa ở 7.1): `AppointmentBookedEvent`, `AppointmentNoShowEvent`, `PatientCalledEvent`, `ParaclinicalResultsReadyEvent`, `VisitCompletedEvent`, `MedicineInvoicePaidEvent`, `MedicineLowStockEvent` + routing key trong `EventRouting` (`appointment.booked`, `appointment.no_show`, `visit.patient_called`, `visit.results_ready`, `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`). `VisitCheckedInEvent` và `AppointmentStatusChangedEvent` giữ, chỉ thêm trường nếu cần (`doctorId`).
+- [x] **1.3** Đổi `InventoryTransactionType`/`PaymentStatus` nằm ở billing (xem 4.A), không ở common. *(không có việc ở Phase 1)*
+- **Kết quả đo:** `mvn clean test` 8/8 module BUILD SUCCESS, **288 test, 0 lỗi**; không có 2 mã nào trùng chuỗi. Lưu ý kỹ thuật: build gia tăng (`mvn test` không `clean`) từng gây `NoClassDefFoundError: LabTestItem` ở clinical → **luôn dùng `mvn clean test`**.
 - **Xong khi:** `mvn -q clean install -DskipTests` xanh; test của `auth-service` vẫn xanh (nếu đỏ do đổi mã lỗi thì sửa test).
 
 ---
@@ -95,19 +119,19 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 ## PHASE 2 — `appointment-service` (nhỏ nhất, làm trước để rút kinh nghiệm)
 
 ### Khối A — khớp schema (`appointments` còn 9 cột)
-- [ ] **2.A1** `Appointment`: bỏ `endTime`, `ownerId`, `cancelReason`, `confirmedBy/At`, `cancelledBy/At`, `updatedAt`. Sửa chỗ báo đỏ (chủ yếu `AppointmentServiceImpl`, `AppointmentMapper`, `AppointmentResponse`).
-- [ ] **2.A2** `transition()`/`recordHistory()` ghi **lý do hủy vào `notes`**, người thao tác vào `changed_by_user_id` (bảng lịch sử đã có sẵn 2 trường này). Response lấy `cancelReason`, `confirmedBy`… từ lịch sử (`AppointmentEnricher`).
-- [ ] **2.A3** `endTime` suy ra = `startTime + 30'` (hằng từ `BookingProperties`), chỉ khi cần hiển thị.
-- [ ] **2.A4** `ownerId`: tạm thời lấy qua `PetClient.getPet(petId).ownerId` (đã có endpoint `/internal/clinical/pets/{id}`); bộ lọc "lịch của tôi" cần `GET /internal/clinical/pets?ownerId=` → **làm cùng bước 3.A5** (bên clinical). Đến khi đó, `AppointmentSpecifications` lọc theo `petId IN (...)`.
-- **Xong khi:** service khởi động trên schema mới; test sửa xong; đặt lịch + duyệt + hủy bằng `curl` (Task 2.7).
+- [x] **2.A1** `Appointment` còn đúng 9 cột (bỏ `endTime`, `ownerId`, `cancelReason`, `confirmedBy/At`, `cancelledBy/At`, `updatedAt`). `ddl-auto: validate` đạt trên schema v3.0.
+- [x] **2.A2** Lý do hủy ghi **nguyên văn** vào `appointment_status_histories.notes`, người thao tác vào `changed_by_user_id` (`null` = hệ thống). `AppointmentEnricher` suy ra `cancelReason`/`confirmedBy/At`/`cancelledBy/At`/`updatedAt` từ lịch sử bằng **một** truy vấn theo lô (`findByAppointmentIdInOrderByIdAsc`); hình dạng `AppointmentResponse` giữ nguyên nên FE và clinical không phải đổi. Controller `enrich` MỌI response (create/confirm/cancel/reschedule/no-show).
+- [x] **2.A3** `endTime` suy ra = `startTime + slotMinutes` (`SlotPolicy.endOf`); repository `findIdsEndedBefore` → `findIdsStartedBefore` (lọc theo giờ bắt đầu; hai scheduler tự trừ độ dài khung/thời gian chờ). Hành vi v2 giữ nguyên (hạn NO_SHOW còn là *kết thúc khung + 30 phút*; đổi sang *bắt đầu + 30 phút* ở 2.B2).
+- [x] **2.A4** `ownerId` suy ra từ thú cưng qua `PetClient` — **luôn ngoài transaction** (các hàm `confirm/cancel/reschedule/markNoShow/*BySystem` đổi sang `transactionTemplate`, tra chủ nuôi trước). Chủ nuôi (PET_OWNER) tra không được ⇒ **đóng cửa** (404 `APPT_1202` / 503), nhân viên tra không được ⇒ chỉ mất thông báo (CLAUDE.md §10 #3). "Lịch của tôi"/lọc theo chủ = `pet_id IN (...)` qua `GET /internal/clinical/pets?ownerId=`; tra không được ⇒ danh sách rỗng, **không bao giờ bỏ điều kiện lọc**. **Endpoint phía clinical đã làm luôn ở bước này** (`PetService.getSummariesByOwner`, `PetRepository.findByOwnerId`, `@GetMapping(params="ownerId")`) nên 3.A5 không cần làm lại phần đó.
+- **Kết quả đo Khối A (12/11):** `mvn clean test`: appointment **63 test** (54 cũ + 9 mới), clinical **106** (103 + 3 mới), 0 lỗi. **Chạy thật** appointment-service (jar) trên MySQL schema v3.0 + auth-service thật + clinical *giả* (Python, đúng hợp đồng `/internal/clinical/pets…` vì clinical thật chưa boot được trên schema mới): đặt lịch `201` (ownerId 8 suy ra từ thú cưng, endTime 09:30, tên chủ từ auth) → lễ tân duyệt (`confirmedBy` 5 từ lịch sử) → "lịch của tôi" đúng 2 lịch → chủ nuôi khác thấy 0 lịch dù gửi `ownerId=8`, xem/hủy lịch người khác = `404 APPT_1202` → chủ nuôi hủy kèm lý do (`cancelReason`, `cancelledBy` từ lịch sử) → lịch sử đúng 3 dòng. Không có ERROR trong log. Dữ liệu thử đã xóa khỏi DB. *(Lưu ý kiểm thử: `curl` trên Git Bash/Windows làm hỏng byte tiếng Việt trong body → 400 `SYS_1001`; dùng ASCII khi test bằng `curl`.)*
 
 ### Khối B — nghiệp vụ mới
-- [ ] **2.B1 Sức chứa `N_active × 2`** (`SlotPolicy`/`SlotService`) — sửa 1 chỗ + test.
-- [ ] **2.B2 NO_SHOW = `appointment_date + start_time + 30'`** (`AppointmentServiceImpl.isNoShowDue`, `AppointmentNoShowScheduler`), cron `0 */5 7-21 * * *`, phát `AppointmentNoShowEvent`.
-- [ ] **2.B3** Đổi sự kiện tạo lịch sang `AppointmentBookedEvent` (`appointment.booked`). Thêm listener tương ứng ở notification (bước 5.1) rồi mới xóa `AppointmentCreatedEvent`.
-- [ ] **2.B4** `GET /appointments/slots` public ở service (`vetclinic.security.public-paths`) — Gateway làm ở 6.1.
-- [ ] **2.B5** Consumer `VisitCheckedInEvent`: giữ; thêm log cảnh báo nếu lịch đã `NO_SHOW`.
-- [ ] **2.B6** Chỉ để ý: `reschedule`, `expirePendingBySystem`, `reports/summary` giữ nguyên (CLAUDE.md §10 #8).
+- [x] **2.B1 Sức chứa `N_active × 2`** — `SlotPolicy.APPOINTMENTS_PER_DOCTOR_PER_SLOT = 2` (hằng có tên, kèm lý do k=2). 3 bác sĩ ACTIVE ⇒ 6 chỗ/khung (đã đo thật qua `/slots`). Có test riêng: 1 bác sĩ ⇒ nhận lịch thứ 2, từ chối lịch thứ 3.
+- [x] **2.B2 NO_SHOW = `appointment_date + start_time + 30 phút`** (trước là *giờ kết thúc khung + 30'*); cron mặc định `0 */5 7-21 * * *`; phát `AppointmentNoShowEvent` (`appointment.no_show`). Test phân biệt hai công thức (hẹn 08:00, bây giờ 09:00: v3 quá hạn, v2 chưa). Đã đo thật bằng scheduler cron 10 giây: lịch 08:00 ⇒ `NO_SHOW` (người thao tác `NULL`), lịch 11:30 vẫn `CONFIRMED`. **Lưu ý:** hiện phát SONG SONG với `appointment.status_changed` (NO_SHOW) — xem bước 5.2.
+- [x] **2.B3** Phát `AppointmentBookedEvent` (`appointment.booked`) **song song** với `AppointmentCreatedEvent` (notification vẫn đang nghe `appointment.created`). Đã đo thật: một lần đặt lịch phát đủ hai event. **Còn lại (làm ở 5.1 / 7.1):** notification nghe `appointment.booked`, rồi xóa `AppointmentCreatedEvent`.
+- [x] **2.B4** `GET /appointments/slots` công khai **ở phía appointment-service** (`vetclinic.security.public-paths` + `@PreAuthorize("permitAll()")`): đã đo thật `200` không cần header, trong khi `GET /appointments` không header vẫn `401`. **Chưa công khai qua Gateway** — làm ở 6.1.
+- [x] **2.B5** Consumer `VisitCheckedInEvent` giữ nguyên (idempotent); thêm nhánh `NO_SHOW`: log cảnh báo *giữ nguyên NO_SHOW, khách được tiếp nhận như vãng lai* (FR-18), không ghi gì; có test.
+- [x] **2.B6** `reschedule`, `expirePendingBySystem`, `reports/summary` giữ nguyên hành vi (CLAUDE.md §10 #8). `expirePendingBySystem` chạy đúng khi đo thật (PENDING quá hạn ⇒ `CANCELLED`, người thao tác `NULL`).
 
 ---
 
@@ -115,81 +139,148 @@ Phase 7  Dọn code cũ + e2e + seed mở rộng             ── cả nhóm, 
 
 ### Khối A — cho service chạy lại trên schema mới (chủ yếu cơ học)
 
-- [ ] **3.A1 Thú cưng / xét nghiệm:** `Pet` bỏ `weight`; `LabTestResult` bỏ `evaluation` → tính `LabEvaluation` trong `VisitAssembler`/`LabResultResponse` từ `resultValue` so `min/maxValueSnapshot`. (~5 file)
-- [ ] **3.A2 Lịch sử:** `PetVisitStatusHistory.changedByUserId` cho phép `null`. Thêm tiện ích `VisitTimeline` (1 query lịch sử) để lấy "thời điểm bắt đầu khám / chốt / hoàn tất / lý do hủy" thay cho `startedAt/closedAt/completedAt/cancelReason`.
-- [ ] **3.A3 `PetVisit`:** bỏ `assignedRoom` (phòng lấy từ `AuthClient` theo bác sĩ), `startedAt`, `closedAt`, `completedAt`, `cancelReason`, `scheduledAt`, `callbackPostponedAt`; thêm `queueOrder BIGINT`, `skipCount INT`. Thêm `QueueOrders.now()` (epoch micro giây) và gán trong `createVisit`.
-  - Xóa: `QueueSchedule`, `QueueState`, `DoctorStatus.AVAILABLE_PRIORITY_CALLBACK`, `callBack()`/`postponeCallback()` và 2 endpoint tương ứng, `existsByDoctorIdAndStatusAndCallbackPostponedAtIsNull`, `PaymentCompletedListener`.
-  - `findQueueByStatus` đổi thành `ORDER BY (emergency AND skipCount = 0) DESC, queueOrder ASC`.
-- [ ] **3.A4 `VisitServiceDetail`:** bỏ `unitPrice`, `subtotal`; thêm `queueOrder`, `skipCount` (gán ở `createDetail`). `ClinicService` thêm `vatRate`.
-- [ ] **3.A5 Entity `ServiceInvoice`** (+ repository, mã `SINV-YYYY-XXXX` từ id, `@Version`) và gắn vào `createDetail`: **tạo chỉ định ⇒ tạo hóa đơn `PENDING` trong cùng giao dịch** (snapshot `unit_price = services.price`, `vat_rate`). Thêm `GET /internal/clinical/pets?ownerId=` (cho 2.A4).
-- [ ] **3.A6** `billableServices` (đang đọc `unitPrice`) tạm trả từ `services.price`; sẽ xóa ở 3.B13.
-- **Xong khi:** `mvn -pl clinical-service test` xanh (xóa/sửa test của hành vi đã bỏ), **service khởi động**, `POST /pet-visits/check-in` chạy (Task 3.2 bước 1).
+- [x] **3.A1 Thú cưng / xét nghiệm** — `Pet` bỏ `weight` (và bỏ `weight` khỏi `CreatePetRequest`/`UpdatePetRequest`); `PetResponse.weight` giữ nhưng được **suy ra** = `weight_at_visit` của đợt khám gần nhất có cân (một truy vấn theo lô `findLatestWeights`). `LabTestResult` bỏ `evaluation`; `LabEvaluation.of(value, min, max)` tính khi hiển thị trong `VisitAssembler`.
+- [x] **3.A2 Lịch sử** — `PetVisitStatusHistory.changed_by_user_id` cho phép `null`; thêm `VisitTimeline` (một truy vấn lịch sử theo lô) suy ra `startedAt`/`closedAt`/`completedAt`/`cancelReason`: bắt đầu = lần vào `IN_PROGRESS` đầu tiên; chốt = lần `WAITING_PAYMENT` mới nhất (ca mở lại thì `null`); hoàn tất = lần `COMPLETED`; lý do hủy = `notes` dòng `CANCELLED`.
+- [x] **3.A3 `PetVisit`** — bỏ `assignedRoom`, `startedAt`, `closedAt`, `completedAt`, `cancelReason`, `scheduledAt`, `callbackPostponedAt`; thêm `queueOrder`, `skipCount`; `QueueOrders.of/now` (epoch micro giây) gán ở `createVisit`. **Số phòng** do `VisitEnricher` (Feign `auth`, theo lô, ngoài transaction) gắn ở controller. `findQueueByStatus`/`findDoctorVisits` sắp theo `(emergency AND skipCount = 0) DESC, queueOrder ASC`.
+  - **Đã xóa:** `QueueSchedule`+test, `QueueState`, `DoctorStatus.AVAILABLE_PRIORITY_CALLBACK`, `ErrorCode.DOCTOR_PRIORITY_LOCKED`, `callBack()`/`postponeCallback()` + endpoint `call-back`/`postpone-callback`, `completeAfterPayment()`, `PaymentCompletedListener`+`ClinicalRabbitConfig`, truy vấn `...CallbackPostponedAt...`. **Xóa thêm so với kế hoạch ban đầu:** `postpone`/`recall` của phòng Lab/CĐHA (phụ thuộc `QueueState`, không thể giữ).
+  - **Hàm hiển thị mới:** `VisitEnricher` (số phòng), `VisitTimeline` (mốc thời gian). `VisitResponse` đổi hình dạng: bỏ `callbackPostponed`, `scheduledAt`; thêm `skipCount`, `queueOrder`.
+- [x] **3.A4 `VisitServiceDetail`** — bỏ `unitPrice`, `subtotal`; thêm `queueOrder` (= lúc chỉ định, gán ở `createDetail`), `skipCount`. `ClinicService` thêm `vatRate` (có trong `ServiceResponse`, `CreateServiceRequest`, `UpdateServiceRequest`; mặc định 0.00; đổi chỉ áp cho chỉ định mới).
+- [x] **3.A5 `ServiceInvoice`** — entity + `ServiceInvoiceRepository` + enum `PaymentStatus`; `@Version`; mã `SINV-YYYY-XXXX` sinh từ id. **Tạo chỉ định ⇒ tạo hóa đơn `PENDING` trong cùng giao dịch** (`VisitSupport.createInvoice`, snapshot `unit_price`/`vat_rate`). `ServiceDetailResponse` đọc giá/VAT từ hóa đơn và thêm `vatRate`, `invoiceId`, `invoiceCode`, `paymentStatus`. **Làm thêm cho giữ bất biến (BR-33):** hủy dịch vụ (cả `cancel` đợt khám lẫn `cancel` của KTV/Bác sĩ) ⇒ `VisitSupport.cancelInvoiceOf` hủy hóa đơn cùng giao dịch; hóa đơn `PAID` ⇒ `CLIN_1310`.
+- [x] **3.A6** `billableServices` tạm trả giá từ hóa đơn snapshot (fallback `services.price`); sẽ xóa ở 3.B13.
+- **Kết quả đo Khối A (12/11):** `mvn clean test` clinical **117 test** (106 trước Khối A − 15 test của tính năng đã xóa/thay thế + 26 test mới), toàn repo **316 test, 0 lỗi** (auth 28, appointment 68, clinical 117, billing 68, notification 35). **Chạy thật** clinical-service (jar) + auth-service thật trên MySQL schema v3.0: khởi động `ddl-auto: validate` đạt; check-in vãng lai `201` (`queueOrder` = epoch micro, `skipCount` 0); check-in lần 2 `409 CLIN_1306`; phân công ⇒ `assignedRoom` P101 qua `VisitEnricher`; bắt đầu khám ⇒ dòng khám + hóa đơn `SINV-2026-0001` 100.000 `PENDING`; chỉ định CBC + siêu âm + tiêm ⇒ mỗi dịch vụ 1 hóa đơn (`0002`–`0004`); xét nghiệm đánh giá `HIGH/NORMAL/NORMAL/LOW` **tính khi hiển thị** (DB không có cột); Bác sĩ hủy siêu âm ⇒ hóa đơn `0003` `CANCELLED`, ca `RESULTS_READY`; `GET /pets/1` ⇒ `weight` 4.6 suy ra; các endpoint `call-back`/`postpone-callback`/`postpone`/`recall` ⇒ 404; hủy ca ở sảnh ⇒ `cancelReason` suy ra từ lịch sử. Không có ERROR trong log; dữ liệu thử đã xóa (thú cưng seed giữ nguyên).
+
+> **Ghi chú điều chỉnh sau Khối A (12/11) — đọc trước khi làm Khối B:**
+> - **3.B2:** `DoctorStatusServiceImpl.statusOf` hiện vẫn tính BUSY khi có ca `WAITING` đã gán (điều kiện v2, ghi chú tại `DoctorStatusService`) và `assignDoctor` vẫn từ chối bác sĩ BUSY. Bước này phải đổi: BUSY chỉ khi có ca `IN_PROGRESS`, `assign-doctor` KHÔNG kiểm tra bác sĩ rảnh.
+> - **3.B3 / 3.B10:** hiện KHÔNG còn đường nào để vào Giai đoạn 2 (`call-back` đã xóa); `RESULTS_READY → IN_PROGRESS` chỉ quay lại khi có `start-phase2` (3.B10) sau `call-next` (3.B3). Giữa hai bước này luồng chuẩn dừng ở `RESULTS_READY`.
+> - **3.B6:** `postpone`/`recall` và `QueueState` đã bị xóa ở 3.A3; bước này chỉ còn **thêm** `call-next`, `skip` (`SKIPPED`), `sample-collected`, huy hiệu `labStatus`. `VisitServiceDetailRepository.findQueue` đã sắp đúng `(cấp cứu chưa lùi) DESC, queue_order`.
+> - **3.B8:** phần lõi đã làm ở 3.A5 (`cancelInvoiceOf`, `CLIN_1310`); bước này còn lại: API hủy dịch vụ tại phòng và test EX-08 qua API.
+> - **3.B9 / 3.B10:** `VisitSupport.evaluateParaclinicalCompletion` vẫn phát `DoctorPriorityCallbackEvent` và `closeVisit`/`abandon` vẫn phát `VisitClosedToPaymentEvent` + `reopen` vẫn gọi `BillingClient` (cả ba là v2, billing v2 chưa chạy được trên schema mới cho tới Phase 4). Đổi sang `ParaclinicalResultsReadyEvent` (kèm Q5: `queue_order = MIN − 1`) và bỏ gọi billing ở các bước này.
+> - **3.B6–3.B8 (đã làm):** `POST /lab-queue/call-next`, `/imaging-queue/call-next`, `POST /service-details/{id}/skip` (Q4, `action=SKIPPED`, chỉ định giữ `PENDING`), `POST /service-details/{id}/sample-collected` (action `SAMPLE_COLLECTED`, trạng thái vẫn `IN_PROGRESS`). `QueueItemResponse` đổi `otherRoomStatus` → `stage` (chỉ Lab: `QUEUED/SAMPLING/ANALYZING`, suy ra từ action mới nhất) + `labStatus` (chỉ hàng đợi CĐHA: `SAMPLING/SAMPLE_COLLECTED`). Kết quả: `POST/GET /lab-results/{detailId}` (body `{results:[{labTestItemId, resultValue}]}`, vẫn nhận `items`/`value`; gói đã cấu hình phải đủ chỉ số, thiếu → `SYS_1001`) và `POST /imaging-results/{detailId}` (multipart). **Đường dẫn cũ `/service-details/{id}/lab-results` và `/imaging-result` còn giữ làm bí danh** tới khi FE đổi (Phase 6/7.1 xóa). 3.B8 (hủy CLS kèm hóa đơn, `CLIN_1310`) đã xong từ Khối A.
+> - **3.B9–3.B11 (đã làm):** T06 do hệ thống tự chuyển (`changed_by_user_id = NULL`) + Q5 (`queue_order = MIN(hàng đợi bác sĩ, không tính ca này) − 1`, `skip_count = 0`; hàng đợi trống thì giữ nguyên); phát `ParaclinicalResultsReadyEvent` **và vẫn phát `DoctorPriorityCallbackEvent` song song** tới khi notification đổi listener (Phase 5, xóa ở 7.1). `start-phase2` (T07). `close-visit` (T05/T09) không còn gọi billing/phát event; thêm kiểm `CLIN_1308`/`CLIN_1309` và hoàn tất dịch vụ khám. `abandon` (T08 từ `RESULTS_READY`, T12 từ `WAITING_RESULTS`): hủy CLS `PENDING` kèm hóa đơn, `CLIN_1304` nếu còn CLS `IN_PROGRESS`, phát `VisitCompletedEvent(abandoned=true)`. `cancel-exam` (T11, Bác sĩ, chỉ GĐ 1, chưa có dịch vụ tại phòng `COMPLETED`). `cancel` (T03) chỉ còn Lễ tân + `WAITING`. `reopen` (T14) Bác sĩ phụ trách **hoặc ADMIN**, bỏ `BillingClient`/`DoctorStatusService`/khóa tên khỏi `VisitServiceImpl`. `VisitStatus`: thêm `WAITING_RESULTS→COMPLETED`, **bỏ** `WAITING_RESULTS→CANCELLED`. **FE v2 đang gọi `/cancel` cho ca đang khám và `/reopen` kiểu ADMIN sẽ phải đổi sang `/cancel-exam` (Phase 6).**
+> - **3.B12–3.B14 (đã làm):** `ServiceInvoiceController`: `GET /pet-visits/{id}/service-invoices` (bảng kê + `totalPending`/`totalPaid`), `POST /service-invoices/{id}/discount` (trần = `qty × unit × (1+vat)` của chính hóa đơn, `BILL_1402`), `POST /pet-visits/{id}/service-invoices/confirm-payment {invoiceIds}` (kiểm hết rồi mới ghi; hết `PENDING` + ca `WAITING_PAYMENT` ⇒ `COMPLETED` cùng giao dịch + `VisitCompletedEvent`), `GET /pet-visits/with-debt`. Tiền tính bằng `InvoiceAmounts` (cùng công thức VIEW, `HALF_UP` từng hóa đơn). `GET /internal/pet-visits/{id}/summary` thêm mới; `/internal/clinical/visits/{id}` giữ tạm cho billing v2 (xóa ở 7.1); **đã xóa** `billable-services` + `BillableServiceResponse` + `BillingClient.cancelInvoiceForReopen`. `GET /reports/revenue` (ADMIN): doanh thu dịch vụ `PAID` theo `paid_at` nhóm `services.category` + công nợ hiện tại; **doanh thu thuốc ở billing (Phase 4), Admin FE cộng hai nguồn (§10 #5)**.
+> - **3.B1:** `CheckInRequest` vẫn dùng trường `emergency` và chưa có `doctorId`; `VisitCheckedInEvent` chưa có `doctorId`.
+> - **FE (Phase 6) bị ảnh hưởng bởi hình dạng response mới:** `VisitResponse` (bỏ `callbackPostponed`, `scheduledAt`; thêm `skipCount`, `queueOrder`), `QueueItemResponse` (`queueState` → `skipCount`), `ServiceDetailResponse` (thêm `vatRate`, `invoiceId`, `invoiceCode`, `paymentStatus`), `ServiceResponse`/request dịch vụ (thêm `vatRate`), request thú cưng (bỏ `weight`, response vẫn có `weight` suy ra).
 
 ### Khối B — từng nghiệp vụ (mỗi bước có `curl` ở Lộ trình)
 
 | Bước | Nghiệp vụ | Việc chính | Kiểm thử |
 |---|---|---|---|
-| [ ] **3.B1** | Check-in + hai danh sách | `CheckInRequest` thêm `doctorId?`; chặn `CLIN_1306`; `GET /pet-visits/queue` (chờ phân công + hàng đợi từng bác sĩ + `waitingCount` + `suggestedDoctorId`), `GET /my-queue` | Task 3.2 |
-| [ ] **3.B2** | Phân công | đổi `/assign` → `/assign-doctor` (không kiểm tra bác sĩ rảnh, giữ `queue_order`, kiểm `version`), thêm `/unassign-doctor`; `doctors/status` chỉ `BUSY`/`AVAILABLE` | Task 3.3.1–3.3.2b |
-| [ ] **3.B3** | Gọi số + Đẩy lùi (phòng khám) | `POST /call-next` (`CLIN_1302`/`CLIN_1303`, `PatientCalledEvent`), `POST /{id}/skip` — công thức Q4 (3 trường hợp), dùng `@Version` | Task 3.3.2c–d; test đủ 3 trường hợp công thức |
-| [ ] **3.B4** | Bắt đầu khám (T02) | kiểm tra đúng bác sĩ được gán (`CLIN_1311`), không có ca `IN_PROGRESS`; tự tạo dịch vụ `EXAM_GEN` + hóa đơn; `PUT /{id}/clinical-info` | Task 3.3.3–3.3.4 |
-| [ ] **3.B5** | Chỉ định CLS (T04) + dịch vụ tại phòng | `paraclinical-orders`: kiểm `weight/temperature` (`CLIN_1308`), dịch vụ tại phòng xong (`CLIN_1309`); `in-room-services`; `service-details/{id}/perform`; ca → `WAITING_RESULTS` | Task 3.4 |
-| [ ] **3.B6** | Hàng đợi Lab/CĐHA | `lab-queue`/`imaging-queue` sắp theo `queue_order`; `call-next`, `service-details/{id}/skip` (`action=SKIPPED`), `start`, `sample-collected`, huy hiệu liên phòng `labStatus`; **xóa** `postpone`/`recall`/tab hoãn | Task 3.5, 3.6 |
-| [ ] **3.B7** | Kết quả CLS | Lab: bắt buộc đủ chỉ số của gói (`service_lab_test_items`); CĐHA multipart giữ nguyên | Task 3.5, 3.6 |
-| [ ] **3.B8** | Hủy dịch vụ CLS (EX-08) | hủy dịch vụ ⇒ hóa đơn `CANCELLED` cùng giao dịch; `CLIN_1310` nếu hóa đơn đã `PAID` | Task 3.5/EX-08 |
-| [ ] **3.B9** | `WAITING_RESULTS → RESULTS_READY` (T06, Q5) | **khóa dòng `pet_visits` trước rồi mới đếm** (bài học đua); đặt `queue_order = MIN − 1`, `skip_count = 0`, history `changed_by = NULL`; phát `ParaclinicalResultsReadyEvent` | Task 3.7 |
-| [ ] **3.B10** | GĐ 2 + chốt ca | `start-phase2` (T07); `close-visit` (T05/T09): chỉ validate, ghi lịch sử, **bỏ** gọi billing và `VisitClosedToPaymentEvent` | Task 3.8 |
-| [ ] **3.B11** | Thoát ca | `abandon` (T08/T12: hủy CLS `PENDING` kèm hóa đơn, giữ công nợ), `cancel-exam` (T11, guard chưa có dịch vụ tại phòng `COMPLETED`), `cancel` (T03), `reopen` (T14: bác sĩ **hoặc ADMIN**, bỏ Feign hủy hóa đơn billing) | Task 3.8, EX-03/11 |
-| [ ] **3.B12** | Thu tiền dịch vụ (T10) | `GET /{id}/service-invoices`, `POST /service-invoices/{id}/discount` (`BILL_1402`), `POST /{id}/service-invoices/confirm-payment {invoiceIds}`: `PAID` + nếu hết `PENDING` thì `COMPLETED` **cùng giao dịch**; `GET /with-debt`; phát `VisitCompletedEvent` | Task 3.9, EX-14/16 |
-| [ ] **3.B13** | API nội bộ | thêm `/internal/pet-visits/{id}/summary`; **xóa** `/visits/{id}/billable-services`; thu gọn `BillingClient` | Task 4.2 |
-| [ ] **3.B14** | Báo cáo | doanh thu dịch vụ (nhóm theo `services.category`) + công nợ từ `service_invoices`; vận hành giữ | FR-69/70 |
+| [x] **3.B1** | Check-in + hai danh sách | `CheckInRequest` thêm `doctorId?`; chặn `CLIN_1306`; `GET /pet-visits/queue` (chờ phân công + hàng đợi từng bác sĩ + `waitingCount` + `suggestedDoctorId`), `GET /my-queue` | Task 3.2 |
+| [x] **3.B2** | Phân công | đổi `/assign` → `/assign-doctor` (không kiểm tra bác sĩ rảnh, giữ `queue_order`, kiểm `version`), thêm `/unassign-doctor`; `doctors/status` chỉ `BUSY`/`AVAILABLE` | Task 3.3.1–3.3.2b |
+| [x] **3.B3** | Gọi số + Đẩy lùi (phòng khám) | `POST /call-next` (`CLIN_1302`/`CLIN_1303`, `PatientCalledEvent`), `POST /{id}/skip` — công thức Q4 (3 trường hợp), dùng `@Version` | Task 3.3.2c–d; test đủ 3 trường hợp công thức |
+| [x] **3.B4** | Bắt đầu khám (T02) | kiểm tra đúng bác sĩ được gán (`CLIN_1311`), không có ca `IN_PROGRESS`; tự tạo dịch vụ `EXAM_GEN` + hóa đơn; `PUT /{id}/clinical-info` | Task 3.3.3–3.3.4 |
+| [x] **3.B5** | Chỉ định CLS (T04) + dịch vụ tại phòng | `paraclinical-orders`: kiểm `weight/temperature` (`CLIN_1308`), dịch vụ tại phòng xong (`CLIN_1309`); `in-room-services`; `service-details/{id}/perform`; ca → `WAITING_RESULTS` | Task 3.4 |
+| [x] **3.B6** | Hàng đợi Lab/CĐHA | `lab-queue`/`imaging-queue` sắp theo `queue_order`; `call-next`, `service-details/{id}/skip` (`action=SKIPPED`), `start`, `sample-collected`, huy hiệu liên phòng `labStatus`; **xóa** `postpone`/`recall`/tab hoãn | Task 3.5, 3.6 |
+| [x] **3.B7** | Kết quả CLS | Lab: bắt buộc đủ chỉ số của gói (`service_lab_test_items`); CĐHA multipart giữ nguyên | Task 3.5, 3.6 |
+| [x] **3.B8** | Hủy dịch vụ CLS (EX-08) | hủy dịch vụ ⇒ hóa đơn `CANCELLED` cùng giao dịch; `CLIN_1310` nếu hóa đơn đã `PAID` | Task 3.5/EX-08 |
+| [x] **3.B9** | `WAITING_RESULTS → RESULTS_READY` (T06, Q5) | **khóa dòng `pet_visits` trước rồi mới đếm** (bài học đua); đặt `queue_order = MIN − 1`, `skip_count = 0`, history `changed_by = NULL`; phát `ParaclinicalResultsReadyEvent` | Task 3.7 |
+| [x] **3.B10** | GĐ 2 + chốt ca | `start-phase2` (T07); `close-visit` (T05/T09): chỉ validate, ghi lịch sử, **bỏ** gọi billing và `VisitClosedToPaymentEvent` | Task 3.8 |
+| [x] **3.B11** | Thoát ca | `abandon` (T08/T12: hủy CLS `PENDING` kèm hóa đơn, giữ công nợ), `cancel-exam` (T11, guard chưa có dịch vụ tại phòng `COMPLETED`), `cancel` (T03), `reopen` (T14: bác sĩ **hoặc ADMIN**, bỏ Feign hủy hóa đơn billing) | Task 3.8, EX-03/11 |
+| [x] **3.B12** | Thu tiền dịch vụ (T10) | `GET /{id}/service-invoices`, `POST /service-invoices/{id}/discount` (`BILL_1402`), `POST /{id}/service-invoices/confirm-payment {invoiceIds}`: `PAID` + nếu hết `PENDING` thì `COMPLETED` **cùng giao dịch**; `GET /with-debt`; phát `VisitCompletedEvent` | Task 3.9, EX-14/16 |
+| [x] **3.B13** | API nội bộ | thêm `/internal/pet-visits/{id}/summary`; **xóa** `/visits/{id}/billable-services`; thu gọn `BillingClient` | Task 4.2 |
+| [x] **3.B14** | Báo cáo | doanh thu dịch vụ (nhóm theo `services.category`) + công nợ từ `service_invoices`; vận hành giữ | FR-69/70 |
 
 ---
 
 ## PHASE 4 — `billing-pharmacy-service`
 
 ### Khối A — khớp schema
-- [ ] **4.A1** `Medicine` thêm `vatRate`. `Prescription` bỏ `status`, `dispensedBy/At`. `PrescriptionItem` bỏ `unitPrice`, `subtotal`. `InventoryTransaction` bỏ `balanceAfter`, `referenceId`, thêm `medicineInvoiceId`; `InventoryTransactionType`: `EXPORT_PRESCRIPTION → EXPORT_SALE`; `quantity` có dấu.
-- [ ] **4.A2** Xóa `Invoice`, `InvoiceItem`, `InvoiceItemType`, `PrescriptionStatus`, `InvoiceCalculator`, `InvoiceServiceImpl`, `InvoiceController`, `VisitClosedListener`, `prescriptions/{id}/dispense`, `removeFromInvoice`, `cancelForReopen`. Thêm entity `MedicineInvoice` (`@Version`) + `MedicineInvoiceItem` + repository.
+- [x] **4.A1** `Medicine` thêm `vatRate`. `Prescription` bỏ `status`, `dispensedBy/At`. `PrescriptionItem` bỏ `unitPrice`, `subtotal`. `InventoryTransaction` bỏ `balanceAfter`, `referenceId`, thêm `medicineInvoiceId`; `InventoryTransactionType`: `EXPORT_PRESCRIPTION → EXPORT_SALE`; `quantity` có dấu.
+- [x] **4.A2** Xóa `Invoice`, `InvoiceItem`, `InvoiceItemType`, `PrescriptionStatus`, `InvoiceCalculator`, `InvoiceServiceImpl`, `InvoiceController`, `VisitClosedListener`, `prescriptions/{id}/dispense`, `removeFromInvoice`, `cancelForReopen`. Thêm entity `MedicineInvoice` (`@Version`) + `MedicineInvoiceItem` + repository.
 - **Xong khi:** service khởi động trên schema mới; test cũ của phần đã xóa bị loại.
 
 ### Khối B
 | Bước | Nghiệp vụ | Việc chính | Kiểm thử |
 |---|---|---|---|
-| [ ] **4.B1** | Thuốc + kho | CRUD thêm `vat_rate`; `import`/`adjust` ghi `quantity` có dấu, giữ bất biến `stock = SUM(quantity)` | Task 4.1 |
-| [ ] **4.B2** | Đơn thuốc | không giá/không trạng thái; trả `stockWarnings` thay vì chặn (EX-13); khóa theo `/internal/pet-visits/{id}/summary` (`PHARM_1411`); `print` | Task 4.2 |
-| [ ] **4.B3** | Lập hóa đơn thuốc | `POST /prescriptions/{id}/medicine-invoices`: chỉ khi ca `WAITING_PAYMENT`/`COMPLETED`; `PHARM_1407`, `PHARM_1410`; snapshot giá/VAT; mã `MINV-` | Task 4.3 |
-| [ ] **4.B4** | Sửa/hủy | `PUT /medicine-invoices/{id}/items` (`quantity = 0` bỏ dòng, còn ≥ 1 dòng); `POST …/cancel` (hủy là kết thúc) | Task 4.3.4 |
-| [ ] **4.B5** | Thu tiền + trừ kho | **một `@Transactional`**: sắp theo `medicineId` → `UPDATE … WHERE stock >= :qty` → `inventory_transactions EXPORT_SALE` → `PAID`; thiếu kho ⇒ rollback toàn bộ (`PHARM_1406`); phát `MedicineInvoicePaidEvent` + `MedicineLowStockEvent`. **Giữ lại logic trừ kho hiện có**, chỉ đổi nguồn dữ liệu | Task 4.4, EX-15/16 |
-| [ ] **4.B6** | Báo cáo | doanh thu thuốc từ `medicine_invoices` `PAID` (tái dùng `RevenuePeriods`) | FR-69 |
+| [x] **4.B1** | Thuốc + kho | CRUD thêm `vat_rate`; `import`/`adjust` ghi `quantity` có dấu, giữ bất biến `stock = SUM(quantity)` | Task 4.1 |
+| [x] **4.B2** | Đơn thuốc | không giá/không trạng thái; trả `stockWarnings` thay vì chặn (EX-13); khóa theo `/internal/pet-visits/{id}/summary` (`PHARM_1411`); `print` | Task 4.2 |
+| [x] **4.B3** | Lập hóa đơn thuốc | `POST /prescriptions/{id}/medicine-invoices`: chỉ khi ca `WAITING_PAYMENT`/`COMPLETED`; `PHARM_1407`, `PHARM_1410`; snapshot giá/VAT; mã `MINV-` | Task 4.3 |
+| [x] **4.B4** | Sửa/hủy | `PUT /medicine-invoices/{id}/items` (`quantity = 0` bỏ dòng, còn ≥ 1 dòng); `POST …/cancel` (hủy là kết thúc) | Task 4.3.4 |
+| [x] **4.B5** | Thu tiền + trừ kho | **một `@Transactional`**: sắp theo `medicineId` → `UPDATE … WHERE stock >= :qty` → `inventory_transactions EXPORT_SALE` → `PAID`; thiếu kho ⇒ rollback toàn bộ (`PHARM_1406`); phát `MedicineInvoicePaidEvent` + `MedicineLowStockEvent`. **Giữ lại logic trừ kho hiện có**, chỉ đổi nguồn dữ liệu | Task 4.4, EX-15/16 |
+| [x] **4.B6** | Báo cáo | doanh thu thuốc từ `medicine_invoices` `PAID` (tái dùng `RevenuePeriods`) | FR-69 |
+
+
+> **Ghi chú điều chỉnh sau Phase 4 (12/11/2026):**
+> - **Bỏ so với v2 (đã xóa khỏi code):** `Invoice`/`InvoiceItem`, `InvoiceCalculator`, `VisitClosedListener` (và `BillingRabbitConfig`: billing không còn consumer nào), `prescriptions/{id}/dispense`, hủy đơn thuốc (`/prescriptions/{id}/cancel`), danh sách "chờ phát", `cancel-for-reopen`, `vetclinic.billing.vat.*` (VAT là dữ liệu: `medicines.vat_rate`). Docs v3.0 không có API hủy đơn thuốc nên không giữ.
+> - **Đơn thuốc:** `PUT` ghép dòng theo thuốc và **sửa tại chỗ** (giữ id dòng) thay vì xóa-rồi-thêm, để hóa đơn đã hủy còn tham chiếu được (`fk_mii_pitem`); bỏ một thuốc mà hóa đơn (kể cả đã hủy) còn tham chiếu → `PHARM_1411`. Đơn bị khóa khi ca không còn `IN_PROGRESS` **hoặc** đã có hóa đơn thuốc `PENDING`/`PAID`; hóa đơn `CANCELLED` không khóa (dùng với "Mở lại hồ sơ" T14).
+> - **Hóa đơn thuốc:** lập khi ca `WAITING_PAYMENT`/`COMPLETED` (sai → `BILL_1409`); `PUT …/items` chỉ sửa dòng **đã có** trong hóa đơn (dòng lạ → `SYS_1001`), `quantity = 0` bỏ dòng, luôn kiểm tra lại giảm giá; sửa/hủy/thu đều khóa dòng (`SELECT … FOR UPDATE`) + `@Version`. Thu tiền: `UPDATE … WHERE stock >= :qty` (đã thêm `version = version + 1` theo docs 4.4.2), sắp theo `medicineId`.
+> - **Kho:** `POST /pharmacy/inventory/import` và `/adjust` (ADMIN, body có `medicineId`) thay `/medicines/{id}/import|adjust` (đã xóa); `inventory_transactions.quantity` có dấu, `EXPORT_SALE` có `medicine_invoice_id`; `InventoryTransactionResponse` không còn `balanceAfter`/`referenceId`.
+> - **Báo cáo:** `GET /billing/reports/revenue` chỉ còn phần **thuốc** (`totals`, `periods`, `byStatus` = số hóa đơn theo trạng thái); phần dịch vụ + công nợ ở `clinical /reports/revenue` — Admin FE cộng hai nguồn (CLAUDE.md §10 #5).
+> - **Feign billing→clinical** đổi sang `/internal/pet-visits/{id}/summary` + **mới** `/internal/pet-visits/summaries?ids=` (theo lô, thêm vào `InternalVisitController` của clinical). Đã xóa `/internal/clinical/visits?ids=` (chỉ billing dùng). **Còn giữ** `/internal/clinical/visits/{id}` vì notification-service v2 vẫn gọi (xóa ở 7.1 sau Phase 5).
+> - **clinical:** `PrescriptionSummary` (bệnh án) bỏ `status/totalAmount/dispensedAt`; đơn thuốc xem được cả khi khách mua ngoài.
+> - **Phát event:** `MedicineInvoicePaidEvent`, `MedicineLowStockEvent` đã phát sau commit (RabbitMQ); notification-service chưa nghe (Phase 5.3). Event/routing key v2 của billing không còn ai phát.
+> - **FE (Phase 6) bị ảnh hưởng:** `PrescriptionResponse` (không `status/unitPrice/subtotal/totalAmount/dispensedAt`, thêm `stockWarnings`, `medicineInvoiceId/Status`), `MedicineResponse.vatRate`, endpoint kho mới, toàn bộ API hóa đơn gộp `/billing/invoices` biến mất → màn hình "bán thuốc theo đơn" mới.
 
 ---
 
 ## PHASE 5 — `notification-service` (làm rải, mỗi lần một event)
 
-- [ ] **5.1** Thêm listener cho `appointment.booked` → (xóa `appointment.created` ở 7.1).
-- [ ] **5.2** `appointment.no_show`, `visit.patient_called` (gọi số: phòng + STT; báo bị đẩy lùi), `visit.results_ready`.
-- [ ] **5.3** `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`.
-- [ ] **5.4** `POST /notifications/{id}/read`; **bỏ** `POST /notifications/send-email`.
-- [ ] **5.5** Cập nhật `NotificationType`; chưa làm `/topic/lobby` (CLAUDE.md §10 #6).
+- [x] **5.1** Thêm listener cho `appointment.booked` → (xóa `appointment.created` ở 7.1). *(appointment-service đang phát song song `appointment.created` + `appointment.booked` từ 12/11; sau khi listener mới chạy, KHÔNG cần sửa gì thêm ở appointment — chỉ xóa event cũ ở 7.1.)*
+- [x] **5.2** `appointment.no_show`, `visit.patient_called` (gọi số: phòng + STT; báo bị đẩy lùi), `visit.results_ready`. **BẮT BUỘC kèm theo:** khi listener `appointment.no_show` đã chạy, vào `AppointmentServiceImpl.transition()` (appointment-service) **bỏ việc phát `AppointmentStatusChangedEvent` cho `NO_SHOW`** (hiện phát song song với `AppointmentNoShowEvent`, comment ghi rõ tại chỗ) — nếu không chủ nuôi nhận hai thông báo; đồng thời bỏ nhánh `NO_SHOW` trong listener `status_changed` của notification.
+- [x] **5.3** `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`.
+- [x] **5.4** `POST /notifications/{id}/read`; **bỏ** `POST /notifications/send-email`.
+- [x] **5.5** Cập nhật `NotificationType`; chưa làm `/topic/lobby` (CLAUDE.md §10 #6).
+
+
+> **Ghi chú điều chỉnh sau Phase 5 (12/11/2026):**
+> - **9 queue** `notification-service.<routing-key>` (+ DLQ): `appointment.booked`, `appointment.status_changed`, `appointment.no_show`, `visit.checked_in`, `visit.patient_called`, `visit.results_ready`, `visit.completed`, `pharmacy.medicine_invoice_paid`, `pharmacy.low_stock`. Đã bỏ 5 queue v2 (`appointment.created`, `doctor.priority_callback`, `visit.closed_to_payment`, `payment.completed`, `stock.low_alert`).
+> - **Ngừng phát event trùng/cũ ở nơi phát:** appointment-service không còn phát `AppointmentCreatedEvent`, và chuyển sang `NO_SHOW` chỉ phát `AppointmentNoShowEvent` (không còn `status_changed` cho NO_SHOW, đúng yêu cầu BẮT BUỘC của 5.2); clinical-service không còn phát `DoctorPriorityCallbackEvent`. Các **class** event/routing key v2 vẫn còn trong `common-library`, xóa ở 7.1 (không còn ai phát hay nghe).
+> - **Feign notification→clinical** đổi sang `/internal/pet-visits/{id}/summary`; đã xóa `/internal/clinical/visits/{id}` của clinical (không còn consumer).
+> - **Nội dung thông báo:** `visit.patient_called` → chủ nuôi nhận "Mời vào <phòng> (phòng <số>)" kèm mã ca làm số thứ tự, hoặc "lùi một lượt" khi `PUSHED_BACK`; bác sĩ / KTV Lab / KTV CĐHA của đúng hàng đợi nhận bản làm mới. `visit.results_ready` → bác sĩ của ca (user) + chủ nuôi. `visit.checked_in` → thêm thông báo riêng cho bác sĩ được xếp ngay lúc tiếp nhận. `visit.completed` → chủ nuôi + lễ tân; **khách bỏ về (`abandoned`) thì lễ tân nhận cảnh báo công nợ, chủ nuôi không nhận email phiếu thu**. `medicine_invoice_paid` → chủ nuôi (push + email có số tiền). `low_stock` → Admin. Không còn thông báo "Có ca chờ thanh toán" cho lễ tân (v3.0 không có event khi bác sĩ chốt ca).
+> - **API:** `GET /notifications` trả thêm trường `read`; `POST /notifications/{id}/read` (idempotent, trạng thái đọc riêng từng người, id không thuộc người đó → 404 `SYS_1006`); **đã xóa** `POST /notifications/send-email` và `SendEmailRequest`. Lịch sử vẫn trong bộ nhớ (mất khi khởi động lại).
+> - **`NotificationType` đổi (FE Phase 6 bị ảnh hưởng):** `APPOINTMENT_CREATED→APPOINTMENT_BOOKED`; thêm `APPOINTMENT_NO_SHOW`, `PATIENT_CALLED`, `RESULTS_READY`, `MEDICINE_INVOICE_PAID`; bỏ `PRIORITY_CALLBACK`, `PAYMENT_PENDING`. FE đang dùng `APPOINTMENT_CREATED`, `PAYMENT_PENDING`, `PRIORITY_CALLBACK` ở `AppointmentsPage`, `DispensePage`, `InvoicesPage`, `QueuePage`, `TodayPage` (hook `useNotificationEvents`) và `notificationsApi.sendEmail` ở `api/endpoints.js`.
+> - **Chưa làm (CLAUDE.md §10 #6):** `/topic/lobby` và màn hình sảnh công cộng; vẫn dùng `/user/queue/notifications` + `/topic/role/<ROLE>`.
 
 ---
 
 ## PHASE 6 — Gateway + Frontend (Linh, song song)
 
-- [ ] **6.1** Gateway: thêm `GET /api/v1/appointments/slots` vào `vetclinic.gateway.public-paths`.
-- [ ] **6.2** FE theo thứ tự backend hoàn thành (không chờ hết): ① bảng mã lỗi (`lib/labels.js`) + `api/endpoints.js` → ② Lễ tân: hàng đợi/điều phối (sau 3.B1–2) → ③ Bác sĩ: hàng đợi riêng, Gọi số/Đẩy lùi (3.B3–4) → ④ chỉ định, dịch vụ tại phòng (3.B5) → ⑤ KTV Lab/CĐHA (3.B6–7) → ⑥ Thu ngân hóa đơn dịch vụ (3.B12) → ⑦ Bán thuốc (4.B3–5) → ⑧ báo cáo, kho.
+- [x] **6.1** Gateway: thêm `GET /api/v1/appointments/slots` vào `vetclinic.gateway.public-paths`. *(Phía appointment-service đã công khai từ 2.B4; còn thiếu Gateway thì Portal vẫn bị 401 khi gọi qua :8080.)*
+- [x] **6.2** FE theo thứ tự backend hoàn thành (không chờ hết): ① bảng mã lỗi (`lib/labels.js`) + `api/endpoints.js` → ② Lễ tân: hàng đợi/điều phối (sau 3.B1–2) → ③ Bác sĩ: hàng đợi riêng, Gọi số/Đẩy lùi (3.B3–4) → ④ chỉ định, dịch vụ tại phòng (3.B5) → ⑤ KTV Lab/CĐHA (3.B6–7) → ⑥ Thu ngân hóa đơn dịch vụ (3.B12) → ⑦ Bán thuốc (4.B3–5) → ⑧ báo cáo, kho.
+
+
+> **Ghi chú điều chỉnh sau Phase 6 (12/11/2026):**
+> - **6.1 Gateway:** `GET /api/v1/appointments/slots` đã vào `vetclinic.gateway.public-paths`; kiểm chứng: không token → 200, các API khác không token → 401. FE gọi `appointmentsApi.slots` với `auth: false`; trang chủ có mục "Khung giờ còn trống" công khai (`components/home/AvailabilitySection.js`). **Chưa làm** "bảng giá dịch vụ" công khai (cần mở `GET /clinical/services` không đăng nhập ở backend + Gateway; trang chủ vẫn dùng giá tham khảo tĩnh `homeData`).
+> - **① Nền:** `api/endpoints.js` theo API v3.0 (`assignDoctor`/`unassignDoctor`/`callNext`/`skip`/`startPhase2`/`cancelExam`/`inRoomServices`/`paraclinicalOrders`, thu từng phần hóa đơn dịch vụ, hóa đơn thuốc, kho `inventory/import|adjust`, `notificationsApi.markRead`; bỏ hẳn `postpone`/`recall`/`call-back`/`dispense`/`/billing/invoices`). `lib/labels.js`: bỏ `QUEUE_STATE`, `AVAILABLE_PRIORITY_CALLBACK`, `PRESCRIPTION_STATUS`, `INVOICE_ITEM_TYPE`; thêm `QUEUE_STAGE`, `LAB_BADGE`, `ERROR_HINTS` + `errorText()` (bảng mã lỗi Quy chuẩn §5.1 → câu hướng dẫn; `useAction` và `FormDialog` dùng chung).
+> - **② Lễ tân:** Bảng điều phối = danh sách chờ phân công + một hàng đợi riêng cho từng bác sĩ (gợi ý bác sĩ ít người chờ nhất, Phân công / Đổi / Gỡ luôn dùng được, hiển thị "đã bị lùi N lần", bỏ nhóm "đúng giờ hẹn", "Khách bỏ về" cho ca `RESULTS_READY`/`WAITING_RESULTS`). Tiếp nhận: chọn bác sĩ ngay (tùy chọn), gửi `isEmergency`. Thu ngân (`/reception/invoices`): danh sách ca chờ thanh toán + tab Công nợ; trang chi tiết `/reception/invoices/:visitId` = bảng kê hóa đơn dịch vụ (chọn thu một phần, giảm giá từng hóa đơn) + mục bán thuốc (`components/shared/MedicineSale.js`: lập hóa đơn thuốc một phần/toàn bộ, sửa số lượng khi thiếu kho, hủy, thu tiền + trừ kho, in đơn cho khách mua ngoài). `/reception/dispense` thành "Bán thuốc" (danh sách đơn + lối vào trang thu ngân của ca).
+> - **③④ Bác sĩ:** `/vet/today` = hàng đợi riêng + "Gọi số tiếp theo" + khung "đang gọi" (Bắt đầu khám / Bắt đầu giai đoạn 2 / Không thấy khách — Đẩy lùi 1 bậc); bỏ "Khóa ưu tiên", "Mời vào khám", "Tạm hoãn". Hồ sơ khám: tab Sinh hiệu (PUT `clinical-info`, sinh hiệu nhập sau được), Dịch vụ tại phòng (chỉ định → "Đã thực hiện"), Chỉ định cận lâm sàng, Đơn thuốc (không giá, hiện `stockWarnings`, không còn hủy đơn), Chốt ca; "Hủy ca / chuyển viện" (T11), "Mở lại hồ sơ" (T14) cho bác sĩ phụ trách, "Khách bỏ về" ở giai đoạn có kết quả.
+> - **⑤ KTV:** hàng đợi Lab/CĐHA có "Gọi số tiếp theo", "Đẩy lùi 1 bậc", "Đã lấy mẫu" (Lab), giai đoạn Lab (`stage`) và huy hiệu liên phòng ở CĐHA (`labStatus`); bỏ tab "Ca tạm hoãn". Form kết quả gửi `results[].resultValue` tới `POST /lab-results/{id}`, ảnh tới `POST /imaging-results/{id}`.
+> - **⑧ Admin:** Báo cáo doanh thu cộng hai nguồn (dịch vụ + công nợ từ clinical, thuốc từ billing); kho dùng endpoint mới, nhật ký kho số lượng có dấu + cột hóa đơn thuốc; thuốc có VAT (%) ; Tổng quan cộng doanh thu hai nguồn.
+> - **Thông báo:** `NotificationContext` dùng cờ `read` của backend + gọi `POST /notifications/{id}/read` khi mở chuông; kiểu thông báo mới (`APPOINTMENT_BOOKED`, `PATIENT_CALLED`, `RESULTS_READY`, `MEDICINE_INVOICE_PAID`…); toast có liên kết "Mở hàng đợi của tôi" cho bác sĩ.
+> - **Lỗi tìm ra khi chạy thật:** thông báo "Đã lập hóa đơn thuốc" biến mất vì component lập hóa đơn bị thay ngay bằng bản chỉnh sửa → chuyển thông báo lên component cha. Smoke cũ `e2e/fe_smoke.mjs` (v2) giữ nguyên tới Phase 7 (xóa/thay bằng `fe_smoke_v3.mjs`).
+> - **Còn lại cho Phase 7:** `fe/legacy-mock` và `features/*` (kho dữ liệu `localStorage` cũ, `useAdminInsights` không còn được dùng) cần rà xóa; trang quản trị `VisitsPage` vẫn dùng bộ lọc cũ (hoạt động); `README` của `e2e/` chưa nhắc smoke v3.
 
 ---
 
 ## PHASE 7 — Dọn dẹp và kiểm thử cuối
 
-- [ ] **7.1** Xóa event cũ khỏi `common-library` và listener cũ ở `notification` (`appointment.created`, `doctor.priority_callback`, `visit.closed_to_payment`, `payment.completed`, `stock.low_alert`).
-- [ ] **7.2** `mvn clean install` toàn bộ; `docker compose down -v && docker compose up -d --build` → mọi service `healthy`.
-- [ ] **7.3** Chạy luồng Task 5.4 (9 bước) trên trình duyệt; đối chiếu `v_service_invoice_amounts` = 530.000 và `v_medicine_invoice_amounts` = 157.500.
-- [ ] **7.4** Test các luồng dễ lỗi: EX-15, EX-16, đua `RESULTS_READY`, đặt lịch đồng thời, refresh token tái sử dụng, 3 trường hợp công thức Đẩy lùi, ca có kết quả đứng đầu, thu hóa đơn cuối ⇒ `COMPLETED`, công nợ.
-- [ ] **7.5** Viết lại `e2e/` ngắn gọn theo Task 5.4–5.5 (script cũ nhắm v2, bỏ).
-- [ ] **7.6** Cập nhật `CLAUDE.md` §9 (đánh dấu phần đã xong), §11.
+- [x] **7.1** Xóa event cũ khỏi `common-library` và listener cũ ở `notification` (`appointment.created`, `doctor.priority_callback`, `visit.closed_to_payment`, `payment.completed`, `stock.low_alert`).
+- [x] **7.2** `mvn clean install` toàn bộ; `docker compose down -v && docker compose up -d --build` → mọi service `healthy`.
+- [x] **7.3** Chạy luồng Task 5.4 (9 bước) trên trình duyệt; đối chiếu `v_service_invoice_amounts` = 530.000 và `v_medicine_invoice_amounts` = 157.500.
+- [x] **7.4** Test các luồng dễ lỗi: EX-15, EX-16, đua `RESULTS_READY`, đặt lịch đồng thời, refresh token tái sử dụng, 3 trường hợp công thức Đẩy lùi, ca có kết quả đứng đầu, thu hóa đơn cuối ⇒ `COMPLETED`, công nợ.
+- [x] **7.5** Viết lại `e2e/` ngắn gọn theo Task 5.4–5.5 (script cũ nhắm v2, bỏ).
+- [x] **7.6** Cập nhật `CLAUDE.md` §9 (đánh dấu phần đã xong), §11.
+
+
+> **Ghi chú kết quả Phase 7 (12/11/2026):**
+> - **7.1:** `common-library` đã xóa 5 event v2 (`AppointmentCreatedEvent`, `DoctorPriorityCallbackEvent`, `VisitClosedToPaymentEvent`, `PaymentAndDispenseCompletedEvent`, `LowStockEvent`), 5 routing key v2 và 4 mã lỗi v2 không còn dùng (`INVALID_PRESCRIPTION_STATUS`, `INVOICE_NOT_PAID`, `INVALID_INVOICE_STATUS`, `VISIT_NOT_READY_FOR_INVOICE`). Listener/queue v2 của notification đã bỏ từ Phase 5. Còn `PRESCRIPTION_ALREADY_EXISTS` (PHARM_1413) và `MEDICINE_CODE_ALREADY_EXISTS` (PHARM_1414), `INVALID_STOCK_ADJUSTMENT` (PHARM_1412): mã chỉ có trong code, giữ nguyên.
+> - **7.2:** `mvn -o clean install` toàn bộ **BUILD SUCCESS, 380 test**; `docker compose build` dựng 8 image; `docker compose down -v && up -d --wait` → api-gateway, appointment, auth, billing-pharmacy, clinical, frontend, notification, service-registry, mysql, rabbitmq, mailpit đều `healthy`. Lần đầu mất ~10 phút vì 4 JVM (auth/appointment/clinical/billing) tranh CPU lúc khởi động (mỗi JVM ~200% CPU, `mem_limit` 512m đủ dùng, không bị OOM).
+> - **7.3:** `e2e/backend_v3.mjs` chạy luồng chuẩn Task 5.4 và đối chiếu bằng truy vấn trực tiếp: `v_service_invoice_amounts` = **530.000**, `v_medicine_invoice_amounts` = **157.500**, Clavamox **200 → 190**, `SUM(inventory_transactions.quantity) = stock_quantity`, thu hóa đơn cuối → `COMPLETED` cùng giao dịch. Luồng giao diện: `e2e/fe_smoke_v3.mjs` (Chrome headless, cả khi giao diện chạy bằng nginx của compose) 69/69, 0 lỗi console/mạng.
+> - **7.4:** trong `backend_v3.mjs`: EX-15 (409 `PHARM_1406`, kho/nhật ký/trạng thái không đổi, sửa 10 → 5 rồi thu lại), EX-16 (409 `BILL_1403`; 5 yêu cầu song song → đúng 1 thành công, kho trừ một lần), đua `RESULTS_READY` (2 KTV hoàn tất cùng lúc, 3 vòng, không ca nào kẹt), Đẩy lùi 1 bậc (xếp giữa người kế tiếp và sau nữa; lùi tiếp; ca cuối giữ vị trí; `skip_count` tăng), công nợ (bỏ về → `COMPLETED`, thu bù sau), đặt lịch đồng thời (9 yêu cầu vào khung 6 chỗ → 6 thành công + 3 `APPT_1203`), refresh token dùng lại (401 và thu hồi token mới), `/internal/**` bị chặn ở Gateway, phân quyền. Trường hợp công thức Đẩy lùi "người kế tiếp là ca cấp cứu chưa bị lùi" được phủ bởi unit test (Phase 3), không dựng được ở e2e vì ca cấp cứu luôn đứng đầu hàng đợi.
+> - **7.5:** xóa `appointment.sh`, `clinical.sh`, `billing.sh`, `features.py`, `notification.py`, `fe_smoke.mjs`, `reset_data.sh` (nhắm v2). Còn `auth.sh` (auth không đổi) và 3 script mới + `run_all.sh`, `README.md` viết lại. Kiểm tra email trong `notification_v3.mjs` chỉ chạy khi Mailpit truy cập được (cổng 8025 chỉ mở ở `docker-compose.dev.yml`); email đã được kiểm chứng riêng ở Phase 5 (5 loại thư đến Mailpit).
+> - **7.6:** `CLAUDE.md` viết lại phần đầu (migration hoàn tất, số liệu kiểm chứng, việc còn mở), §9 đánh dấu đã đóng, §11 lệnh chạy cập nhật (RabbitMQ đăng nhập `vetclinic/vetclinic_dev`, không phải `guest`).
+> - **Seed demo:** `docs/seed_demo_data.sql` thêm 5 chủ nuôi (id 9–13) và 12 thú cưng (id 3–14); cố ý KHÔNG thêm lịch hẹn/đợt khám/hóa đơn/kho để các ID cố định trong Lộ trình (đợt khám #1, lịch hẹn #1, hóa đơn thuốc #1, Clavamox tồn 200) vẫn đúng. Kế hoạch ban đầu "~100 dòng" chỉ đạt ~30 dòng vì lý do đó.
+> - **Việc còn mở, không chặn demo:** bảng giá dịch vụ công khai và màn hình sảnh (`/topic/lobby`); Rate Limiting ở Gateway (CLAUDE.md §10 #14); sửa 3 file docs còn nội dung cũ + cột Tình trạng trong Bảng tổng hợp (§10 #15–#16, file của nhóm nên chưa tự sửa); xóa `fe/legacy-mock`; `update.md` ở gốc repo là báo cáo v2, lỗi thời; chưa chạy kiểm thử tải (NFR) và responsive FE (việc của Linh, Tuần 12).
+
+
+> **Kiểm tra toàn diện sau Phase 7 (12/11/2026, theo yêu cầu "kiểm tra tất cả các luồng"):** dựng lại stack Docker đầy đủ (`docker-compose.dev.yml` để có Mailpit/RabbitMQ UI) và chạy 5 bộ e2e: `backend_v3` 45/45, `notification_v3` 28/28, `fe_smoke_v3` 69/69, **mới** `features_v3` 162/162 (tài khoản, danh mục + đánh giá xét nghiệm, thú cưng, lịch hẹn đủ vòng đời, quản lý đợt khám T03/T05/T11/T12/T14, báo cáo, thuốc/kho, **WebSocket/STOMP thật**) và **mới** `fe_pages_v3` 48/48 (quét mọi trang theo 6 vai trò + thao tác CRUD). Phát hiện và **đã sửa 3 lỗi thật**:
+> 1. **Hộp thoại tạo khách hàng (lễ tân) tự đóng ngay sau khi tạo** nên mật khẩu tạm không bao giờ hiện: `FormDialog` tự gọi `onClose` sau `onSubmit`, làm mất màn hình "Đã tạo tài khoản khách hàng" (`CustomerFormDialog.js`: giữ hộp thoại bằng cờ `keepOpen`). Lỗi có từ v2 vì smoke cũ không đi qua đường này.
+> 2. **Trang Dịch vụ của Admin thiếu ô VAT** dù backend có `services.vat_rate` (Phase 6 bỏ sót): thêm ô "VAT (%)" khi thêm / sửa và hiện VAT trong bảng.
+> 3. **Hủy dịch vụ đã làm xong và đã thu tiền** trả mã chung chung `CLIN_1322` thay vì `CLIN_1310` như docs: `ParaclinicServiceImpl.cancel` kiểm tra hóa đơn đã thu trước khi kiểm tra trạng thái (+1 unit test, clinical 184).
+> **Gộp ca Lab/CĐHA (12/11/2026, theo góp ý khi dùng thử):** trước đây mỗi dịch vụ CLS là một dòng hàng đợi riêng nên ca có 2 dịch vụ CĐHA phải gọi / đẩy lùi hai lượt. Nay các chỉ định `PENDING` của cùng đợt khám trong cùng phòng là **một ca** (backend `ParaclinicServiceImpl.skip` đẩy lùi cả nhóm, một thông báo; `fe/.../QueuePage.js` hiển thị một dòng/ca, "Bắt đầu" bắt đầu mọi dịch vụ của ca, nhập kết quả/hủy vẫn theo từng dịch vụ). **Khác docs** (State Machine/Use case mô tả hàng đợi theo dòng dịch vụ) — cần báo nhóm và sửa mô tả BR-34 nếu đồng ý. +1 unit test (clinical 185), +3 kiểm tra e2e (`features_v3` 165). Lưu ý: ca vẫn ở `Chờ kết quả CLS` cho tới khi **mọi** dịch vụ CLS (cả Lab lẫn CĐHA) xong — đúng T06.
+> **Thứ tự màn hình khám của bác sĩ (12/11/2026, theo góp ý khi dùng thử):** các tab nay theo đúng trình tự nghiệp vụ *Sinh hiệu → Dịch vụ & cận lâm sàng → **Kết luận** (chẩn đoán, phác đồ, lời dặn) → **Đơn thuốc** → **Chốt ca** (xem lại rồi chốt)*; trước đây Đơn thuốc đứng trước và chẩn đoán nằm chung tab Chốt ca. Không đổi backend: kết luận là bản nháp ở trình duyệt (giữ khi đổi tab / tải lại) và chỉ được gửi cùng `close-visit`. `fe_smoke_v3` đã sửa theo thứ tự mới (chưa chạy lại — cần CSDL seed sạch).
+> **"Gọi" theo từng dòng thay "Đẩy lùi 1 bậc" (13/11/2026, theo góp ý khi dùng thử):** công thức Q4 gây vòng lặp khi nhiều ca đầu hàng vắng (xem CLAUDE.md §4.2) và làm ca cấp cứu mất cảnh báo. Thêm `POST /pet-visits/{id}/call` và `POST /service-details/{id}/call` (chỉ thông báo, không đổi thứ tự/trạng thái; +3 unit test); giao diện bác sĩ / Lab / CĐHA hiện nút **Gọi** + **Bắt đầu** trên từng dòng (bỏ nút Đẩy lùi); **sau đó xóa hẳn** API `skip`, cột `skip_count` (2 bảng), hành động `SKIPPED`/`PUSHED_BACK`, `QueueOrders.afterPushBack`, trường `skipCount` của DTO và `PatientCalledEvent` (CSDL đang chạy: `ALTER TABLE ... DROP COLUMN`; unit test còn 368 = 28+68+172+56+44). `backend_v3`, `fe_smoke_v3`, `features_v3`, `notification_v3` đã sửa theo (chưa chạy lại toàn bộ — cần CSDL seed sạch). **Docs đã được cập nhật theo (13/11/2026, 12 file `docs/*.md` + chú thích `schema_init.sql`)**; bản `.docx` của ERD chưa sửa.
+> Các kịch bản phụ còn lại **chỉ có unit test, chưa chạy thật**: tự hủy lịch `PENDING` quá hạn và quét `NO_SHOW` bằng cron (chờ 5 phút/lần; đã kiểm chứng đường thủ công `POST /no-show` và việc quá giờ + 30 phút), kiểm thử tải (NFR) và responsive. Ngoài ra `visits?keyword=` chỉ khớp **mã đợt khám** (đúng như ô tìm kiếm của Admin), không khớp tên thú cưng.
 
 ---
 

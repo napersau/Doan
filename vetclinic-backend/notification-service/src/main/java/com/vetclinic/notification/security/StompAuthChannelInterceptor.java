@@ -54,8 +54,8 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         if (user == null) {
             throw new MessagingException("Chưa đăng nhập hoặc token đã hết hạn");
         }
-        accessor.setUser(new UsernamePasswordAuthenticationToken(String.valueOf(user.userId()), null,
-                List.of(new SimpleGrantedAuthority("ROLE_" + user.role().name()))));
+        accessor.setUser(new UsernamePasswordAuthenticationToken(user.userId().toString(), null,
+                user.roles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role.name())).toList()));
     }
 
     private void authorizeSubscription(StompHeaderAccessor accessor) {

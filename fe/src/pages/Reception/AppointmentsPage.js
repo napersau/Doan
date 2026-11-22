@@ -21,7 +21,7 @@ function CreateDialog({ onClose, onDone }) {
     if (!picked.owner || !picked.pet) throw new Error('Chọn chủ nuôi và thú cưng.');
     if (!startTime) throw new Error('Chọn khung giờ còn trống.');
     if (!reason.trim()) throw new Error('Nhập lý do khám.');
-    const created = await appointmentsApi.create({ ownerId: Number(picked.owner.id), petId: Number(picked.pet.id), appointmentDate: date, startTime, reason: reason.trim(), bookingChannel: channel });
+    const created = await appointmentsApi.create({ ownerId: picked.owner.id, petId: picked.pet.id, appointmentDate: date, startTime, reason: reason.trim(), bookingChannel: channel });
     onDone(`Đã tạo lịch ${created.appointmentCode} (đã xác nhận).`);
   };
   return <FormDialog title="Đặt lịch hộ khách" onClose={onClose} onSubmit={submit} submitLabel="Tạo lịch hẹn" wide>
@@ -55,7 +55,7 @@ export default function AppointmentsPage() {
   const list = useAsync(() => appointmentsApi.list(pending
     ? { status: 'PENDING', sortBy: 'createdAt', ascending: true, page, size: 20 }
     : { code: search.trim() || undefined, fromDate, toDate, status, page, size: 20 }), [tab, page, search, fromDate, toDate, status]);
-  useNotificationEvents(() => list.refresh(), ['APPOINTMENT_CREATED']);
+  useNotificationEvents(() => list.refresh(), ['APPOINTMENT_BOOKED']);
   const done = (text) => { setNotice({ type: 'success', text }); setDialog(null); list.refresh(); };
   const confirm = async (appointment) => {
     try { await appointmentsApi.confirm(appointment.id); done(`Đã xác nhận lịch ${appointment.appointmentCode}.`); } catch (problem) { setNotice({ type: 'error', text: problem.message }); }

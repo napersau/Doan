@@ -18,7 +18,6 @@ import ReceptionIntakePage from './pages/Reception/IntakePage';
 import ReceptionAppointmentsPage from './pages/Reception/AppointmentsPage';
 import ReceptionInvoicesPage from './pages/Reception/InvoicesPage';
 import ReceptionInvoiceDetailPage from './pages/Reception/InvoiceDetailPage';
-import ReceptionDispensePage from './pages/Reception/DispensePage';
 import ReceptionCustomersPage from './pages/Reception/CustomersPage';
 import ReceptionCustomerDetailPage from './pages/Reception/CustomerDetailPage';
 import ReceptionPetsPage from './pages/Reception/PetsPage';
@@ -69,7 +68,6 @@ export default function App() {
             <Route path="/reception/appointments" element={reception(<ReceptionAppointmentsPage />)} />
             <Route path="/reception/invoices" element={reception(<ReceptionInvoicesPage />)} />
             <Route path="/reception/invoices/:invoiceId" element={reception(<ReceptionInvoiceDetailPage />)} />
-            <Route path="/reception/dispense" element={reception(<ReceptionDispensePage />)} />
             <Route path="/reception/customers" element={reception(<ReceptionCustomersPage />)} />
             <Route path="/reception/customers/:customerId" element={reception(<ReceptionCustomerDetailPage />)} />
             <Route path="/reception/pets" element={reception(<ReceptionPetsPage />)} />

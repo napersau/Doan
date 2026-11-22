@@ -1,5 +1,8 @@
 package com.vetclinic.clinical.entity;
 
+import jakarta.persistence.Version;
+import java.util.UUID;
+import org.hibernate.annotations.UuidGenerator;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -9,7 +12,6 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
-import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
@@ -21,25 +23,18 @@ import java.time.Instant;
 @AllArgsConstructor
 public class VisitServiceDetail {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @UuidGenerator(style = UuidGenerator.Style.VERSION_7)
+    private UUID id;
 
     @Column(name = "visit_id", nullable = false)
-    private Long visitId;
+    private UUID visitId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "service_id", nullable = false)
     private ClinicService service;
 
-    /** Snapshot đơn giá tại thời điểm chỉ định: bất biến dù Admin đổi giá sau này (BR-25). */
-    @Column(name = "unit_price", nullable = false, precision = 12, scale = 2)
-    private BigDecimal unitPrice;
-
     @Column(name = "quantity", nullable = false)
     private int quantity;
-
-    @Column(name = "subtotal", nullable = false, precision = 12, scale = 2)
-    private BigDecimal subtotal;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -52,4 +47,11 @@ public class VisitServiceDetail {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
+
+    // Dịch vụ XN / CĐHA vào hàng đợi qua queue_ticket_items sau khi khách nộp tiền (17/11/2026); bảng này không có cột hàng đợi.
+    // Giá/VAT KHÔNG nằm ở đây mà ở service_invoices (1-1 với dòng chỉ định này).
 }

@@ -46,12 +46,12 @@ class SlotServiceTest {
 
     @BeforeEach
     void setUp() {
-        BookingProperties properties = new BookingProperties("Asia/Ho_Chi_Minh", 30, STANDARD_SLOTS, 30, 2, 60, false, 5);
+        BookingProperties properties = new BookingProperties("Asia/Ho_Chi_Minh", 30, STANDARD_SLOTS, 30, 2, 60, 5);
         slotService = new SlotService(properties, new SlotPolicy(properties, CLOCK, authClient), appointmentRepository);
     }
 
     @Test
-    void getSlots_returnsAll14SlotsWithCapacityEqualToActiveDoctors() {
+    void getSlots_returnsAll14SlotsWithCapacityOfTwoPerActiveDoctor() {
         when(authClient.getActiveDoctorCount()).thenReturn(ApiResponse.success(3L));
         when(appointmentRepository.countBookedBySlot(TOMORROW, AppointmentStatus.OCCUPYING)).thenReturn(List.of());
 
@@ -59,9 +59,9 @@ class SlotServiceTest {
 
         assertThat(slots).hasSize(14);
         assertThat(slots).allSatisfy(s -> {
-            assertThat(s.capacity()).isEqualTo(3);
+            assertThat(s.capacity()).isEqualTo(6);   // 3 bác sĩ ACTIVE × 2 (FR-13)
             assertThat(s.booked()).isZero();
-            assertThat(s.remaining()).isEqualTo(3);
+            assertThat(s.remaining()).isEqualTo(6);
             assertThat(s.available()).isTrue();
             assertThat(s.past()).isFalse();
         });
@@ -73,17 +73,17 @@ class SlotServiceTest {
 
     @Test
     void getSlots_reflectsBookedCountsAndFullSlots() {
-        when(authClient.getActiveDoctorCount()).thenReturn(ApiResponse.success(2L));
+        when(authClient.getActiveDoctorCount()).thenReturn(ApiResponse.success(2L));   // 2 bác sĩ => 4 chỗ mỗi khung
         when(appointmentRepository.countBookedBySlot(TOMORROW, AppointmentStatus.OCCUPYING)).thenReturn(List.of(
                 new SlotBookedCount(LocalTime.of(9, 0), 1L),
-                new SlotBookedCount(LocalTime.of(9, 30), 2L),
+                new SlotBookedCount(LocalTime.of(9, 30), 4L),
                 new SlotBookedCount(LocalTime.of(10, 0), 5L)));   // dữ liệu vượt sức chứa (vd. bác sĩ bị khóa sau khi đã có hẹn)
 
         List<SlotAvailabilityResponse> slots = slotService.getSlots(TOMORROW);
 
         SlotAvailabilityResponse nineOclock = slotAt(slots, 9, 0);
         assertThat(nineOclock.booked()).isEqualTo(1);
-        assertThat(nineOclock.remaining()).isEqualTo(1);
+        assertThat(nineOclock.remaining()).isEqualTo(3);
         assertThat(nineOclock.available()).isTrue();
 
         SlotAvailabilityResponse full = slotAt(slots, 9, 30);
@@ -142,11 +142,11 @@ class SlotServiceTest {
 
     @Test
     void properties_failFastOnBrokenConfiguration() {
-        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of("08:00", "25:99"), 30, 2, 60, false, 5))
+        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of("08:00", "25:99"), 30, 2, 60, 5))
                 .isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> new BookingProperties("Khong/Co", 30, STANDARD_SLOTS, 30, 2, 60, false, 5))
+        assertThatThrownBy(() -> new BookingProperties("Khong/Co", 30, STANDARD_SLOTS, 30, 2, 60, 5))
                 .isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of(), 30, 2, 60, false, 5))
+        assertThatThrownBy(() -> new BookingProperties("Asia/Ho_Chi_Minh", 30, List.of(), 30, 2, 60, 5))
                 .isInstanceOf(IllegalStateException.class);
     }
 

@@ -6,7 +6,7 @@ import { Field, FormDialog, Input, Select, Textarea } from '../ui';
 import { PET_GENDER } from '../../lib/labels';
 import { blankToNull, toNumber } from '../../lib/format';
 
-const empty = { name: '', speciesId: '', breed: '', gender: 'UNKNOWN', dateOfBirth: '', color: '', weight: '', neutered: false, identifyingCharacteristics: '', notes: '' };
+const empty = { name: '', speciesId: '', breed: '', gender: 'UNKNOWN', dateOfBirth: '', color: '', weight: '', neutered: false, microchipNumber: '', identifyingCharacteristics: '', allergies: '', notes: '' };
 
 /**
  * Thêm hoặc sửa hồ sơ thú cưng. `pet` (PetResponse) có thì là sửa — loài không đổi được sau khi tạo (backend từ chối).
@@ -28,9 +28,11 @@ export default function PetFormDialog({ pet, ownerId, onClose, onSaved }) {
     const body = {
       name: form.name.trim(), breed: blankToNull(form.breed), gender: form.gender, dateOfBirth: blankToNull(form.dateOfBirth), color: blankToNull(form.color),
       weight: toNumber(form.weight), neutered: Boolean(form.neutered), identifyingCharacteristics: blankToNull(form.identifyingCharacteristics), notes: blankToNull(form.notes),
+      // chuỗi rỗng = xóa (khi sửa); tạo mới thì rỗng = không có
+      microchipNumber: pet ? form.microchipNumber.trim() : blankToNull(form.microchipNumber), allergies: pet ? form.allergies.trim() : blankToNull(form.allergies),
     };
     try {
-      const saved = pet ? await petsApi.update(pet.id, body) : await petsApi.create({ ...body, speciesId: Number(form.speciesId), ...(ownerId ? { ownerId: Number(ownerId) } : {}) });
+      const saved = pet ? await petsApi.update(pet.id, body) : await petsApi.create({ ...body, speciesId: form.speciesId, ...(ownerId ? { ownerId } : {}) });
       onSaved(saved);
     } catch (problem) {
       setErrors(mapFieldErrors(problem));
@@ -50,8 +52,10 @@ export default function PetFormDialog({ pet, ownerId, onClose, onSaved }) {
       <Field label="Cân nặng (kg)" error={errors.weight}><Input type="number" step="0.01" min="0" value={form.weight} onChange={set('weight')} /></Field>
       <Field label="Màu lông" error={errors.color}><Input value={form.color} onChange={set('color')} maxLength={100} /></Field>
       <label className="ui-check"><input type="checkbox" checked={Boolean(form.neutered)} onChange={set('neutered')} />Đã triệt sản</label>
+      <Field label="Số vi mạch" error={errors.microchipNumber} hint="Không bắt buộc; mỗi số chỉ gắn cho một thú cưng."><Input value={form.microchipNumber} onChange={set('microchipNumber')} maxLength={30} inputMode="numeric" /></Field>
+      <Field label="Tiền sử dị ứng thuốc" wide error={errors.allergies} hint="Bác sĩ sẽ thấy cảnh báo này khi kê đơn."><Textarea value={form.allergies} onChange={set('allergies')} maxLength={1000} rows={2} /></Field>
       <Field label="Đặc điểm nhận dạng" wide error={errors.identifyingCharacteristics}><Textarea value={form.identifyingCharacteristics} onChange={set('identifyingCharacteristics')} maxLength={1000} /></Field>
-      <Field label="Ghi chú (dị ứng, bệnh nền…)" wide error={errors.notes}><Textarea value={form.notes} onChange={set('notes')} maxLength={2000} /></Field>
+      <Field label="Ghi chú (bệnh nền, tính cách…)" wide error={errors.notes}><Textarea value={form.notes} onChange={set('notes')} maxLength={2000} /></Field>
     </div>
   </FormDialog>;
 }

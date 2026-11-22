@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.repository;
 
+import java.util.UUID;
 import com.vetclinic.clinical.entity.LabTestResult;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,5 +13,5 @@ import java.util.List;
 public interface LabTestResultRepository extends JpaRepository<LabTestResult, Long> {
 
     @EntityGraph(attributePaths = "labTestItem")
-    List<LabTestResult> findByVisitServiceDetailIdInOrderByIdAsc(Collection<Long> detailIds);
+    List<LabTestResult> findByVisitServiceDetailIdInOrderByIdAsc(Collection<UUID> detailIds);
 }

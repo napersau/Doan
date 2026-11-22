@@ -1,12 +1,16 @@
 package com.vetclinic.clinical.dto.request;
 
-import jakarta.validation.constraints.*;
-import java.math.BigDecimal;
+import jakarta.validation.constraints.Size;
 
-/** Đổi giá không ảnh hưởng các chỉ định đã tạo: đơn giá đã được snapshot (BR-25). Ngừng dùng bằng active=false, không xóa. */
+/**
+ * Sửa thông tin dịch vụ (không chứa giá: đổi giá bằng {@code POST /api/v1/catalog/services/{id}/prices}). Trường null thì giữ nguyên.
+ * Ngừng cung cấp bằng {@code active = false}, không xóa (hóa đơn cũ vẫn tra được).
+ */
 public record UpdateServiceRequest(
         @Size(min = 1, max = 150, message = "Tên từ 1 đến 150 ký tự") String name,
-        @DecimalMin(value = "0.00", message = "Đơn giá không được âm") @Digits(integer = 10, fraction = 2, message = "Đơn giá tối đa 10 chữ số nguyên và 2 chữ số thập phân") BigDecimal price,
+        @Size(min = 1, max = 30, message = "Đơn vị từ 1 đến 30 ký tự") String unit,
+        Short estimatedMinutes,
+        @Size(max = 255, message = "Dặn dò chuẩn bị tối đa 255 ký tự") String preparationNotes,
         String description,
         Boolean active
 ) {

@@ -6,6 +6,7 @@ import PetGallerySection from '../../components/home/PetGallerySection';
 import PricingSection from '../../components/home/PricingSection';
 import TestimonialsSection from '../../components/home/TestimonialsSection';
 import BookingSection from '../../components/home/BookingSection';
+import AvailabilitySection from '../../components/home/AvailabilitySection';
 import '../../styles/home.css';
 
 export default function HomePage() {
@@ -18,6 +19,7 @@ export default function HomePage() {
         <PetGallerySection />
         <PricingSection />
         <TestimonialsSection />
+        <AvailabilitySection />
         <BookingSection />
       </main>
       <Footer />

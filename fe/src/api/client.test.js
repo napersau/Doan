@@ -1,4 +1,4 @@
-import { ApiError, SESSION_EXPIRED, mapFieldErrors, request } from './client';
+import { ApiError, SESSION_EXPIRED, api, mapFieldErrors, request } from './client';
 import { clearSession, getSession, setSession } from './session';
 
 const ok = (data) => ({ ok: true, status: 200, text: async () => JSON.stringify({ status: 200, data }) });
@@ -15,6 +15,14 @@ describe('request', () => {
   test('gắn Access Token và trả về data của ApiResponse', async () => {
     fetch.mockResolvedValueOnce(ok({ id: 7 }));
     await expect(request('/api/v1/pets/7')).resolves.toEqual({ id: 7 });
+    expect(fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer old-access');
+  });
+
+  test('api.delete gửi DELETE (xóa mềm thú cưng) kèm Access Token', async () => {
+    fetch.mockResolvedValueOnce(ok(null));
+    await api.delete('/api/v1/pets/019a9442-d820-7000-8000-000000000001');
+    expect(fetch.mock.calls[0][1].method).toBe('DELETE');
+    expect(fetch.mock.calls[0][0]).toMatch(/\/api\/v1\/pets\/019a9442-d820-7000-8000-000000000001$/);
     expect(fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer old-access');
   });
 
@@ -78,5 +86,13 @@ describe('request', () => {
     await expect(request('/api/v1/auth/login', { method: 'POST', body: {}, auth: false })).rejects.toMatchObject({ code: 'AUTH_1103' });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
+  test('đăng nhập tài khoản bị khóa trả 401 AUTH_1107 nhưng KHÔNG kích hoạt refresh dù đang có phiên cũ', async () => {
+    fetch.mockResolvedValueOnce(fail(401, { errorCode: 'AUTH_1107', message: 'Tài khoản đã bị khóa hoặc ngừng sử dụng' }));
+    await expect(request('/api/v1/auth/login', { method: 'POST', body: {}, auth: false })).rejects.toMatchObject({ code: 'AUTH_1107', status: 401 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).not.toMatch(/\/auth\/refresh/);
+    expect(getSession()?.refreshToken).toBe('old-refresh');
   });
 });

@@ -14,6 +14,7 @@ import com.vetclinic.auth.service.UserService;
 import com.vetclinic.common.dto.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,7 +41,7 @@ public class AuthController {
     /** Public: chủ nuôi tự đăng ký (luôn vai trò PET_OWNER). Đăng nhập sau đó bằng số điện thoại và mật khẩu vừa đặt. */
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
+        return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created("Đăng ký tài khoản thành công", userService.register(request)));
     }
 

@@ -2,17 +2,26 @@ package com.vetclinic.clinical.repository;
 
 import com.vetclinic.clinical.entity.ClinicService;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
 @Repository
-public interface ClinicServiceRepository extends JpaRepository<ClinicService, Long> {
+public interface ClinicServiceRepository extends JpaRepository<ClinicService, UUID> {
     boolean existsByCode(String code);
 
-    java.util.Optional<ClinicService> findByCode(String code);
+    Optional<ClinicService> findByCode(String code);
 
-    java.util.List<ClinicService> findByActiveTrueOrderByCategoryAscNameAsc();
+    /** Danh sách theo thứ tự hiển thị của nhóm rồi theo tên; tùy chọn lọc theo mã nhóm và chỉ lấy dịch vụ đang dùng. */
+    @Query("select s from ClinicService s where (:activeOnly = false or s.active = true) "
+            + "and (:categoryCode is null or s.category.code = :categoryCode) "
+            + "order by s.category.displayOrder, s.name")
+    List<ClinicService> search(@Param("activeOnly") boolean activeOnly, @Param("categoryCode") String categoryCode);
 
-    java.util.List<ClinicService> findAllByOrderByCategoryAscNameAsc();
-
-    java.util.List<ClinicService> findByIdInAndActiveTrue(java.util.Collection<Long> ids);
+    List<ClinicService> findByIdInAndActiveTrue(Collection<UUID> ids);
 }

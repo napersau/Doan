@@ -12,15 +12,14 @@ const RECEPTION_LINKS = [
   { to: '/reception/queue', label: 'Bảng điều phối', icon: 'users' },
   { to: '/reception/intake', label: 'Tiếp nhận khách', icon: 'calendar' },
   { to: '/reception/appointments', label: 'Lịch hẹn', icon: 'calendar' },
-  { to: '/reception/invoices', label: 'Hóa đơn & thanh toán', icon: 'chart' },
-  { to: '/reception/dispense', label: 'Phát thuốc', icon: 'medicine' },
+  { to: '/reception/invoices', label: 'Thu ngân', icon: 'chart' },
   { to: '/reception/customers', label: 'Khách hàng', icon: 'users' },
   { to: '/reception/pets', label: 'Thú cưng', icon: 'heart' },
   { to: '/reception/history', label: 'Tra cứu bệnh án', icon: 'document' },
 ];
 
 const VET_LINKS = [
-  { to: '/vet/today', label: 'Ca khám của tôi', icon: 'heart' },
+  { to: '/vet/today', label: 'Hàng đợi của tôi', icon: 'heart' },
   { to: '/vet/history', label: 'Tra cứu bệnh án', icon: 'document' },
   { to: '/vet/medicines', label: 'Tra cứu thuốc', icon: 'medicine' },
 ];
@@ -40,9 +39,9 @@ const ADMIN_LINKS = [
 ];
 
 export const STAFF_AREAS = {
-  reception: { role: 'RECEPTIONIST', label: 'lễ tân', accountLabel: 'Nhân viên lễ tân', title: 'Không gian lễ tân', subtitle: 'Tiếp nhận · Lịch hẹn · Thu ngân', brand: 'RECEPTION CONSOLE', caption: 'KHU VỰC LỄ TÂN', home: '/reception/queue', themeKey: 'pawcare_reception_theme_v1', defaultTheme: 'light', links: RECEPTION_LINKS, description: 'Điều phối hàng đợi, tiếp nhận, thu tiền và phát thuốc.' },
-  vet: { role: 'VETERINARIAN', label: 'bác sĩ', accountLabel: 'Bác sĩ thú y', title: 'Không gian bác sĩ', subtitle: 'Ca được phân công · Hồ sơ khám', brand: 'VETERINARIAN CONSOLE', caption: 'KHU VỰC BÁC SĨ', home: '/vet/today', themeKey: 'pawcare_vet_theme_v1', defaultTheme: 'light', links: VET_LINKS, description: 'Khám hai pha, chỉ định cận lâm sàng, kê đơn và chốt ca.' },
-  lab: { role: 'LAB_TECHNICIAN', label: 'xét nghiệm', accountLabel: 'Kỹ thuật viên xét nghiệm', title: 'Phòng xét nghiệm', subtitle: 'Hàng đợi · Nhập kết quả', brand: 'LAB CONSOLE', caption: 'KHU VỰC XÉT NGHIỆM', home: '/lab/queue', themeKey: 'pawcare_lab_theme_v1', defaultTheme: 'light', links: LAB_LINKS, description: 'Nhận mẫu, nhập chỉ số; hệ thống tự đối chiếu khoảng tham chiếu của loài.' },
+  reception: { role: 'RECEPTIONIST', label: 'lễ tân', accountLabel: 'Nhân viên lễ tân', title: 'Không gian lễ tân', subtitle: 'Tiếp nhận · Lịch hẹn · Thu ngân', brand: 'RECEPTION CONSOLE', caption: 'KHU VỰC LỄ TÂN', home: '/reception/queue', themeKey: 'pawcare_reception_theme_v1', defaultTheme: 'light', links: RECEPTION_LINKS, description: 'Điều phối hàng đợi từng bác sĩ, tiếp nhận, thu tiền dịch vụ và bán thuốc.' },
+  vet: { role: 'VETERINARIAN', label: 'bác sĩ', accountLabel: 'Bác sĩ thú y', title: 'Không gian bác sĩ', subtitle: 'Hàng đợi riêng · Hồ sơ khám', brand: 'VETERINARIAN CONSOLE', caption: 'KHU VỰC BÁC SĨ', home: '/vet/today', themeKey: 'pawcare_vet_theme_v1', defaultTheme: 'light', links: VET_LINKS, description: 'Gọi số, khám hai pha, dịch vụ tại phòng, chỉ định cận lâm sàng, kê đơn và chốt ca.' },
+  lab: { role: 'LAB_TECHNICIAN', label: 'xét nghiệm', accountLabel: 'Kỹ thuật viên xét nghiệm', title: 'Phòng xét nghiệm', subtitle: 'Hàng đợi · Nhập kết quả', brand: 'LAB CONSOLE', caption: 'KHU VỰC XÉT NGHIỆM', home: '/lab/queue', themeKey: 'pawcare_lab_theme_v1', defaultTheme: 'light', links: LAB_LINKS, description: 'Gọi số, lấy mẫu, nhập chỉ số; hệ thống tự đối chiếu khoảng tham chiếu của loài.' },
   imaging: { role: 'IMAGING_TECHNICIAN', label: 'chẩn đoán hình ảnh', accountLabel: 'Kỹ thuật viên CĐHA', title: 'Phòng chẩn đoán hình ảnh', subtitle: 'Hàng đợi · Tải ảnh kết quả', brand: 'IMAGING CONSOLE', caption: 'KHU VỰC CĐHA', home: '/imaging/queue', themeKey: 'pawcare_imaging_theme_v1', defaultTheme: 'light', links: IMAGING_LINKS, description: 'Thực hiện chụp, mô tả và tải ảnh (JPEG, PNG, DICOM).' },
   admin: { role: 'ADMIN', label: 'quản trị', accountLabel: 'Quản trị viên', title: 'Quản trị hệ thống', subtitle: 'Tài khoản · Danh mục · Kho · Báo cáo', brand: 'ADMIN CONSOLE', caption: 'MENU QUẢN TRỊ', home: '/admin/dashboard', themeKey: 'pawcare_admin_theme_v1', defaultTheme: 'dark', links: ADMIN_LINKS, description: 'Không gian dành riêng cho đội ngũ quản trị phòng khám.' },
 };

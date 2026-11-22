@@ -2,7 +2,8 @@
 // id luôn là chuỗi trong giao diện (dùng cho URL và so sánh).
 export function normalizeUser(user) {
   if (!user) return null;
-  return { ...user, id: String(user.id), phone: user.phoneNumber || '', email: user.email || '', address: user.address || '', roomNumber: user.roomNumber || '' };
+  const roles = Array.isArray(user.roles) && user.roles.length ? user.roles : (user.role ? [user.role] : []);
+  return { ...user, id: String(user.id), roles, phone: user.phoneNumber || '', email: user.email || '', address: user.address || '', roomNumber: user.roomNumber || '' };
 }
 
 // Mật khẩu tạm cho tài khoản chủ nuôi do lễ tân tạo (UC-10: hệ thống cấp tài khoản). Có đủ chữ hoa, thường, số, ký hiệu.

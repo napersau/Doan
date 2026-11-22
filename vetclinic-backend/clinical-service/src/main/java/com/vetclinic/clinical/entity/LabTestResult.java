@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.entity;
 
+import java.util.UUID;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -8,7 +9,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-import com.vetclinic.clinical.constant.LabEvaluation;
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -25,7 +25,7 @@ public class LabTestResult {
     private Long id;
 
     @Column(name = "visit_service_detail_id", nullable = false)
-    private Long visitServiceDetailId;
+    private UUID visitServiceDetailId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "lab_test_item_id", nullable = false)
@@ -41,12 +41,8 @@ public class LabTestResult {
     @Column(name = "max_value_snapshot", nullable = false, precision = 8, scale = 2)
     private BigDecimal maxValueSnapshot;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "evaluation", nullable = false)
-    private LabEvaluation evaluation;
-
     @Column(name = "performed_by", nullable = false)
-    private Long performedBy;
+    private UUID performedBy;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;

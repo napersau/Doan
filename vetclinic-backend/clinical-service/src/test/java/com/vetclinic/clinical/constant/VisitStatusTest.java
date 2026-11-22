@@ -14,16 +14,16 @@ import static com.vetclinic.clinical.constant.VisitStatus.WAITING_PAYMENT;
 import static com.vetclinic.clinical.constant.VisitStatus.WAITING_RESULTS;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Ma trận chuyển trạng thái phải khớp bảng T01..T12 trong THIET_KE_SO_DO_TRANG_THAI_STATE_MACHINE.md. */
+/** Ma trận chuyển trạng thái phải khớp bảng T01..T14 trong THIET_KE_SO_DO_TRANG_THAI_STATE_MACHINE.md. */
 class VisitStatusTest {
 
     @Test
     void allowedTransitionsMatchTheStateMachineDocument() {
         assertThat(targets(WAITING)).containsExactlyInAnyOrder(IN_PROGRESS, CANCELLED);
         assertThat(targets(IN_PROGRESS)).containsExactlyInAnyOrder(WAITING_RESULTS, WAITING_PAYMENT, CANCELLED);
-        assertThat(targets(WAITING_RESULTS)).containsExactlyInAnyOrder(RESULTS_READY, CANCELLED);
+        assertThat(targets(WAITING_RESULTS)).containsExactlyInAnyOrder(RESULTS_READY, COMPLETED);   // T06 và T12 (khách bỏ về)
         assertThat(targets(RESULTS_READY)).containsExactlyInAnyOrder(IN_PROGRESS, COMPLETED);
-        assertThat(targets(WAITING_PAYMENT)).containsExactlyInAnyOrder(COMPLETED, IN_PROGRESS);   // T10 và T12 (mở lại)
+        assertThat(targets(WAITING_PAYMENT)).containsExactlyInAnyOrder(COMPLETED, IN_PROGRESS);   // T10 và T14 (mở lại hồ sơ)
     }
 
     @Test
@@ -38,6 +38,7 @@ class VisitStatusTest {
         assertThat(WAITING.canTransitionTo(WAITING_PAYMENT)).isFalse();
         assertThat(WAITING.canTransitionTo(COMPLETED)).isFalse();
         assertThat(WAITING_RESULTS.canTransitionTo(WAITING_PAYMENT)).isFalse();
+        assertThat(WAITING_RESULTS.canTransitionTo(CANCELLED)).isFalse();   // v3.0: khách bỏ về giữa chừng thì COMPLETED + công nợ (T12)
         assertThat(RESULTS_READY.canTransitionTo(WAITING_PAYMENT)).isFalse();
         assertThat(WAITING_PAYMENT.canTransitionTo(WAITING)).isFalse();
         assertThat(WAITING_PAYMENT.canTransitionTo(CANCELLED)).isFalse();

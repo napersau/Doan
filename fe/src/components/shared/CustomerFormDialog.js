@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { usersApi } from '../../api/endpoints';
 import { mapFieldErrors } from '../../api/client';
 import { temporaryPassword } from '../../api/normalize';
@@ -14,6 +14,9 @@ export default function CustomerFormDialog({ customer, onClose, onSaved }) {
   const [form, setForm] = useState({ fullName: customer?.fullName || '', phoneNumber: customer?.phoneNumber || '', email: customer?.email || '', address: customer?.address || '' });
   const [errors, setErrors] = useState({});
   const [issued, setIssued] = useState(null);
+  // FormDialog tự gọi onClose sau khi onSubmit thành công; tạo tài khoản mới thì phải GIỮ hộp thoại để hiện mật khẩu tạm (chỉ hiện một lần)
+  const keepOpen = useRef(false);
+  const closeForm = () => { if (!keepOpen.current) onClose(); };
   const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
 
   const submit = async () => {
@@ -25,11 +28,12 @@ export default function CustomerFormDialog({ customer, onClose, onSaved }) {
     const body = { fullName: form.fullName.trim(), phoneNumber: form.phoneNumber.trim(), email: blankToNull(form.email), address: blankToNull(form.address) };
     try {
       if (customer) {
-        const saved = await usersApi.update(customer.id, body);
+        const saved = await usersApi.updateProfile(customer.id, body);
         onSaved(saved);
       } else {
         const password = temporaryPassword();
         const saved = await usersApi.create({ ...body, password, roleCode: 'PET_OWNER' });
+        keepOpen.current = true;
         setIssued({ user: saved, password });
         onSaved(saved, { keepOpen: true });
       }
@@ -44,7 +48,7 @@ export default function CustomerFormDialog({ customer, onClose, onSaved }) {
     <div className="ui-form-actions"><Button variant="primary" onClick={onClose}>Đã ghi lại</Button></div>
   </Modal>;
 
-  return <FormDialog title={customer ? 'Sửa thông tin khách hàng' : 'Thêm khách hàng mới'} id="customer-form-title" onClose={onClose} onSubmit={submit} submitLabel={customer ? 'Lưu thay đổi' : 'Tạo tài khoản'}>
+  return <FormDialog title={customer ? 'Sửa thông tin khách hàng' : 'Thêm khách hàng mới'} id="customer-form-title" onClose={closeForm} onSubmit={submit} submitLabel={customer ? 'Lưu thay đổi' : 'Tạo tài khoản'}>
     <div className="ui-grid">
       <Field label="Họ và tên *" error={errors.fullName}><Input value={form.fullName} onChange={set('fullName')} maxLength={150} autoFocus /></Field>
       <Field label="Số điện thoại *" error={errors.phoneNumber} hint={customer ? undefined : 'Dùng làm tên đăng nhập.'}><Input inputMode="tel" value={form.phoneNumber} onChange={set('phoneNumber')} /></Field>
