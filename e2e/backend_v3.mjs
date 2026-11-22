@@ -220,7 +220,7 @@ async function main() {
   check('số lượng bác sĩ kê chỉ để tham khảo: kê 10, khách mua 12 (≤ tồn) vẫn sửa được', mi3b.status === 200 && mi3b.data.items[0].quantity === 12 && mi3b.data.items[0].prescribedQuantity === 10, brief(mi3b));
   check('hóa đơn trả kèm tồn kho hiện tại để màn hình bán thuốc hiển thị', mi3b.data.items[0].stockQuantity === stockNow, brief(mi3b));
   // EX-19: sự kiện chốt ca giao lại không tạo hóa đơn thứ hai và không dựng lại nháp đã sửa
-  const outboxRow = `routing_key='prescription.created' AND aggregate_id='${v3}'`;
+  const outboxRow = `routing_key='prescription.created' AND aggregate_id = UNHEX(REPLACE('${v3}','-',''))`;
   sql(`UPDATE pet_clinic_clinical_db.outbox_events SET status='PENDING', published_at=NULL, next_attempt_at=UTC_TIMESTAMP() WHERE ${outboxRow}`);
   for (let i = 0; i < 40 && sql(`SELECT status FROM pet_clinic_clinical_db.outbox_events WHERE ${outboxRow}`) !== 'PUBLISHED'; i += 1) await sleep(500);
   await sleep(2000);
@@ -371,8 +371,8 @@ async function main() {
     && summaryApi.data.totalVisits === summaryApi.data.routineVisits + summaryApi.data.paraclinicalVisits, brief(summaryApi));
   // EX-19: phát lại sự kiện thu tiền dịch vụ + thu tiền thuốc của luồng chuẩn -> báo cáo không đổi
   const beforeReplay = [reportedService(), reportedMedicine(), Number(sql(`SELECT COUNT(*) FROM ${RDB}.revenue_facts`)), Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`))];
-  sql(`UPDATE pet_clinic_clinical_db.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'invoice.service_paid' AND aggregate_id = '${v1}'`);
-  sql(`UPDATE pet_clinic_billing_pharmacy_db.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = '${mi.id}'`);
+  sql(`UPDATE pet_clinic_clinical_db.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'invoice.service_paid' AND aggregate_id = UNHEX(REPLACE('${v1}','-',''))`);
+  sql(`UPDATE pet_clinic_billing_pharmacy_db.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = UNHEX(REPLACE('${mi.id}','-',''))`);
   for (let i = 0; i < 20 && Number(sql("SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE status <> 'PUBLISHED'")) + Number(sql("SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.outbox_events WHERE status <> 'PUBLISHED'")) > 0; i += 1) await sleep(1000);
   await sleep(4000);
   const afterReplay = [reportedService(), reportedMedicine(), Number(sql(`SELECT COUNT(*) FROM ${RDB}.revenue_facts`)), Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`))];

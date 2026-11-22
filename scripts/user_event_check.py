@@ -154,7 +154,7 @@ try:
     wait_for(lambda: sql("SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events WHERE status <> 'PUBLISHED'") == "0")
     time.sleep(3)
     check("khóa tài khoản KHÔNG phải Bác sĩ -> không báo Lễ tân", len(inbox()) == count, (count, len(inbox())))
-    check("sự kiện của tài khoản đó vẫn đi qua outbox", sql(f"SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events WHERE aggregate_id = '{other}' AND event_type = 'UserStatusChangedEvent'") == "1")
+    check("sự kiện của tài khoản đó vẫn đi qua outbox", sql(f"SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events WHERE aggregate_id = UNHEX(REPLACE('{other}','-','')) AND event_type = 'UserStatusChangedEvent'") == "1")
 finally:
     for proc in PROCS:
         proc.terminate()

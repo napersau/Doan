@@ -250,8 +250,8 @@ try:
     check("chỉ phát ĐÚNG 1 phiếu cho ca 2, số phiếu 2 (không tranh số)", bool(t2) and len(t2) == 1 and t2[0]["ticketNo"] == 2, t2)
     tid2 = t2[0]["id"] if t2 else None
     seq_before = rcli("get", f"queue:seq:{TODAY}:DOCTOR")
-    sql(f"UPDATE {CDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'invoice.service_paid' AND aggregate_id = '{v2}'")
-    wait_for(lambda: sql(f"SELECT status FROM {CDB}.outbox_events WHERE routing_key = 'invoice.service_paid' AND aggregate_id = '{v2}' ORDER BY id DESC LIMIT 1") == "PUBLISHED")
+    sql(f"UPDATE {CDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'invoice.service_paid' AND aggregate_id = UNHEX(REPLACE('{v2}','-',''))")
+    wait_for(lambda: sql(f"SELECT status FROM {CDB}.outbox_events WHERE routing_key = 'invoice.service_paid' AND aggregate_id = UNHEX(REPLACE('{v2}','-','')) ORDER BY id DESC LIMIT 1") == "PUBLISHED")
     time.sleep(3)
     check("EX-19: sự kiện giao lại KHÔNG phát phiếu thứ hai, số phiếu không tăng (dedupe)", len(tickets(v2)) == 1 and rcli("get", f"queue:seq:{TODAY}:DOCTOR") == seq_before, (tickets(v2), seq_before))
     st, res = clin("POST", f"{CLIN}/queue-tickets/{tid2}/call", tien)
@@ -307,7 +307,7 @@ try:
     st, res = clin("POST", f"{CLIN}/service-details/{uuid_of(img_detail)}/cancel", tien, {"reason": "Máy X-quang hỏng", "reasonType": "CLINIC"})
     check("hủy X-quang do phòng khám (đã thu tiền) -> 200", st == 200 and res["data"]["status"] == "CANCELLED", (st, res))
     check("hóa đơn X-quang REFUNDED + outbox có ServiceInvoiceRefundedEvent", sql(f"SELECT COUNT(*) FROM {CDB}.service_invoices WHERE payment_status = 'REFUNDED' AND visit_service_detail_id = {b(uuid_of(img_detail))}") == "1"
-          and sql(f"SELECT COUNT(*) FROM {CDB}.outbox_events WHERE routing_key = 'invoice.service_refunded' AND aggregate_id = '{v1}'") == "1")
+          and sql(f"SELECT COUNT(*) FROM {CDB}.outbox_events WHERE routing_key = 'invoice.service_refunded' AND aggregate_id = UNHEX(REPLACE('{v1}','-',''))") == "1")
     check("phiếu CĐHA hết dịch vụ chờ: lịch sử CANCELLED + xóa khỏi Redis", bool(wait_for(lambda: rcli("exists", f"ticket:{img_ticket}") == "0")) and ["IMAGING", "CANCELLED", "1", "0"] in history(v1), history(v1))
 
     # T06: đủ kết quả -> phiếu ưu tiên 1
@@ -328,7 +328,7 @@ try:
     check("phiếu CANCELLED (kèm lý do) trong lịch sử, xóa khỏi Redis, outbox có VisitCancelledEvent",
           sql(f"SELECT final_status, cancel_reason FROM {CDB}.queue_ticket_histories WHERE visit_id = {b(v2)}") == "CANCELLED\tKhách bận xin về"
           and rcli("exists", f"ticket:{tid2}") == "0" and rcli("zcard", waiting_zset(TIEN)) == "1"   # còn phiếu cấp cứu ca 3
-          and sql(f"SELECT COUNT(*) FROM {CDB}.outbox_events WHERE routing_key = 'visit.cancelled' AND aggregate_id = '{v2}'") == "1")
+          and sql(f"SELECT COUNT(*) FROM {CDB}.outbox_events WHERE routing_key = 'visit.cancelled' AND aggregate_id = UNHEX(REPLACE('{v2}','-',''))") == "1")
 
     # ================================================================== E: EX-18 Redis sập ngắn: vẫn thu tiền được, bật lại thì có đúng 1 phiếu
     v4 = new_visit("Redis-sập")

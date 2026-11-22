@@ -20,6 +20,8 @@ import static org.mockito.Mockito.when;
 
 class OutboxWriterTest {
 
+    private static final java.util.UUID AGGREGATE = java.util.UUID.fromString("019a9442-d810-7000-8000-00000000002a");
+
     private static final Instant NOW = Instant.parse("2026-11-20T03:00:00Z");
     private final OutboxEventRepository repository = mock(OutboxEventRepository.class);
     private final JsonMapper mapper = new JsonMapper();
@@ -30,11 +32,11 @@ class OutboxWriterTest {
         when(repository.save(any(OutboxEvent.class))).thenAnswer(inv -> inv.getArgument(0));
         VisitCompletedEvent event = new VisitCompletedEvent(UuidV7.generate(), NOW, UuidV7.generate(), UuidV7.generate(), "VIS-2026-00042", UuidV7.generate(), false);
 
-        OutboxEvent row = writer.write("VISIT", 42L, event);
+        OutboxEvent row = writer.write("VISIT", AGGREGATE, event);
 
         assertThat(row.getEventId()).isEqualTo(event.eventId());
         assertThat(row.getAggregateType()).isEqualTo("VISIT");
-        assertThat(row.getAggregateId()).isEqualTo("42");
+        assertThat(row.getAggregateId()).isEqualTo(AGGREGATE);
         assertThat(row.getEventType()).isEqualTo("VisitCompletedEvent");
         assertThat(row.getRoutingKey()).isEqualTo(EventRouting.VISIT_COMPLETED);
         assertThat(row.getStatus()).isEqualTo(OutboxStatus.PENDING);
@@ -51,7 +53,7 @@ class OutboxWriterTest {
         OutboxWriter atFraction = new OutboxWriter(repository, mapper,
                 Clock.fixed(Instant.parse("2026-11-20T03:00:00.700Z"), ZoneOffset.UTC));
 
-        OutboxEvent row = atFraction.write("VISIT", 1L,
+        OutboxEvent row = atFraction.write("VISIT", AGGREGATE,
                 new VisitCompletedEvent(UuidV7.generate(), NOW, null, UuidV7.generate(), "VIS-1", UuidV7.generate(), false));
 
         assertThat(row.getNextAttemptAt()).isEqualTo(NOW);   // không bị làm tròn lên 03:00:01 (tương lai)

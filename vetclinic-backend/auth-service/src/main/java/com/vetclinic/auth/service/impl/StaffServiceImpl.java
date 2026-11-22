@@ -5,6 +5,8 @@ import com.vetclinic.auth.dto.request.CreateStaffRequest;
 import com.vetclinic.auth.dto.request.UpdateStaffRequest;
 import com.vetclinic.auth.dto.request.VetProfileRequest;
 import com.vetclinic.auth.dto.response.StaffResponse;
+import com.vetclinic.auth.constant.EmploymentType;
+import com.vetclinic.auth.constant.Gender;
 import com.vetclinic.auth.entity.Role;
 import com.vetclinic.auth.entity.StaffProfile;
 import com.vetclinic.auth.entity.User;
@@ -122,7 +124,7 @@ public class StaffServiceImpl implements StaffService {
                 .phoneNumber(phone)
                 .email(email)
                 .address(blankToNull(request.address()))
-                .gender(blankToNull(request.gender()))
+                .gender(Gender.parse(request.gender()))
                 .dateOfBirth(request.dateOfBirth())
                 .build());
         StaffProfile staff = StaffProfile.builder()
@@ -132,7 +134,7 @@ public class StaffServiceImpl implements StaffService {
                 .positionTitle(hasText(request.positionTitle()) ? request.positionTitle().trim() : primaryRole.getName())
                 .department(hasText(request.department()) ? request.department().trim() : AccountRules.departmentOf(primary))
                 .roomNumber(room)
-                .employmentType(hasText(request.employmentType()) ? request.employmentType() : "FULL_TIME")
+                .employmentType(hasText(request.employmentType()) ? EmploymentType.parse(request.employmentType()) : EmploymentType.FULL_TIME)
                 .hireDate(request.hireDate() != null ? request.hireDate() : LocalDate.now(clock.withZone(CLINIC_ZONE)))
                 .emergencyContactName(blankToNull(request.emergencyContactName()))
                 .emergencyContactPhone(blankToNull(request.emergencyContactPhone()))
@@ -187,7 +189,7 @@ public class StaffServiceImpl implements StaffService {
             staff.setDepartment(blankToNull(request.department()));
         }
         if (hasText(request.employmentType())) {
-            staff.setEmploymentType(request.employmentType());
+            staff.setEmploymentType(EmploymentType.parse(request.employmentType()));
         }
         if (request.hireDate() != null) {
             staff.setHireDate(request.hireDate());

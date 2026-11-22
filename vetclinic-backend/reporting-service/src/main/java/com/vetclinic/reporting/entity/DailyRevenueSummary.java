@@ -1,6 +1,9 @@
 package com.vetclinic.reporting.entity;
 
+import com.vetclinic.reporting.constant.RevenueType;
 import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.IdClass;
@@ -28,8 +31,9 @@ public class DailyRevenueSummary {
     private LocalDate businessDate;
 
     @Id
+    @Enumerated(EnumType.STRING)
     @Column(name = "revenue_type", nullable = false, length = 20)
-    private String revenueType;
+    private RevenueType revenueType;
 
     @Id
     @Column(name = "category_code", nullable = false, length = 30)

@@ -344,8 +344,8 @@ try:
     # ================================================================== EX-19: giao lại sự kiện -> không cộng đôi
     totals_before = sql(f"SELECT (SELECT SUM(net_amount) FROM {RDB}.daily_revenue_summaries), (SELECT COUNT(*) FROM {RDB}.revenue_facts), "
                         f"(SELECT SUM(completed_visits) FROM {RDB}.doctor_daily_performances)")
-    sql(f"UPDATE {CDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE aggregate_id IN ('{v1}', '{v2}', '{v4}') AND routing_key IN ('invoice.service_paid', 'visit.completed', 'invoice.service_refunded')")
-    sql(f"UPDATE {BDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = '{draft['id']}'")
+    sql(f"UPDATE {CDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE aggregate_id IN ({b(v1)}, {b(v2)}, {b(v4)}) AND routing_key IN ('invoice.service_paid', 'visit.completed', 'invoice.service_refunded')")
+    sql(f"UPDATE {BDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = UNHEX(REPLACE('{draft['id']}','-',''))")
     wait_for(lambda: sql(f"SELECT COUNT(*) FROM {CDB}.outbox_events WHERE status = 'PENDING' AND routing_key IN ('invoice.service_paid', 'visit.completed', 'invoice.service_refunded')") == "0"
              and sql(f"SELECT COUNT(*) FROM {BDB}.outbox_events WHERE status = 'PENDING' AND routing_key = 'pharmacy.medicine_invoice_paid'") == "0", 40)
     time.sleep(4)
@@ -421,7 +421,7 @@ try:
     old_event_id = str(uuid.UUID(bytes=raw))
     payload = json.dumps({"eventId": old_event_id, "occurredAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "actorUserId": None, "visitId": OLD_VISIT,
                           "visitCode": "VIS-OLD", "petId": pets[v1][0], "abandoned": False, "doctorId": TIEN, "doctorName": tien_name}, ensure_ascii=False)
-    sql(f"INSERT INTO {CDB}.outbox_events (event_id, aggregate_type, aggregate_id, event_type, routing_key, payload, status, published_at) VALUES ({b(old_event_id)}, 'VISIT', '{OLD_VISIT}', 'VisitCompletedEvent', 'visit.completed', '{payload.replace(chr(39), chr(39) * 2)}', 'PUBLISHED', NOW())")
+    sql(f"INSERT INTO {CDB}.outbox_events (event_id, aggregate_type, aggregate_id, event_type, routing_key, payload, status, published_at) VALUES ({b(old_event_id)}, 'VISIT', {b(OLD_VISIT)}, 'VisitCompletedEvent', 'visit.completed', '{payload.replace(chr(39), chr(39) * 2)}', 'PUBLISHED', NOW())")
     st, res = rebuild(1)
     check("ca cũ đóng trong cửa sổ: dựng lại -> 200, đọc thêm 1 sự kiện hoàn tất, không bỏ qua gì", st == 200 and res["data"]["fetchedByType"]["VisitCompletedEvent"] == 4 and res["data"]["skipped"] == 0, (st, res))
     check("ca cũ được đóng lại đúng (COMPLETED, giờ đóng = giờ sự kiện, vẫn thuộc ngày 01/01/2026)",

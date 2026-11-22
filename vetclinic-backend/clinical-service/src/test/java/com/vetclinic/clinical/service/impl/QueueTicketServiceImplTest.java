@@ -1,6 +1,7 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AuthClient;
+import com.vetclinic.clinical.constant.ServiceDetailAction;
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.TicketStatus;
@@ -236,8 +237,8 @@ class QueueTicketServiceImplTest {
         assertThat(started.status()).isEqualTo(TicketStatus.IN_SERVICE);
         assertThat(us.getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
         assertThat(xray.getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
-        verify(support).recordDetail(lid(1L), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", IMAGING_TECH, null);
-        verify(support).recordDetail(lid(2L), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", IMAGING_TECH, null);
+        verify(support).recordDetail(lid(1L), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, ServiceDetailAction.START_PROCESSING, IMAGING_TECH, null);
+        verify(support).recordDetail(lid(2L), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, ServiceDetailAction.START_PROCESSING, IMAGING_TECH, null);
         verify(queue).startRoomTicketAfterCommit(tid(80L));
     }
 

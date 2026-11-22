@@ -1,5 +1,9 @@
 package com.vetclinic.auth.entity;
 
+import com.vetclinic.auth.constant.RegisteredChannel;
+import com.vetclinic.auth.constant.ContactChannel;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -28,9 +32,6 @@ import java.util.UUID;
 @AllArgsConstructor
 public class PetOwnerProfile {
 
-    public static final String CHANNEL_ONLINE = "ONLINE";
-    public static final String CHANNEL_AT_CLINIC = "AT_CLINIC";
-
     @Id
     @Column(name = "user_id")
     private UUID userId;
@@ -44,14 +45,15 @@ public class PetOwnerProfile {
     private String customerCode;
 
     /** ONLINE (tự đăng ký) | AT_CLINIC (Lễ tân / Admin tạo tại quầy). */
+    @Enumerated(EnumType.STRING)
     @Column(name = "registered_channel", nullable = false, length = 20)
     @Builder.Default
-    private String registeredChannel = CHANNEL_ONLINE;
+    private RegisteredChannel registeredChannel = RegisteredChannel.ONLINE;
 
-    /** PHONE | EMAIL | APP. */
+    @Enumerated(EnumType.STRING)
     @Column(name = "preferred_contact", nullable = false, length = 20)
     @Builder.Default
-    private String preferredContact = "PHONE";
+    private ContactChannel preferredContact = ContactChannel.PHONE;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;

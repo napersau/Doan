@@ -240,7 +240,7 @@ try:
     st, res = close(va)
     check("chốt ca có đơn thuốc -> WAITING_PAYMENT", st == 200 and res["data"]["status"] == "WAITING_PAYMENT", (st, res))
     check("outbox clinical có PrescriptionCreatedEvent (routing key prescription.created)",
-          sql(f"SELECT COUNT(*) FROM {CLIN_DB}.outbox_events WHERE routing_key = 'prescription.created' AND aggregate_id = '{va}'") == "1")
+          sql(f"SELECT COUNT(*) FROM {CLIN_DB}.outbox_events WHERE routing_key = 'prescription.created' AND aggregate_id = UNHEX(REPLACE('{va}','-',''))") == "1")
     inv = wait_draft(va)
     check("clinical -> RabbitMQ -> billing: có hóa đơn thuốc NHÁP PENDING", bool(inv) and inv[0]["paymentStatus"] == "PENDING", inv)
     inv = inv[0]
@@ -254,13 +254,13 @@ try:
     check("GET đơn thuốc kèm hóa đơn nháp (medicineInvoiceId, PENDING)", st == 200 and res["data"]["medicineInvoiceId"] == inv["id"] and res["data"]["medicineInvoiceStatus"] == "PENDING", (st, res.get("data")))
 
     # ================================================================== EX-19: sự kiện giao lại không tạo hóa đơn thứ hai
-    sql(f"UPDATE {CLIN_DB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = NOW() WHERE routing_key = 'prescription.created' AND aggregate_id = '{va}'")
-    republished = wait_for(lambda: sql(f"SELECT status FROM {CLIN_DB}.outbox_events WHERE routing_key = 'prescription.created' AND aggregate_id = '{va}'") == "PUBLISHED", 30)
+    sql(f"UPDATE {CLIN_DB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = NOW() WHERE routing_key = 'prescription.created' AND aggregate_id = UNHEX(REPLACE('{va}','-',''))")
+    republished = wait_for(lambda: sql(f"SELECT status FROM {CLIN_DB}.outbox_events WHERE routing_key = 'prescription.created' AND aggregate_id = UNHEX(REPLACE('{va}','-',''))") == "PUBLISHED", 30)
     time.sleep(3)
     check("EX-19: relay gửi lại sự kiện", bool(republished))
     check("EX-19: vẫn chỉ 1 hóa đơn thuốc cho đơn, nháp không đổi", sql(f"SELECT COUNT(*) FROM {BILL_DB}.medicine_invoices WHERE prescription_id = {b(pa['id'])}") == "1" and len(drafts(va)) == 1)
     check("EX-19: processed_events có đúng 1 dòng cho billing.prescription-created của sự kiện này",
-          sql(f"SELECT COUNT(*) FROM {BILL_DB}.processed_events WHERE consumer = 'billing.prescription-created' AND event_id = (SELECT event_id FROM {CLIN_DB}.outbox_events WHERE routing_key = 'prescription.created' AND aggregate_id = '{va}')") == "1")
+          sql(f"SELECT COUNT(*) FROM {BILL_DB}.processed_events WHERE consumer = 'billing.prescription-created' AND event_id = (SELECT event_id FROM {CLIN_DB}.outbox_events WHERE routing_key = 'prescription.created' AND aggregate_id = UNHEX(REPLACE('{va}','-','')))") == "1")
 
     # ================================================================== Thu ngân sửa nháp, EX-15 thiếu kho
     iid = inv["id"]
@@ -296,7 +296,7 @@ try:
     check("kho Clavamox 200 -> 190 (một giao dịch với thu tiền)", stock(AMOX) == 190)
     check("nhật ký kho: EXPORT_SALE số âm gắn medicine_invoice_id",
           sql(f"SELECT transaction_type, quantity FROM {BILL_DB}.inventory_transactions WHERE medicine_invoice_id = {b(iid)}") == "EXPORT_SALE\t-10")
-    check("outbox billing có MedicineInvoicePaidEvent", sql(f"SELECT COUNT(*) FROM {BILL_DB}.outbox_events WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = '{iid}'") == "1")
+    check("outbox billing có MedicineInvoicePaidEvent", sql(f"SELECT COUNT(*) FROM {BILL_DB}.outbox_events WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = UNHEX(REPLACE('{iid}','-',''))") == "1")
     st, res = bill("POST", f"{BILL}/{iid}/confirm-payment", rec)
     check("EX-16: thu lần hai -> BILL_1403", st == 409 and code(res) == "BILL_1403", (st, res))
     check("EX-16: kho không bị trừ lần hai", stock(AMOX) == 190)

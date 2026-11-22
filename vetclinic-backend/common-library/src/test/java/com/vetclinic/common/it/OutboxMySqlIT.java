@@ -57,7 +57,7 @@ import static org.mockito.Mockito.verify;
  * docker run -d --name outbox-it -e MYSQL_ROOT_PASSWORD=test123 -e MYSQL_DATABASE=outbox_it -p 3317:3306 mysql:8.0
  * OUTBOX_IT_JDBC_URL="jdbc:mysql://localhost:3317/outbox_it" OUTBOX_IT_PASSWORD=test123 mvn -o -pl common-library test -Dtest=OutboxMySqlIT
  * </pre>
- * Bảng tạo đúng DDL của docs/schema_init.sql v4.0 (riêng aggregate_id tạm VARCHAR(36) – quyết định D2) và kiểm tra bằng
+ * Bảng tạo đúng DDL của docs/schema_init.sql v4.0 (aggregate_id BINARY(16)) và kiểm tra bằng
  * {@code ddl-auto: validate}. Lớp ứng dụng thử đặt ở package khác nên entity chỉ được nạp nhờ {@code @EnableOutbox} /
  * {@code @EnableIdempotentConsumer}.
  */
@@ -70,6 +70,8 @@ import static org.mockito.Mockito.verify;
         "spring.rabbitmq.listener.simple.auto-startup=false"
 })
 class OutboxMySqlIT {
+
+    private static final java.util.UUID AGGREGATE = java.util.UUID.fromString("019a9442-d810-7000-8000-00000000002a");
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
@@ -95,7 +97,7 @@ class OutboxMySqlIT {
         registry.add("spring.datasource.password", OutboxMySqlIT::password);
     }
 
-    /** DDL giống docs/schema_init.sql v4.0 mục 9 và 13 (aggregate_id tạm VARCHAR(36)). Chạy TRƯỚC khi Spring validate. */
+    /** DDL giống docs/schema_init.sql v4.0 mục 9 và 13 (aggregate_id BINARY(16)). Chạy TRƯỚC khi Spring validate. */
     @BeforeAll
     static void createTables() throws Exception {
         try (Connection c = DriverManager.getConnection(url(), System.getenv().getOrDefault("OUTBOX_IT_USER", "root"), password());
@@ -107,7 +109,7 @@ class OutboxMySqlIT {
                         id BIGINT AUTO_INCREMENT PRIMARY KEY,
                         event_id BINARY(16) NOT NULL UNIQUE,
                         aggregate_type VARCHAR(50) NOT NULL,
-                        aggregate_id VARCHAR(36) NOT NULL,
+                        aggregate_id BINARY(16) NOT NULL,
                         event_type VARCHAR(100) NOT NULL,
                         routing_key VARCHAR(100) NOT NULL,
                         payload JSON NOT NULL,
@@ -161,7 +163,7 @@ class OutboxMySqlIT {
     @Test
     void writerStoresTheEventInTheSameTransaction_asValidJson_withTheEventIdAsBinary16() {
         VisitCompletedEvent e = event();
-        tx.executeWithoutResult(s -> writer.write("VISIT", 42L, e));
+        tx.executeWithoutResult(s -> writer.write("VISIT", AGGREGATE, e));
 
         assertThat(jdbc.queryForObject("SELECT BIN_TO_UUID(event_id) FROM outbox_events", String.class)).isEqualTo(e.eventId().toString());
         assertThat(jdbc.queryForObject("SELECT JSON_VALID(payload) FROM outbox_events", Integer.class)).isEqualTo(1);
@@ -173,7 +175,7 @@ class OutboxMySqlIT {
     @Test
     void aRolledBackBusinessTransactionLeavesNoEvent() {
         assertThatThrownBy(() -> tx.executeWithoutResult(s -> {
-            writer.write("VISIT", 42L, event());
+            writer.write("VISIT", AGGREGATE, event());
             throw new IllegalStateException("nghiệp vụ lỗi");
         })).isInstanceOf(IllegalStateException.class);
         assertThat(repository.count()).isZero();
@@ -181,13 +183,13 @@ class OutboxMySqlIT {
 
     @Test
     void writingOutsideATransactionIsRejected() {
-        assertThatThrownBy(() -> writer.write("VISIT", 42L, event())).isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> writer.write("VISIT", AGGREGATE, event())).isInstanceOf(IllegalTransactionStateException.class);
     }
 
     @Test
     void relayPublishesPendingRowsAndMarksThemPublished() {
         VisitCompletedEvent e = event();
-        tx.executeWithoutResult(s -> writer.write("VISIT", 42L, e));
+        tx.executeWithoutResult(s -> writer.write("VISIT", AGGREGATE, e));
 
         int sent = relay.publishBatch();
 
@@ -201,7 +203,7 @@ class OutboxMySqlIT {
 
     @Test
     void relayFailureIsPersisted_andTheRowIsRetriedOnlyAfterTheBackoff() {
-        tx.executeWithoutResult(s -> writer.write("VISIT", 42L, event()));
+        tx.executeWithoutResult(s -> writer.write("VISIT", AGGREGATE, event()));
         doThrow(new AmqpConnectException(new ConnectException("Connection refused")))
                 .when(rabbitTemplate).send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
 
@@ -216,7 +218,7 @@ class OutboxMySqlIT {
 
     @Test
     void lockedRowsAreSkippedByAConcurrentRelay() throws Exception {
-        tx.executeWithoutResult(s -> writer.write("VISIT", 42L, event()));
+        tx.executeWithoutResult(s -> writer.write("VISIT", AGGREGATE, event()));
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         Thread holder = new Thread(() -> tx.executeWithoutResult(s -> {

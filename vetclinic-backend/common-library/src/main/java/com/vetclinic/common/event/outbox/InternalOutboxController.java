@@ -4,6 +4,7 @@ import com.vetclinic.common.dto.ApiResponse;
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -27,6 +28,7 @@ import java.util.List;
  */
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+@ConditionalOnClass(name = "org.springframework.data.jpa.repository.JpaRepository")   // service không có JPA (notification) không nạp: lớp tham chiếu kiểu Spring Data
 @RequestMapping("/internal/outbox")
 public class InternalOutboxController {
 

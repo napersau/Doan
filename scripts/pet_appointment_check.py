@@ -177,13 +177,13 @@ try:
     st, res = call("clinical-service", "PUT", f"/api/v1/pets/{pet['id']}", lan, {"name": new_name})
     check("đổi tên thú cưng -> 200", st == 200 and res["data"]["name"] == new_name, (st, res))
     n = sql("SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type='PetUpdatedEvent' "
-            f"AND aggregate_id = '{pet['id']}'")
+            f"AND aggregate_id = UNHEX(REPLACE('{pet['id']}','-',''))")
     check("clinical ghi PetUpdatedEvent vào outbox cùng giao dịch", n == "1", n)
     snap = wait_for(lambda: sql(f"SELECT pet_name_snapshot FROM pet_clinic_appointment_db.appointments WHERE id = {b(appt['id'])}") == new_name)
     check("outbox -> RabbitMQ -> appointment cập nhật pet_name_snapshot", bool(snap))
     check("đổi mô tả khác (không đổi tên/chủ) không phát thêm sự kiện",
           call("clinical-service", "PUT", f"/api/v1/pets/{pet['id']}", lan, {"breed": "Poodle"})[0] == 200
-          and sql(f"SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type='PetUpdatedEvent' AND aggregate_id = '{pet['id']}'") == "1")
+          and sql(f"SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type='PetUpdatedEvent' AND aggregate_id = UNHEX(REPLACE('{pet['id']}','-',''))") == "1")
     check("processed_events của appointment ghi nhận listener pet", sql("SELECT COUNT(*) FROM pet_clinic_appointment_db.processed_events WHERE consumer='appointment.pet-updated'") != "0")
 
     # ================================================================== UserProfileUpdatedEvent: đổi tên chủ nuôi -> snapshot thú cưng + lịch hẹn

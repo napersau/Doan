@@ -112,7 +112,7 @@ def start_jar(module, extra=()):
     env = dict(os.environ, DB_HOST="localhost", DB_PORT="3399", DB_USERNAME="root", DB_PASSWORD="check", TZ="UTC",
                JWT_SECRET="check-secret-check-secret-check-secret-0123456789", RABBITMQ_HOST="localhost", RABBITMQ_PORT=RABBIT_PORT,
                REDIS_HOST="localhost", REDIS_PORT=REDIS_PORT)
-    args = [JAVA, "-Duser.timezone=UTC", "-jar", jar, f"--server.port={PORTS[module]}", "--eureka.client.enabled=false", *extra]
+    args = [JAVA, "-Duser.timezone=UTC", "-Dstdout.encoding=UTF-8", "-jar", jar, f"--server.port={PORTS[module]}", "--eureka.client.enabled=false", *extra]
     for name, port in PORTS.items():
         args.append(f"--spring.cloud.discovery.client.simple.instances.{name}[0].uri=http://localhost:{port}")
     proc = subprocess.Popen(args, stdout=open(log, "w"), stderr=subprocess.STDOUT, env=env)

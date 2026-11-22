@@ -9,6 +9,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Ghi sự kiện vào {@code outbox_events} trong CÙNG giao dịch với thay đổi nghiệp vụ (Quy chuẩn v4.0 mục 9.2, NFR-09):
@@ -37,12 +38,12 @@ public class OutboxWriter {
 
     /** Sự kiện đã tự biết routing key của mình. */
     @Transactional(propagation = Propagation.MANDATORY)
-    public OutboxEvent write(String aggregateType, Object aggregateId, DomainEvent event) {
+    public OutboxEvent write(String aggregateType, UUID aggregateId, DomainEvent event) {
         return write(aggregateType, aggregateId, event.routingKey(), event);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    public OutboxEvent write(String aggregateType, Object aggregateId, String routingKey, BaseEvent event) {
+    public OutboxEvent write(String aggregateType, UUID aggregateId, String routingKey, BaseEvent event) {
         Objects.requireNonNull(event.eventId(), "Sự kiện phải có eventId");
         // Cột TIMESTAMP của MySQL không giữ phần lẻ giây và LÀM TRÒN (10:00:00.7 -> 10:00:01): nếu không cắt về giây,
         // next_attempt_at có thể nằm ở tương lai và relay chạy ngay sau đó coi sự kiện là "chưa đến hạn".
@@ -50,7 +51,7 @@ public class OutboxWriter {
         return repository.save(OutboxEvent.builder()
                 .eventId(event.eventId())
                 .aggregateType(aggregateType)
-                .aggregateId(String.valueOf(Objects.requireNonNull(aggregateId, "aggregateId")))
+                .aggregateId(Objects.requireNonNull(aggregateId, "aggregateId"))
                 .eventType(event.getClass().getSimpleName())
                 .routingKey(routingKey)
                 .payload(objectMapper.writeValueAsString(event))

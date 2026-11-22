@@ -9,6 +9,8 @@ import com.vetclinic.common.event.VisitCancelledEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.reporting.config.ReportingProperties;
+import com.vetclinic.reporting.constant.RevenueEntryType;
+import com.vetclinic.reporting.constant.RevenueType;
 import com.vetclinic.reporting.entity.RevenueFact;
 import com.vetclinic.reporting.entity.VisitFact;
 import com.vetclinic.reporting.repository.DailyRevenueSummaryRepository;
@@ -122,7 +124,7 @@ public class ReportingProjectionService {
         Instant at = e.paidAt() != null ? e.paidAt() : e.occurredAt();
         LocalDate date = businessDate(at);
         for (ServiceInvoicePaidEvent.Line line : e.lines()) {
-            if (revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(line.invoiceId(), line.serviceId(), RevenueFact.SALE)) {
+            if (revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(line.invoiceId(), line.serviceId(), RevenueEntryType.SALE)) {
                 continue;
             }
             BigDecimal before = money(line.unitPrice().multiply(BigDecimal.valueOf(line.quantity())));
@@ -131,7 +133,7 @@ public class ReportingProjectionService {
                     : money(line.unitPrice().multiply(BigDecimal.valueOf(line.quantity())).multiply(BigDecimal.ONE.add(line.vatRate())).subtract(discount));
             BigDecimal vat = net.add(discount).subtract(before);   // before + vat - discount = net (khớp VIEW của clinical)
             write(RevenueFact.builder()
-                    .revenueType(RevenueFact.SERVICE).entryType(RevenueFact.SALE)
+                    .revenueType(RevenueType.SERVICE).entryType(RevenueEntryType.SALE)
                     .sourceInvoiceId(line.invoiceId()).invoiceCode(line.invoiceCode())
                     .itemId(line.serviceId()).itemCode(line.serviceCode()).itemName(line.serviceName())
                     .categoryCode(line.category()).categoryName(orElse(line.categoryName(), line.category()))
@@ -144,19 +146,19 @@ public class ReportingProjectionService {
 
     @Transactional
     public void onServiceInvoiceRefunded(ServiceInvoiceRefundedEvent e) {
-        List<RevenueFact> sales = revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(e.invoiceId(), RevenueFact.SERVICE, RevenueFact.SALE);
+        List<RevenueFact> sales = revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(e.invoiceId(), RevenueType.SERVICE, RevenueEntryType.SALE);
         if (sales.isEmpty()) {
             throw new IllegalStateException("Hoàn tiền hóa đơn " + e.invoiceCode() + " nhưng chưa thấy dòng thu tương ứng (sự kiện thu đến chậm)");
         }
         for (RevenueFact sale : sales) {
-            if (revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(sale.getSourceInvoiceId(), sale.getItemId(), RevenueFact.REFUND)) {
+            if (revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(sale.getSourceInvoiceId(), sale.getItemId(), RevenueEntryType.REFUND)) {
                 continue;
             }
             if (e.amount() != null && e.amount().compareTo(sale.getNetAmount()) != 0) {
                 log.warn("Hoàn tiền hóa đơn {}: số hoàn {} khác số đã thu {}; báo cáo ghi theo số đã thu", e.invoiceCode(), e.amount(), sale.getNetAmount());
             }
             write(RevenueFact.builder()
-                    .revenueType(RevenueFact.SERVICE).entryType(RevenueFact.REFUND)
+                    .revenueType(RevenueType.SERVICE).entryType(RevenueEntryType.REFUND)
                     .sourceInvoiceId(sale.getSourceInvoiceId()).invoiceCode(sale.getInvoiceCode())
                     .itemId(sale.getItemId()).itemCode(sale.getItemCode()).itemName(sale.getItemName())
                     .categoryCode(sale.getCategoryCode()).categoryName(sale.getCategoryName())
@@ -209,7 +211,7 @@ public class ReportingProjectionService {
             }
             netSoFar = netSoFar.add(net);
             built.add(RevenueFact.builder()
-                    .revenueType(RevenueFact.MEDICINE).entryType(RevenueFact.SALE)
+                    .revenueType(RevenueType.MEDICINE).entryType(RevenueEntryType.SALE)
                     .sourceInvoiceId(e.invoiceId()).invoiceCode(e.invoiceCode())
                     .itemId(l.medicineId()).itemCode(l.medicineCode()).itemName(l.medicineName())
                     .categoryCode(orElse(l.categoryCode(), "UNKNOWN")).categoryName(orElse(l.categoryName(), orElse(l.categoryCode(), UNKNOWN)))
@@ -219,7 +221,7 @@ public class ReportingProjectionService {
                     .build());
         }
         for (RevenueFact fact : built) {
-            if (!revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(fact.getSourceInvoiceId(), fact.getItemId(), RevenueFact.SALE)) {
+            if (!revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(fact.getSourceInvoiceId(), fact.getItemId(), RevenueEntryType.SALE)) {
                 write(fact);
             }
         }
@@ -254,10 +256,10 @@ public class ReportingProjectionService {
 
     private void write(RevenueFact fact) {
         revenueFacts.save(fact);
-        boolean sale = RevenueFact.SALE.equals(fact.getEntryType());
-        summaries.accumulate(fact.getBusinessDate(), fact.getRevenueType(), fact.getCategoryCode(), fact.getCategoryName(), sale ? 1 : -1,
+        boolean sale = fact.getEntryType() == RevenueEntryType.SALE;
+        summaries.accumulate(fact.getBusinessDate(), fact.getRevenueType().name(), fact.getCategoryCode(), fact.getCategoryName(), sale ? 1 : -1,
                 fact.getAmountBeforeVat(), fact.getVatAmount(), fact.getDiscountAmount(), fact.getNetAmount());
-        if (RevenueFact.SERVICE.equals(fact.getRevenueType()) && fact.getDoctorId() != null) {
+        if (fact.getRevenueType() == RevenueType.SERVICE && fact.getDoctorId() != null) {
             performance(fact.getBusinessDate(), fact.getDoctorId(), orElse(fact.getDoctorName(), UNKNOWN), 0, 0, 0, fact.getNetAmount());
         }
     }

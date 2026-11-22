@@ -2,13 +2,13 @@ package com.vetclinic.reporting.service;
 
 import com.vetclinic.common.exception.AppException;
 import com.vetclinic.common.exception.ErrorCode;
+import com.vetclinic.reporting.constant.RevenueType;
 import com.vetclinic.reporting.dto.response.DoctorPerformanceResponse;
 import com.vetclinic.reporting.dto.response.RevenueByCategoryResponse;
 import com.vetclinic.reporting.dto.response.RevenueDailyResponse;
 import com.vetclinic.reporting.dto.response.VisitSummaryResponse;
 import com.vetclinic.reporting.entity.DailyRevenueSummary;
 import com.vetclinic.reporting.entity.DoctorDailyPerformance;
-import com.vetclinic.reporting.entity.RevenueFact;
 import com.vetclinic.reporting.repository.DailyRevenueSummaryRepository;
 import com.vetclinic.reporting.repository.DoctorDailyPerformanceRepository;
 import com.vetclinic.reporting.repository.RevenueFactRepository;
@@ -66,15 +66,12 @@ public class ReportQueryService {
         return new Range(from, to);
     }
 
-    private static String normalizeType(String type) {
-        if (type == null || type.isBlank()) {
-            return null;
-        }
-        String upper = type.trim().toUpperCase();
-        if (!RevenueFact.SERVICE.equals(upper) && !RevenueFact.MEDICINE.equals(upper)) {
+    private static RevenueType normalizeType(String type) {
+        try {
+            return RevenueType.parse(type);
+        } catch (IllegalArgumentException e) {
             throw new AppException(ErrorCode.INVALID_INPUT_DATA, "Loại doanh thu phải là SERVICE hoặc MEDICINE");
         }
-        return upper;
     }
 
     // ================================================================== doanh thu
@@ -82,18 +79,18 @@ public class ReportQueryService {
     /** Mỗi dòng = (ngày, loại): cộng các nhóm trong ngày; tổng toàn kỳ kèm cột riêng dịch vụ / thuốc. */
     public RevenueDailyResponse revenueDaily(LocalDate fromDate, LocalDate toDate, String typeParam) {
         Range range = range(fromDate, toDate);
-        String type = normalizeType(typeParam);
+        RevenueType type = normalizeType(typeParam);
         Map<String, Acc> byDayAndType = new TreeMap<>();
         Acc total = new Acc();
         BigDecimal serviceNet = BigDecimal.ZERO;
         BigDecimal medicineNet = BigDecimal.ZERO;
         for (DailyRevenueSummary s : summaries.findByBusinessDateBetweenOrderByBusinessDateAscRevenueTypeAscCategoryCodeAsc(range.from(), range.to())) {
-            if (type != null && !type.equals(s.getRevenueType())) {
+            if (type != null && type != s.getRevenueType()) {
                 continue;
             }
-            byDayAndType.computeIfAbsent(s.getBusinessDate() + "|" + s.getRevenueType(), k -> new Acc(s.getBusinessDate(), s.getRevenueType())).add(s);
+            byDayAndType.computeIfAbsent(s.getBusinessDate() + "|" + s.getRevenueType(), k -> new Acc(s.getBusinessDate(), s.getRevenueType().name())).add(s);
             total.add(s);
-            if (RevenueFact.SERVICE.equals(s.getRevenueType())) {
+            if (s.getRevenueType() == RevenueType.SERVICE) {
                 serviceNet = serviceNet.add(s.getNetAmount());
             } else {
                 medicineNet = medicineNet.add(s.getNetAmount());
@@ -101,7 +98,7 @@ public class ReportQueryService {
         }
         List<RevenueDailyResponse.Item> items = byDayAndType.values().stream()
                 .map(a -> new RevenueDailyResponse.Item(a.date, a.type, a.lines, a.before, a.vat, a.discount, a.net)).toList();
-        return new RevenueDailyResponse(range.from(), range.to(), type, total.totals(serviceNet, medicineNet), items);
+        return new RevenueDailyResponse(range.from(), range.to(), type == null ? null : type.name(), total.totals(serviceNet, medicineNet), items);
     }
 
     /** Theo tháng ({@code month=yyyy-MM}) hoặc theo khoảng ngày; hai cách không dùng cùng lúc. */
@@ -127,12 +124,12 @@ public class ReportQueryService {
         BigDecimal serviceNet = BigDecimal.ZERO;
         BigDecimal medicineNet = BigDecimal.ZERO;
         for (DailyRevenueSummary s : summaries.findByBusinessDateBetweenOrderByBusinessDateAscRevenueTypeAscCategoryCodeAsc(range.from(), range.to())) {
-            Acc acc = byCategory.computeIfAbsent(s.getRevenueType() + "|" + s.getCategoryCode(), k -> new Acc(null, s.getRevenueType()));
+            Acc acc = byCategory.computeIfAbsent(s.getRevenueType() + "|" + s.getCategoryCode(), k -> new Acc(null, s.getRevenueType().name()));
             acc.categoryCode = s.getCategoryCode();
             acc.categoryName = s.getCategoryName();   // dòng mới nhất (thứ tự ngày tăng dần) mang tên mới nhất
             acc.add(s);
             total.add(s);
-            if (RevenueFact.SERVICE.equals(s.getRevenueType())) {
+            if (s.getRevenueType() == RevenueType.SERVICE) {
                 serviceNet = serviceNet.add(s.getNetAmount());
             } else {
                 medicineNet = medicineNet.add(s.getNetAmount());

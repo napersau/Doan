@@ -3,6 +3,7 @@ package com.vetclinic.clinical.service.impl;
 import com.vetclinic.clinical.client.AppointmentClient;
 import com.vetclinic.clinical.client.AuthClient;
 import com.vetclinic.clinical.entity.ServiceCategory;
+import com.vetclinic.clinical.constant.ServiceDetailAction;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -359,7 +360,7 @@ public class VisitServiceImpl implements VisitService {
             if (d.getService().getCategory().is(ServiceCategory.EXAMINATION) && d.getStatus() == ServiceDetailStatus.PENDING) {
                 d.setStatus(ServiceDetailStatus.IN_PROGRESS);
                 detailRepository.save(d);
-                support.recordDetail(d.getId(), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING",
+                support.recordDetail(d.getId(), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS, ServiceDetailAction.START_PROCESSING,
                         doctorId, null);
             }
         }
@@ -527,7 +528,7 @@ public class VisitServiceImpl implements VisitService {
                 .notes(notes)
                 .build());
         support.createInvoice(detail, service);
-        support.recordDetail(detail.getId(), null, status, "ORDERED", actorId, notes);
+        support.recordDetail(detail.getId(), null, status, ServiceDetailAction.ORDERED, actorId, notes);
         return detail;
     }
 
@@ -654,7 +655,7 @@ public class VisitServiceImpl implements VisitService {
             ServiceDetailStatus from = detail.getStatus();
             detail.setStatus(ServiceDetailStatus.CANCELLED);
             detailRepository.save(detail);
-            support.recordDetail(detail.getId(), from, ServiceDetailStatus.CANCELLED, "CANCELLED", actorId, reason);
+            support.recordDetail(detail.getId(), from, ServiceDetailStatus.CANCELLED, ServiceDetailAction.CANCELLED, actorId, reason);
             support.settleInvoiceOfCancelled(detail, false);   // chưa thu -> CANCELLED; đã thu -> giữ PAID (không hoàn)
         }
     }

@@ -226,7 +226,7 @@ class StaffServiceImplTest {
 
         service.update(uid(7), new UpdateStaffRequest(null, null, null, "PART_TIME", null, null, null, null, null, "ghi chú"));
 
-        assertThat(doctor.getStaffProfile().getEmploymentType()).isEqualTo("PART_TIME");
+        assertThat(doctor.getStaffProfile().getEmploymentType()).isEqualTo(com.vetclinic.auth.constant.EmploymentType.PART_TIME);
         assertThat(doctor.getStaffProfile().getNotes()).isEqualTo("ghi chú");
         verify(events, never()).profileUpdated(any());
     }

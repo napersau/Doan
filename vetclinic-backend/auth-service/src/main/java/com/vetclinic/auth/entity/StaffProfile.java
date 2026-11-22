@@ -1,6 +1,9 @@
 package com.vetclinic.auth.entity;
 
 import jakarta.persistence.CascadeType;
+import com.vetclinic.auth.constant.EmploymentType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -56,10 +59,10 @@ public class StaffProfile {
     @Column(name = "room_number", length = 20)
     private String roomNumber;
 
-    /** FULL_TIME | PART_TIME. */
+    @Enumerated(EnumType.STRING)
     @Column(name = "employment_type", nullable = false, length = 20)
     @Builder.Default
-    private String employmentType = "FULL_TIME";
+    private EmploymentType employmentType = EmploymentType.FULL_TIME;
 
     @Column(name = "hire_date", nullable = false)
     private LocalDate hireDate;

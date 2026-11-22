@@ -1,5 +1,6 @@
 package com.vetclinic.clinical.service.impl;
 
+import com.vetclinic.clinical.constant.ServiceDetailAction;
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.TicketStatus;
 import com.vetclinic.clinical.dto.response.LabResultResponse;
@@ -73,8 +74,6 @@ public class ParaclinicServiceImpl implements ParaclinicService {
 
     private static final int MAX_FILES = 10;
 
-    private static final String ACTION_SAMPLE_COLLECTED = "SAMPLE_COLLECTED";
-    private static final String ACTION_START = "START_PROCESSING";
     private static final String REASON_CLINIC = "CLINIC";
     private static final String REASON_CUSTOMER = "CUSTOMER";
 
@@ -187,7 +186,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                 .collect(Collectors.toMap(PetVisit::getId, v -> v));
         Map<UUID, List<VisitServiceDetail>> siblings = detailRepository.findByVisitIdInOrderByIdAsc(visitIds).stream()
                 .collect(Collectors.groupingBy(VisitServiceDetail::getVisitId));
-        Map<UUID, String> latestAction = latestActions(siblings.values().stream().flatMap(List::stream)
+        Map<UUID, ServiceDetailAction> latestAction = latestActions(siblings.values().stream().flatMap(List::stream)
                 .map(VisitServiceDetail::getId).toList());
 
         return rows.stream()
@@ -209,8 +208,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     }
 
     /** action mới nhất của từng chỉ định (lịch sử luôn có dòng ORDERED đầu tiên). */
-    private Map<UUID, String> latestActions(List<UUID> detailIds) {
-        Map<UUID, String> latest = new HashMap<>();
+    private Map<UUID, ServiceDetailAction> latestActions(List<UUID> detailIds) {
+        Map<UUID, ServiceDetailAction> latest = new HashMap<>();
         for (VisitServiceDetailHistory h : detailHistoryRepository.findByVisitServiceDetailIdInOrderByIdAsc(detailIds)) {
             latest.put(h.getVisitServiceDetailId(), h.getAction());   // đã sắp theo id tăng dần: dòng cuối thắng
         }
@@ -218,26 +217,26 @@ public class ParaclinicServiceImpl implements ParaclinicService {
     }
 
     /** Trạng thái con của dịch vụ Lab: QUEUED (ORDERED) / SAMPLING (START_PROCESSING) / ANALYZING (SAMPLE_COLLECTED). */
-    static String labStage(VisitServiceDetail d, String latestAction) {
+    static String labStage(VisitServiceDetail d, ServiceDetailAction latestAction) {
         if (d.getStatus() == ServiceDetailStatus.PENDING) {
             return "QUEUED";
         }
         if (d.getStatus() != ServiceDetailStatus.IN_PROGRESS) {
             return null;
         }
-        return ACTION_SAMPLE_COLLECTED.equals(latestAction) ? "ANALYZING" : "SAMPLING";
+        return latestAction == ServiceDetailAction.SAMPLE_COLLECTED ? "ANALYZING" : "SAMPLING";
     }
 
     /**
      * EX-09 / FR-36: huy hiệu liên phòng trên hàng đợi CĐHA. SAMPLING nếu có dịch vụ Lab của ca đang lấy mẫu; SAMPLE_COLLECTED nếu
      * các dịch vụ Lab đang làm đều đã lấy mẫu xong (sẵn sàng chụp); null nếu không có dịch vụ Lab IN_PROGRESS.
      */
-    static String labBadge(List<VisitServiceDetail> siblings, Map<UUID, String> latestAction) {
+    static String labBadge(List<VisitServiceDetail> siblings, Map<UUID, ServiceDetailAction> latestAction) {
         boolean anyLab = false;
         for (VisitServiceDetail s : siblings) {
             if (s.getService().getCategory().is(ServiceCategory.LABORATORY) && s.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
                 anyLab = true;
-                if (!ACTION_SAMPLE_COLLECTED.equals(latestAction.getOrDefault(s.getId(), ACTION_START))) {
+                if (latestAction.getOrDefault(s.getId(), ServiceDetailAction.START_PROCESSING) != ServiceDetailAction.SAMPLE_COLLECTED) {
                     return "SAMPLING";
                 }
             }
@@ -258,11 +257,11 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         }
         requireDetailStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "Phải bắt đầu thực hiện (lấy mẫu) trước khi ghi nhận đã lấy mẫu");
         requireVisitWaitingResults(c.visit());
-        if (ACTION_SAMPLE_COLLECTED.equals(latestActions(List.of(detailId)).get(detailId))) {
+        if (latestActions(List.of(detailId)).get(detailId) == ServiceDetailAction.SAMPLE_COLLECTED) {
             throw new AppException(ErrorCode.INVALID_SERVICE_DETAIL_STATUS, "Đã ghi nhận lấy mẫu cho chỉ định này rồi");
         }
         // Trạng thái vẫn IN_PROGRESS; "đang phân tích" suy ra từ action mới nhất
-        support.recordDetail(detailId, ServiceDetailStatus.IN_PROGRESS, ServiceDetailStatus.IN_PROGRESS, ACTION_SAMPLE_COLLECTED,
+        support.recordDetail(detailId, ServiceDetailStatus.IN_PROGRESS, ServiceDetailStatus.IN_PROGRESS, ServiceDetailAction.SAMPLE_COLLECTED,
                 actor, null);
         return assembler.toServiceDetail(c.detail());
     }
@@ -279,8 +278,8 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         support.assertAssignedTo(c.visit(), actor);
         support.assertStatus(c.visit(), VisitStatus.IN_PROGRESS, "Chỉ ghi nhận dịch vụ khi ca đang khám (IN_PROGRESS)");
         requireDetailStatus(c.detail(), ServiceDetailStatus.PENDING, "Chỉ ghi nhận \"Đã thực hiện\" cho dịch vụ đang chờ (PENDING)");
-        setStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, "START_PROCESSING", actor, null);
-        setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, "Thực hiện tại phòng khám");
+        setStatus(c.detail(), ServiceDetailStatus.IN_PROGRESS, ServiceDetailAction.START_PROCESSING, actor, null);
+        setStatus(c.detail(), ServiceDetailStatus.COMPLETED, ServiceDetailAction.COMPLETED, actor, "Thực hiện tại phòng khám");
         return assembler.toServiceDetail(c.detail());
     }
 
@@ -305,7 +304,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                     "Chỉ hủy được chỉ định đang chờ hoặc đang thực hiện");
         }
         boolean refund = category.isParaclinical() && REASON_CLINIC.equals(resolveReasonType(reasonType));
-        setStatus(c.detail(), ServiceDetailStatus.CANCELLED, "CANCELLED", actor, reason.trim());
+        setStatus(c.detail(), ServiceDetailStatus.CANCELLED, ServiceDetailAction.CANCELLED, actor, reason.trim());
         // BR-33 / EX-08: chưa thu -> CANCELLED; đã thu + lỗi phòng khám -> REFUNDED; đã thu + khách tự hủy -> giữ PAID
         support.settleInvoiceOfCancelled(c.detail(), refund);
         queue.refreshRoomTicketOf(c.visit().getId(), detailId);   // phiếu phòng không còn dịch vụ chờ -> đóng
@@ -422,7 +421,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         }
         labResultRepository.saveAll(results);
 
-        setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
+        setStatus(c.detail(), ServiceDetailStatus.COMPLETED, ServiceDetailAction.COMPLETED, actor, null);
         queue.refreshRoomTicketOf(c.visit().getId(), detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
@@ -482,7 +481,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
                 .imagingResultId(result.getId()).fileKey(f.fileKey()).originalFileName(f.originalName())
                 .fileSize(f.size()).contentType(f.contentType()).uploadedBy(actor).build()).toList());
 
-        setStatus(c.detail(), ServiceDetailStatus.COMPLETED, "COMPLETED", actor, null);
+        setStatus(c.detail(), ServiceDetailStatus.COMPLETED, ServiceDetailAction.COMPLETED, actor, null);
         queue.refreshRoomTicketOf(c.visit().getId(), detailId);   // mọi dịch vụ của phiếu đã xong -> phiếu DONE
         support.evaluateParaclinicalCompletion(c.visit(), actor);
         return assembler.toServiceDetail(c.detail());
@@ -530,7 +529,7 @@ public class ParaclinicServiceImpl implements ParaclinicService {
         }
     }
 
-    private void setStatus(VisitServiceDetail detail, ServiceDetailStatus to, String action, UUID actor, String reason) {
+    private void setStatus(VisitServiceDetail detail, ServiceDetailStatus to, ServiceDetailAction action, UUID actor, String reason) {
         ServiceDetailStatus from = detail.getStatus();
         detail.setStatus(to);
         detailRepository.save(detail);

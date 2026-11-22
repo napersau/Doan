@@ -55,7 +55,7 @@ class ReportQueryServiceTest {
     private static DailyRevenueSummary summary(String date, String type, String code, String name, long lines, String before, String vat, String discount, String net) {
         DailyRevenueSummary s = new DailyRevenueSummary();
         ReflectionTestUtils.setField(s, "businessDate", LocalDate.parse(date));
-        ReflectionTestUtils.setField(s, "revenueType", type);
+        ReflectionTestUtils.setField(s, "revenueType", com.vetclinic.reporting.constant.RevenueType.valueOf(type));
         ReflectionTestUtils.setField(s, "categoryCode", code);
         ReflectionTestUtils.setField(s, "categoryName", name);
         ReflectionTestUtils.setField(s, "lineCount", (int) lines);

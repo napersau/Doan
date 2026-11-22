@@ -1,5 +1,7 @@
 package com.vetclinic.reporting.repository;
 
+import com.vetclinic.reporting.constant.RevenueEntryType;
+import com.vetclinic.reporting.constant.RevenueType;
 import com.vetclinic.reporting.entity.RevenueFact;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -19,7 +21,7 @@ public interface RevenueFactRepository extends JpaRepository<RevenueFact, Long> 
      */
     @Query("""
             select r.visitId from RevenueFact r
-            where r.revenueType = 'SERVICE' and r.categoryCode in :categories
+            where r.revenueType = com.vetclinic.reporting.constant.RevenueType.SERVICE and r.categoryCode in :categories
               and r.visitId in (select v.visitId from VisitFact v where v.businessDate between :from and :to)
             group by r.visitId having sum(r.netAmount) > 0""")
     List<UUID> visitsWithPositiveNet(@Param("categories") Collection<String> categories, @Param("from") LocalDate from, @Param("to") LocalDate to);
@@ -29,9 +31,9 @@ public interface RevenueFactRepository extends JpaRepository<RevenueFact, Long> 
     @Query("DELETE FROM RevenueFact r WHERE r.businessDate >= :from")
     int deleteFromDate(@Param("from") LocalDate from);
 
-    boolean existsBySourceInvoiceIdAndItemIdAndEntryType(UUID sourceInvoiceId, UUID itemId, String entryType);
+    boolean existsBySourceInvoiceIdAndItemIdAndEntryType(UUID sourceInvoiceId, UUID itemId, RevenueEntryType entryType);
 
-    List<RevenueFact> findBySourceInvoiceIdAndRevenueTypeAndEntryType(UUID sourceInvoiceId, String revenueType, String entryType);
+    List<RevenueFact> findBySourceInvoiceIdAndRevenueTypeAndEntryType(UUID sourceInvoiceId, RevenueType revenueType, RevenueEntryType entryType);
 
     @Modifying
     @Query("UPDATE RevenueFact r SET r.doctorName = :name WHERE r.doctorId = :userId")

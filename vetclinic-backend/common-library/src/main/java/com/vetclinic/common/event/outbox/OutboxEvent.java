@@ -24,8 +24,8 @@ import java.util.UUID;
  * Một dòng {@code outbox_events} (schema_init.sql v4.0 mục 9): sự kiện được ghi CÙNG giao dịch với thay đổi nghiệp vụ,
  * {@link OutboxRelay} gửi ra RabbitMQ sau. Không có entity nào của service trỏ vào bảng này.
  * <p>
- * Tạm thời (Lộ trình v4 quyết định D2): {@code aggregate_id} là chuỗi {@code VARCHAR(36)} vì thực thể còn id BIGINT;
- * bước 8.1 đổi về {@code BINARY(16)} / {@link UUID} như docs.
+ * {@code aggregate_id} là {@code BINARY(16)} / {@link UUID} (id của thực thể gốc: đợt khám, hóa đơn, tài khoản...), đúng docs; từ bước 8.1
+ * mọi thực thể gốc đều có id UUID nên không còn dạng chuỗi tạm của quyết định D2.
  */
 @Entity
 @Table(name = "outbox_events")
@@ -49,8 +49,9 @@ public class OutboxEvent {
     @Column(name = "aggregate_type", nullable = false, length = 50)
     private String aggregateType;
 
-    @Column(name = "aggregate_id", nullable = false, length = 36)
-    private String aggregateId;
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "aggregate_id", nullable = false, columnDefinition = "binary(16)")
+    private UUID aggregateId;
 
     /** Tên lớp sự kiện (không gồm package), ví dụ {@code VisitCompletedEvent}. */
     @Column(name = "event_type", nullable = false, length = 100)

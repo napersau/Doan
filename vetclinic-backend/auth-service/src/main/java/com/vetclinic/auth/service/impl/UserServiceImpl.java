@@ -9,6 +9,8 @@ import com.vetclinic.auth.dto.request.UpdateUserProfileRequest;
 import com.vetclinic.auth.dto.response.RoleResponse;
 import com.vetclinic.auth.dto.response.UserResponse;
 import com.vetclinic.auth.dto.response.UserSummaryResponse;
+import com.vetclinic.auth.constant.Gender;
+import com.vetclinic.auth.constant.RegisteredChannel;
 import com.vetclinic.auth.entity.PetOwnerProfile;
 import com.vetclinic.auth.entity.Role;
 import com.vetclinic.auth.entity.StaffProfile;
@@ -124,20 +126,20 @@ public class UserServiceImpl implements UserService {
         }
         currentRole();   // phải đăng nhập (đã chặn vai trò ở @PreAuthorize)
         log.info("Tạo tài khoản khách hàng bởi userId={}", SecurityUtils.getCurrentUserId());
-        return userMapper.toResponse(persistNewOwner(request, PetOwnerProfile.CHANNEL_AT_CLINIC));
+        return userMapper.toResponse(persistNewOwner(request, RegisteredChannel.AT_CLINIC));
     }
 
     @Override
     @Transactional
     public UserResponse register(RegisterRequest request) {
         User user = persistNewOwner(new CreateUserRequest(null, request.password(), request.fullName(), request.phoneNumber(),
-                request.email(), request.address(), null, RoleCode.PET_OWNER), PetOwnerProfile.CHANNEL_ONLINE);
+                request.email(), request.address(), null, RoleCode.PET_OWNER), RegisteredChannel.ONLINE);
         log.info("Chủ nuôi tự đăng ký: userId={}", user.getId());
         return userMapper.toResponse(user);
     }
 
     /** Một giao dịch ghi {@code users + user_roles(PET_OWNER) + user_profiles + pet_owner_profiles}. */
-    private User persistNewOwner(CreateUserRequest request, String channel) {
+    private User persistNewOwner(CreateUserRequest request, RegisteredChannel channel) {
         requireEncodablePassword(request.password());
 
         String phone = request.phoneNumber().trim();
@@ -427,7 +429,7 @@ public class UserServiceImpl implements UserService {
             profile.setAddress(blankToNull(request.address()));
         }
         if (request.gender() != null) {
-            profile.setGender(blankToNull(request.gender()));
+            profile.setGender(Gender.parse(request.gender()));
         }
         if (request.dateOfBirth() != null) {
             profile.setDateOfBirth(request.dateOfBirth());

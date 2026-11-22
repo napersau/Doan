@@ -1,6 +1,10 @@
 package com.vetclinic.reporting.entity;
 
+import com.vetclinic.reporting.constant.RevenueEntryType;
+import com.vetclinic.reporting.constant.RevenueType;
 import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -30,20 +34,17 @@ import java.util.UUID;
 @AllArgsConstructor
 public class RevenueFact {
 
-    public static final String SERVICE = "SERVICE";
-    public static final String MEDICINE = "MEDICINE";
-    public static final String SALE = "SALE";
-    public static final String REFUND = "REFUND";
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "revenue_type", nullable = false, length = 20)
-    private String revenueType;
+    private RevenueType revenueType;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "entry_type", nullable = false, length = 20)
-    private String entryType;
+    private RevenueEntryType entryType;
 
     @Column(name = "source_invoice_id", nullable = false)
     private UUID sourceInvoiceId;

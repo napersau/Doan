@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_id BINARY(16) NOT NULL UNIQUE, -- UUIDv7, consumer dùng để chống xử lý trùng
     aggregate_type VARCHAR(50) NOT NULL, -- USER, PET, VISIT, SERVICE_INVOICE...
-    aggregate_id VARCHAR(36) NOT NULL, -- D2 (LO_TRINH_SUA_CODE_V4.md): tạm VARCHAR(36), đổi về BINARY(16) ở bước 8.1
+    aggregate_id BINARY(16) NOT NULL,
     event_type VARCHAR(100) NOT NULL,
     routing_key VARCHAR(100) NOT NULL,
     payload JSON NOT NULL,
@@ -276,12 +276,11 @@ CREATE INDEX idx_ash_user ON appointment_status_histories(changed_by_user_id);
 
 -- 6. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 12): sự kiện được ghi cùng giao dịch với nghiệp vụ, OutboxRelay gửi sang RabbitMQ.
 -- appointment phát: AppointmentBookedEvent, AppointmentStatusChangedEvent, AppointmentNoShowEvent.
--- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
 CREATE TABLE IF NOT EXISTS outbox_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_id BINARY(16) NOT NULL UNIQUE,
     aggregate_type VARCHAR(50) NOT NULL,
-    aggregate_id VARCHAR(36) NOT NULL,
+    aggregate_id BINARY(16) NOT NULL,
     event_type VARCHAR(100) NOT NULL,
     routing_key VARCHAR(100) NOT NULL,
     payload JSON NOT NULL,
@@ -784,12 +783,11 @@ JOIN species s ON s.code = v.sp;
 -- 17. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 36): sự kiện được ghi cùng giao dịch với nghiệp vụ, OutboxRelay gửi sang RabbitMQ.
 -- clinical phát qua outbox: VisitCheckedInEvent, ParaclinicalResultsReadyEvent, VisitCompletedEvent.
 -- QueueTicketIssuedEvent và PatientCalledEvent gửi thẳng (quyết định D9: thông báo tức thời, mất cũng không sai dữ liệu).
--- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
 CREATE TABLE IF NOT EXISTS outbox_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_id BINARY(16) NOT NULL UNIQUE,
     aggregate_type VARCHAR(50) NOT NULL,
-    aggregate_id VARCHAR(36) NOT NULL,
+    aggregate_id BINARY(16) NOT NULL,
     event_type VARCHAR(100) NOT NULL,
     routing_key VARCHAR(100) NOT NULL,
     payload JSON NOT NULL,
@@ -963,13 +961,12 @@ CREATE INDEX idx_it_creator ON inventory_transactions(created_by);
 
 -- 28. OUTBOX_EVENTS (Transactional Outbox, docs v4.0 mục 52): sự kiện được ghi cùng giao dịch với nghiệp vụ, OutboxRelay gửi sang RabbitMQ.
 -- billing-pharmacy phát: MedicineInvoicePaidEvent, MedicineLowStockEvent (sau này thêm MedicineInvoiceDraftCreatedEvent).
--- Khác docs (quyết định D2 của LO_TRINH_SUA_CODE_V4.md): aggregate_id tạm VARCHAR(36) vì thực thể còn id BIGINT; đổi về BINARY(16) ở bước 8.1.
 -- (processed_events của billing sẽ thêm ở bước 4.x khi billing nhận PrescriptionCreatedEvent.)
 CREATE TABLE IF NOT EXISTS outbox_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_id BINARY(16) NOT NULL UNIQUE,
     aggregate_type VARCHAR(50) NOT NULL,
-    aggregate_id VARCHAR(36) NOT NULL,
+    aggregate_id BINARY(16) NOT NULL,
     event_type VARCHAR(100) NOT NULL,
     routing_key VARCHAR(100) NOT NULL,
     payload JSON NOT NULL,

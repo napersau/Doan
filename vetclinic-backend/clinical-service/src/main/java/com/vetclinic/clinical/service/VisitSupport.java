@@ -3,6 +3,7 @@ package com.vetclinic.clinical.service;
 import com.vetclinic.common.util.Codes;
 import com.vetclinic.clinical.entity.ServiceCategory;
 import com.vetclinic.clinical.entity.ServicePrice;
+import com.vetclinic.clinical.constant.ServiceDetailAction;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.VisitStatus;
@@ -100,7 +101,7 @@ public class VisitSupport {
     }
 
     /** Audit trail tiến độ một chỉ định. action: ORDERED, START_PROCESSING, SAMPLE_COLLECTED, COMPLETED, CANCELLED. */
-    public void recordDetail(UUID detailId, ServiceDetailStatus from, ServiceDetailStatus to, String action,
+    public void recordDetail(UUID detailId, ServiceDetailStatus from, ServiceDetailStatus to, ServiceDetailAction action,
                              UUID actorId, String reason) {
         detailHistoryRepository.save(VisitServiceDetailHistory.builder()
                 .visitServiceDetailId(detailId)
@@ -204,7 +205,7 @@ public class VisitSupport {
                     && detail.getStatus() == ServiceDetailStatus.IN_PROGRESS) {
                 detail.setStatus(ServiceDetailStatus.COMPLETED);
                 detailRepository.save(detail);
-                recordDetail(detail.getId(), ServiceDetailStatus.IN_PROGRESS, ServiceDetailStatus.COMPLETED, "COMPLETED", actorId, null);
+                recordDetail(detail.getId(), ServiceDetailStatus.IN_PROGRESS, ServiceDetailStatus.COMPLETED, ServiceDetailAction.COMPLETED, actorId, null);
             }
         }
     }

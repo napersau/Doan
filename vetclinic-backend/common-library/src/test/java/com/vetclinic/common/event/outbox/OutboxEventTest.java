@@ -13,7 +13,7 @@ class OutboxEventTest {
     private static final Instant NOW = Instant.parse("2026-11-20T03:00:00Z");
 
     static OutboxEvent pending() {
-        return OutboxEvent.builder().eventId(UUID.randomUUID()).aggregateType("VISIT").aggregateId("1")
+        return OutboxEvent.builder().eventId(UUID.randomUUID()).aggregateType("VISIT").aggregateId(UUID.randomUUID())
                 .eventType("VisitCompletedEvent").routingKey("visit.completed").payload("{}")
                 .status(OutboxStatus.PENDING).nextAttemptAt(NOW).createdAt(NOW).build();
     }

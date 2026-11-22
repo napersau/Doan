@@ -148,7 +148,7 @@ class UserServiceImplTest {
         assertThat(user.getProfile().getEmail()).isEqualTo("a@example.com");
         assertThat(user.getStaffProfile()).isNull();
         assertThat(user.getPetOwnerProfile().getCustomerCode()).isEqualTo("KH0007");
-        assertThat(user.getPetOwnerProfile().getRegisteredChannel()).isEqualTo("ONLINE");
+        assertThat(user.getPetOwnerProfile().getRegisteredChannel()).isEqualTo(com.vetclinic.auth.constant.RegisteredChannel.ONLINE);
         assertThat(encoder.matches("Chunuoi@1", user.getPasswordHash())).isTrue();   // lưu BCrypt, không lưu mật khẩu thô
         assertThat(response.role()).isEqualTo(RoleCode.PET_OWNER);
         assertThat(response.roles()).containsExactly(RoleCode.PET_OWNER);
@@ -191,7 +191,7 @@ class UserServiceImplTest {
         User user = savedUser();
         assertThat(user.getRoles()).extracting(Role::getCode).containsExactly(RoleCode.PET_OWNER);
         assertThat(user.getStaffProfile()).isNull();
-        assertThat(user.getPetOwnerProfile().getRegisteredChannel()).isEqualTo("AT_CLINIC");
+        assertThat(user.getPetOwnerProfile().getRegisteredChannel()).isEqualTo(com.vetclinic.auth.constant.RegisteredChannel.AT_CLINIC);
     }
 
     @Test

@@ -128,8 +128,8 @@ class QueueCoordinatorTest {
         verify(histories).save(saved.capture());
         QueueTicketHistory h = saved.getValue();
         assertThat(h.getTicketId()).isEqualTo(tid(60L));
-        assertThat(h.getFinalStatus()).isEqualTo("DONE");
-        assertThat(h.getQueueType()).isEqualTo("DOCTOR");
+        assertThat(h.getFinalStatus()).isEqualTo(TicketStatus.DONE);
+        assertThat(h.getQueueType()).isEqualTo(QueueType.DOCTOR);
         assertThat(h.getTicketNo()).isEqualTo(7);
         assertThat(h.getPriority()).isEqualTo(1);
         assertThat(h.getDoctorId()).isEqualTo(DOCTOR);
@@ -162,7 +162,7 @@ class QueueCoordinatorTest {
 
         ArgumentCaptor<QueueTicketHistory> saved = ArgumentCaptor.forClass(QueueTicketHistory.class);
         verify(histories, org.mockito.Mockito.times(2)).save(saved.capture());
-        assertThat(saved.getAllValues()).extracting(QueueTicketHistory::getFinalStatus).containsOnly("CANCELLED");
+        assertThat(saved.getAllValues()).extracting(QueueTicketHistory::getFinalStatus).containsOnly(TicketStatus.CANCELLED);
         assertThat(saved.getAllValues()).extracting(QueueTicketHistory::getCancelReason).containsOnly("Khách bỏ về");
         assertThat(saved.getAllValues().get(1).getDetailIds()).containsExactly(lid(1L));   // dịch vụ của phiếu phòng
         verify(redis).finish(tid(60L));
@@ -182,7 +182,7 @@ class QueueCoordinatorTest {
 
     @Test
     void recordHistory_aTicketNumberAlreadyInTheHistory_isSkippedSoTheBusinessActionIsNotBroken() {
-        when(histories.existsByQueueTypeAndServiceDateAndTicketNo("DOCTOR", java.time.LocalDate.of(2026, 10, 30), 1)).thenReturn(true);   // Redis cấp lại số từ 1
+        when(histories.existsByQueueTypeAndServiceDateAndTicketNo(QueueType.DOCTOR, java.time.LocalDate.of(2026, 10, 30), 1)).thenReturn(true);   // Redis cấp lại số từ 1
         openTickets(ticket(60L, QueueType.DOCTOR, 100L, DOCTOR, 1, 0, TicketStatus.WAITING));
 
         queue.cancelActiveTickets(VISIT, "chốt ca");   // không ném DataIntegrityViolation
@@ -230,7 +230,7 @@ class QueueCoordinatorTest {
 
         ArgumentCaptor<QueueTicketHistory> saved = ArgumentCaptor.forClass(QueueTicketHistory.class);
         verify(histories).save(saved.capture());
-        assertThat(saved.getValue().getFinalStatus()).isEqualTo("CANCELLED");
+        assertThat(saved.getValue().getFinalStatus()).isEqualTo(TicketStatus.CANCELLED);
         verify(redis).finish(tid(70L));
     }
 
@@ -247,7 +247,7 @@ class QueueCoordinatorTest {
 
         ArgumentCaptor<QueueTicketHistory> saved = ArgumentCaptor.forClass(QueueTicketHistory.class);
         verify(histories).save(saved.capture());
-        assertThat(saved.getValue().getFinalStatus()).isEqualTo("DONE");
+        assertThat(saved.getValue().getFinalStatus()).isEqualTo(TicketStatus.DONE);
         assertThat(saved.getValue().getDetailIds()).containsExactly(d1, d2);
         verify(redis).finish(tid(71L));
     }
@@ -336,7 +336,7 @@ class QueueCoordinatorTest {
     @Test
     void issue_whenTheSequenceKeyIsGone_raisesItToTheLargestNumberInTheHistory_beforeIssuing() {
         when(redis.seqExists(java.time.LocalDate.of(2026, 10, 30), QueueType.DOCTOR)).thenReturn(false);
-        when(histories.findMaxTicketNo("DOCTOR", java.time.LocalDate.of(2026, 10, 30))).thenReturn(7);
+        when(histories.findMaxTicketNo(QueueType.DOCTOR, java.time.LocalDate.of(2026, 10, 30))).thenReturn(7);
         when(redis.issue(any(IssueTicketRequest.class))).thenReturn(new IssuedTicket(tid(60L), 8, false));
 
         queue.issue(petVisit(), QueueType.DOCTOR, DOCTOR, 0, CLOCK.instant(), null, List.of(), "k", null);

@@ -1,6 +1,7 @@
 package com.vetclinic.clinical.service.impl;
 
 import com.vetclinic.clinical.client.AuthClient;
+import com.vetclinic.clinical.constant.ServiceDetailAction;
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.constant.TicketStatus;
@@ -164,7 +165,7 @@ public class QueueTicketServiceImpl implements QueueTicketService {
                     d.setStatus(ServiceDetailStatus.IN_PROGRESS);
                     detailRepository.save(d);
                     support.recordDetail(d.getId(), ServiceDetailStatus.PENDING, ServiceDetailStatus.IN_PROGRESS,
-                            "START_PROCESSING", userId, null);
+                            ServiceDetailAction.START_PROCESSING, userId, null);
                     started = true;
                 }
             }

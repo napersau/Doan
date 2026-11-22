@@ -188,7 +188,7 @@ async function main() {
   check('đổi vai trò bác sĩ → lễ tân (phòng bị xóa)', (await call('PUT', `${USERS}/${docId}/roles`, { token: T.admin, body: { roleCodes: ['RECEPTIONIST'] } })).data?.role === 'RECEPTIONIST');
   check('lễ tân → bác sĩ khi đã có hồ sơ chuyên môn', (await call('PUT', `${USERS}/${docId}/roles`, { token: T.admin, body: { roleCodes: ['VETERINARIAN'] } })).data?.role === 'VETERINARIAN');
   check('trả tài khoản về Lễ tân (như trạng thái cũ, không tính vào sức chứa đặt lịch)', (await call('PUT', `${USERS}/${docId}/roles`, { token: T.admin, body: { roleCodes: ['RECEPTIONIST'] } })).data?.role === 'RECEPTIONIST');
-  const eventCount = (type) => Number(sql(`SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events WHERE aggregate_id = '${docId}' AND event_type = '${type}'`));
+  const eventCount = (type) => Number(sql(`SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events WHERE aggregate_id = UNHEX(REPLACE('${docId}','-','')) AND event_type = '${type}'`));
   check('outbox: UserStatusChangedEvent khi khóa / mở khóa / ngừng / kích hoạt (4 dòng)', eventCount('UserStatusChangedEvent') === 4, String(eventCount('UserStatusChangedEvent')));
   check('outbox: UserProfileUpdatedEvent khi tạo, đổi họ tên, xóa phòng (3 dòng)', eventCount('UserProfileUpdatedEvent') === 3, String(eventCount('UserProfileUpdatedEvent')));
   check('Admin đặt lại mật khẩu nhân sự', (await call('POST', `${AUTH}/users/${docId}/reset-password`, { token: T.admin, body: { newPassword: 'Reset@1234' } })).status === 200 && (await loginRes(docPhone, 'Reset@1234')).status === 200);
@@ -264,7 +264,7 @@ async function main() {
   check('số vi mạch đã dùng cho thú cưng khác → 409', (await call('PUT', `/api/v1/pets/${ID.pet.lu}`, { token: T.rec, body: { microchipNumber: chip } })).status === 409);
   check('tìm thú cưng theo SĐT chủ (snapshot) và theo số vi mạch', (await call('GET', '/api/v1/pets?ownerPhone=0912000008&size=100', { token: T.rec })).data?.items?.some((p) => p.id === petId) && (await call('GET', `/api/v1/pets?keyword=${chip}`, { token: T.rec })).data?.items?.some((p) => p.id === petId));
   const renamed = await call('PUT', `/api/v1/pets/${petId}`, { token: T.rec, body: { name: `Quầy-đổi-${RUN}` } });
-  check('đổi tên thú cưng ghi PetUpdatedEvent vào outbox cùng giao dịch', renamed.status === 200 && Number(sql(`SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type='PetUpdatedEvent' AND aggregate_id='${petId}'`)) >= 1);
+  check('đổi tên thú cưng ghi PetUpdatedEvent vào outbox cùng giao dịch', renamed.status === 200 && Number(sql(`SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type='PetUpdatedEvent' AND aggregate_id = UNHEX(REPLACE('${petId}','-',''))`)) >= 1);
   const doomed = await newPet('XoaMem');
   check('xóa mềm thú cưng: dòng còn (deleted_at), GET → 404, biến mất khỏi danh sách', (await call('DELETE', `/api/v1/pets/${doomed}`, { token: T.rec })).status === 200
     && sql(`SELECT deleted_at IS NOT NULL FROM pet_clinic_clinical_db.pets WHERE id=${uuidSql(doomed)}`) === '1'

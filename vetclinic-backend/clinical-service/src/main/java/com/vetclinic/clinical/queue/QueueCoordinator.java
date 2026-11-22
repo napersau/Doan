@@ -117,7 +117,7 @@ public class QueueCoordinator {
      */
     void ensureSequence(LocalDate date, QueueType type) {
         if (!redis.seqExists(date, type)) {
-            Integer max = histories.findMaxTicketNo(type.name(), date);
+            Integer max = histories.findMaxTicketNo(type, date);
             if (max != null && max > 0) {
                 redis.ensureSeqAtLeast(date, type, max);
             }
@@ -163,7 +163,7 @@ public class QueueCoordinator {
     public void finishDoctorTicket(UUID visitId) {
         openTicketsOf(visitId).stream()
                 .filter(t -> t.queueType() == QueueType.DOCTOR && t.status() == TicketStatus.IN_SERVICE)
-                .forEach(t -> end(t, "DONE", null));
+                .forEach(t -> end(t, TicketStatus.DONE, null));
     }
 
     /** Lễ tân đổi / gỡ Bác sĩ (Q3, EX-17): phiếu DOCTOR đang chờ đi theo bằng {@code move_ticket.lua} sau commit, GIỮ NGUYÊN số phiếu và score. */
@@ -175,7 +175,7 @@ public class QueueCoordinator {
 
     /** Khách bỏ về / hủy ca (T03, T08, T11, T12): mọi phiếu còn hiệu lực của ca -> CANCELLED (lịch sử trong giao dịch, xóa khỏi Redis sau commit). */
     public void cancelActiveTickets(UUID visitId, String reason) {
-        openTicketsOf(visitId).forEach(t -> end(t, "CANCELLED", reason));
+        openTicketsOf(visitId).forEach(t -> end(t, TicketStatus.CANCELLED, reason));
     }
 
     // ================================================================== vòng đời phiếu phòng XN / CĐHA
@@ -190,9 +190,9 @@ public class QueueCoordinator {
             boolean anyPending = details.stream().anyMatch(d -> d.getStatus() == ServiceDetailStatus.PENDING);
             boolean anyOpen = details.stream().anyMatch(d -> ServiceDetailStatus.OPEN.contains(d.getStatus()));
             if (ticket.status() == TicketStatus.WAITING && !anyPending) {
-                end(ticket, "CANCELLED", "Mọi dịch vụ của phiếu đã bị hủy");
+                end(ticket, TicketStatus.CANCELLED, "Mọi dịch vụ của phiếu đã bị hủy");
             } else if (ticket.status() == TicketStatus.IN_SERVICE && !anyOpen) {
-                end(ticket, "DONE", null);
+                end(ticket, TicketStatus.DONE, null);
             }
         });
     }
@@ -209,17 +209,17 @@ public class QueueCoordinator {
 
     // ================================================================== kết thúc phiếu: lịch sử (trong giao dịch) + xóa khỏi Redis (sau commit)
 
-    private void end(TicketView t, String finalStatus, String reason) {
+    private void end(TicketView t, TicketStatus finalStatus, String reason) {
         recordHistory(t, finalStatus, reason);
         afterCommit(() -> redis.finish(t.id()));
     }
 
     /** Ghi một dòng lịch sử cho phiếu kết thúc; {@code ticket_id UNIQUE} + kiểm tra tồn tại chặn ghi trùng khi thử lại. */
-    void recordHistory(TicketView t, String finalStatus, String reason) {
+    void recordHistory(TicketView t, TicketStatus finalStatus, String reason) {
         if (histories.existsByTicketId(t.id())) {
             return;
         }
-        if (histories.existsByQueueTypeAndServiceDateAndTicketNo(t.queueType().name(), t.serviceDate(), t.ticketNo())) {
+        if (histories.existsByQueueTypeAndServiceDateAndTicketNo(t.queueType(), t.serviceDate(), t.ticketNo())) {
             // Redis mất bộ đếm số phiếu rồi cấp lại từ 1 (UNIQUE queue_type + service_date + ticket_no của lịch sử): lịch sử chỉ để tra cứu / thống kê, KHÔNG được
             // làm hỏng thao tác nghiệp vụ đang chạy (chốt ca, hủy ca...) nên bỏ qua dòng này và ghi log để QueueRebuildJob / quản trị xử lý (6.3)
             log.error("Lịch sử phiếu {} #{} ngày {} đã có số này (bộ đếm Redis bị cấp lại?): bỏ qua dòng lịch sử của phiếu {}",
@@ -228,7 +228,7 @@ public class QueueCoordinator {
         }
         histories.save(QueueTicketHistory.builder()
                 .ticketId(t.id())
-                .queueType(t.queueType().name())
+                .queueType(t.queueType())
                 .serviceDate(t.serviceDate())
                 .ticketNo(t.ticketNo())
                 .visitId(t.visitId())

@@ -55,6 +55,10 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+        </dependency>
         <!-- Kiểm tra chữ ký JWT trong STOMP CONNECT (cùng khóa JWT_SECRET với auth-service và Gateway) -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

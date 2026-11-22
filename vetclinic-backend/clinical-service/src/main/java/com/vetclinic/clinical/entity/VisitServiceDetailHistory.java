@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import com.vetclinic.clinical.constant.ServiceDetailAction;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import java.time.Instant;
 
@@ -35,9 +36,9 @@ public class VisitServiceDetailHistory {
     @Column(name = "to_status", nullable = false)
     private ServiceDetailStatus toStatus;
 
-    /** ORDERED, START_PROCESSING, COMPLETED, CANCELLED, POSTPONED, RECALL */
+    @Enumerated(EnumType.STRING)
     @Column(name = "action", nullable = false, length = 50)
-    private String action;
+    private ServiceDetailAction action;
 
     @Column(name = "changed_by_user_id", nullable = false)
     private UUID changedByUserId;

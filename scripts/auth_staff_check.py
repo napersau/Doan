@@ -144,7 +144,7 @@ check("PUT /staff/{id} đổi chức danh", st == 200 and res["data"]["positionT
 st, res = call("PUT", f"/api/v1/users/{doc_id}/profile", admin, {"fullName": "BS Đã Đổi Tên"})
 check("PUT /users/{id}/profile đổi họ tên", st == 200 and res["data"]["fullName"] == "BS Đã Đổi Tên", (st, res))
 n = sql("SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events "
-        f"WHERE aggregate_id = '{doc_id}' AND event_type = 'UserProfileUpdatedEvent'")
+        f"WHERE aggregate_id = UNHEX(REPLACE('{doc_id}','-','')) AND event_type = 'UserProfileUpdatedEvent'")
 check("outbox có UserProfileUpdatedEvent (tạo nhân sự + đổi tên = 2 dòng)", n == "2", n)
 
 # --- khóa / mở khóa / ngừng
@@ -155,7 +155,7 @@ check("đăng nhập khi bị khóa -> 401 AUTH_1107", st == 401 and res.get("er
 st, res = call("GET", "/api/v1/staff/doctors", rec_token)
 check("Bác sĩ bị khóa không còn trong danh sách hoạt động", st == 200 and not any(d["id"] == doc_id for d in res["data"]), (st, res))
 n = sql("SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events "
-        f"WHERE aggregate_id = '{doc_id}' AND event_type = 'UserStatusChangedEvent'")
+        f"WHERE aggregate_id = UNHEX(REPLACE('{doc_id}','-','')) AND event_type = 'UserStatusChangedEvent'")
 check("outbox có UserStatusChangedEvent", n == "1", n)
 st, res = call("POST", f"/api/v1/users/{doc_id}/lock", admin)
 check("khóa lại lần hai -> 400", st == 400, (st, res))

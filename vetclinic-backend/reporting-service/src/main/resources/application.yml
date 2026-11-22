@@ -47,8 +47,8 @@ spring:
       client:
         config:
           default:
-            connect-timeout: 3000
-            read-timeout: 15000     # trang outbox tối đa 1000 dòng
+            connect-timeout: 2000
+            read-timeout: 15000     # khác 2 giây của các service khác: chỉ job dựng lại (admin chạy tay) đọc trang outbox tối đa 1000 dòng; không có Circuit Breaker
 
 eureka:
   client:

@@ -219,7 +219,7 @@ class ParaclinicServiceImplTest {
     }
 
     private static VisitServiceDetailHistory history(long detailId, String action) {
-        return VisitServiceDetailHistory.builder().visitServiceDetailId(lid(detailId)).action(action)
+        return VisitServiceDetailHistory.builder().visitServiceDetailId(lid(detailId)).action(com.vetclinic.clinical.constant.ServiceDetailAction.valueOf(action))
                 .toStatus(ServiceDetailStatus.PENDING).changedByUserId(LAB_TECH).build();
     }
 
@@ -270,7 +270,7 @@ class ParaclinicServiceImplTest {
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
         ArgumentCaptor<VisitServiceDetailHistory> audit = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
         verify(detailHistoryRepository).save(audit.capture());
-        assertThat(audit.getValue().getAction()).isEqualTo("SAMPLE_COLLECTED");
+        assertThat(audit.getValue().getAction()).isEqualTo(com.vetclinic.clinical.constant.ServiceDetailAction.SAMPLE_COLLECTED);
         assertThat(audit.getValue().getFromStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
         assertThat(audit.getValue().getToStatus()).isEqualTo(ServiceDetailStatus.IN_PROGRESS);
     }
@@ -312,7 +312,7 @@ class ParaclinicServiceImplTest {
         assertThat(d.getStatus()).isEqualTo(ServiceDetailStatus.COMPLETED);
         ArgumentCaptor<VisitServiceDetailHistory> audit = ArgumentCaptor.forClass(VisitServiceDetailHistory.class);
         verify(detailHistoryRepository, Mockito.times(2)).save(audit.capture());
-        assertThat(audit.getAllValues()).extracting(VisitServiceDetailHistory::getAction).containsExactly("START_PROCESSING", "COMPLETED");
+        assertThat(audit.getAllValues()).extracting(VisitServiceDetailHistory::getAction).containsExactly(com.vetclinic.clinical.constant.ServiceDetailAction.START_PROCESSING, com.vetclinic.clinical.constant.ServiceDetailAction.COMPLETED);
     }
 
     @Test

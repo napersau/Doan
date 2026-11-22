@@ -1,5 +1,8 @@
 package com.vetclinic.auth.entity;
 
+import com.vetclinic.auth.constant.Gender;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -47,9 +50,9 @@ public class UserProfile {
     @Column(name = "email", unique = true, length = 150)
     private String email;
 
-    /** MALE | FEMALE | OTHER. */
+    @Enumerated(EnumType.STRING)
     @Column(name = "gender", length = 10)
-    private String gender;
+    private Gender gender;
 
     @Column(name = "date_of_birth")
     private LocalDate dateOfBirth;

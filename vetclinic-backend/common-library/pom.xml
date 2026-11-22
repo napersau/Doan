@@ -62,6 +62,11 @@
             <artifactId>spring-cloud-starter-openfeign</artifactId>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-circuitbreaker</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- v4 (Lộ trình bước 1.1): Transactional Outbox + processed_events cần JPA; chỉ service có CSDL mới bật -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

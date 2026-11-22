@@ -9,6 +9,8 @@ import com.vetclinic.common.event.VisitCancelledEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
 import com.vetclinic.reporting.config.ReportingProperties;
+import com.vetclinic.reporting.constant.RevenueEntryType;
+import com.vetclinic.reporting.constant.RevenueType;
 import com.vetclinic.reporting.entity.RevenueFact;
 import com.vetclinic.reporting.entity.VisitFact;
 import com.vetclinic.reporting.repository.DailyRevenueSummaryRepository;
@@ -62,7 +64,7 @@ class ReportingProjectionServiceTest {
     @BeforeEach
     void setUp() {
         service = new ReportingProjectionService(visitFacts, revenueFacts, summaries, performances, new ReportingProperties("Asia/Ho_Chi_Minh"));
-        lenient().when(revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(any(), any(), anyString())).thenReturn(false);
+        lenient().when(revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(any(), any(), any(RevenueEntryType.class))).thenReturn(false);
     }
 
     private VisitFact fact(String status, boolean emergency) {
@@ -179,8 +181,8 @@ class ReportingProjectionServiceTest {
         ArgumentCaptor<RevenueFact> captor = ArgumentCaptor.forClass(RevenueFact.class);
         verify(revenueFacts).save(captor.capture());
         RevenueFact row = captor.getValue();
-        assertThat(row.getRevenueType()).isEqualTo("SERVICE");
-        assertThat(row.getEntryType()).isEqualTo("SALE");
+        assertThat(row.getRevenueType()).isEqualTo(RevenueType.SERVICE);
+        assertThat(row.getEntryType()).isEqualTo(RevenueEntryType.SALE);
         assertThat(row.getBusinessDate()).isEqualTo(LocalDate.of(2026, 11, 21));
         assertThat(row.getAmountBeforeVat()).isEqualByComparingTo("250000.00");
         assertThat(row.getVatAmount()).isEqualByComparingTo("0.00");
@@ -233,7 +235,7 @@ class ReportingProjectionServiceTest {
         UUID invoiceId = UUID.randomUUID();
         UUID serviceId = UUID.randomUUID();
         when(visitFacts.findById(visitId)).thenReturn(Optional.empty());
-        when(revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(invoiceId, serviceId, "SALE")).thenReturn(true);
+        when(revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(invoiceId, serviceId, RevenueEntryType.SALE)).thenReturn(true);
 
         service.onServiceInvoicePaid(paid(invoiceId, serviceId));
 
@@ -244,7 +246,7 @@ class ReportingProjectionServiceTest {
     // ------------------------------------------------------------------ hoàn tiền
 
     private RevenueFact sale(UUID invoiceId, UUID itemId) {
-        return RevenueFact.builder().revenueType("SERVICE").entryType("SALE").sourceInvoiceId(invoiceId).invoiceCode("SINV-1").itemId(itemId).itemCode("XRAY")
+        return RevenueFact.builder().revenueType(RevenueType.SERVICE).entryType(RevenueEntryType.SALE).sourceInvoiceId(invoiceId).invoiceCode("SINV-1").itemId(itemId).itemCode("XRAY")
                 .itemName("Chụp X-quang").categoryCode("IMAGING").categoryName("Chẩn đoán hình ảnh").visitId(visitId).doctorId(doctorId).doctorName("BS Tiến")
                 .businessDate(LocalDate.of(2026, 11, 20)).occurredAt(lateEvening.minusSeconds(86400)).quantity(1)
                 .amountBeforeVat(new BigDecimal("250000.00")).vatAmount(new BigDecimal("0.00")).discountAmount(new BigDecimal("50000.00"))
@@ -260,14 +262,14 @@ class ReportingProjectionServiceTest {
     void refundWritesNegativeCopyOfSaleOnRefundDate() {
         UUID invoiceId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
-        when(revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(invoiceId, "SERVICE", "SALE")).thenReturn(List.of(sale(invoiceId, itemId)));
+        when(revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(invoiceId, RevenueType.SERVICE, RevenueEntryType.SALE)).thenReturn(List.of(sale(invoiceId, itemId)));
 
         service.onServiceInvoiceRefunded(refund(invoiceId));
 
         ArgumentCaptor<RevenueFact> captor = ArgumentCaptor.forClass(RevenueFact.class);
         verify(revenueFacts).save(captor.capture());
         RevenueFact row = captor.getValue();
-        assertThat(row.getEntryType()).isEqualTo("REFUND");
+        assertThat(row.getEntryType()).isEqualTo(RevenueEntryType.REFUND);
         assertThat(row.getQuantity()).isEqualTo(-1);
         assertThat(row.getNetAmount()).isEqualByComparingTo("-200000.00");
         assertThat(row.getAmountBeforeVat()).isEqualByComparingTo("-250000.00");
@@ -281,7 +283,7 @@ class ReportingProjectionServiceTest {
     @Test
     void refundWithoutSaleRowThrowsSoRabbitRetries() {
         UUID invoiceId = UUID.randomUUID();
-        when(revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(invoiceId, "SERVICE", "SALE")).thenReturn(List.of());
+        when(revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(invoiceId, RevenueType.SERVICE, RevenueEntryType.SALE)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.onServiceInvoiceRefunded(refund(invoiceId))).isInstanceOf(IllegalStateException.class);
     }
@@ -290,8 +292,8 @@ class ReportingProjectionServiceTest {
     void refundAlreadyRecordedIsSkipped() {
         UUID invoiceId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
-        when(revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(invoiceId, "SERVICE", "SALE")).thenReturn(List.of(sale(invoiceId, itemId)));
-        when(revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(invoiceId, itemId, "REFUND")).thenReturn(true);
+        when(revenueFacts.findBySourceInvoiceIdAndRevenueTypeAndEntryType(invoiceId, RevenueType.SERVICE, RevenueEntryType.SALE)).thenReturn(List.of(sale(invoiceId, itemId)));
+        when(revenueFacts.existsBySourceInvoiceIdAndItemIdAndEntryType(invoiceId, itemId, RevenueEntryType.REFUND)).thenReturn(true);
 
         service.onServiceInvoiceRefunded(refund(invoiceId));
 
@@ -324,7 +326,7 @@ class ReportingProjectionServiceTest {
         assertThat(net).isEqualByComparingTo("252500.00");
         assertThat(discount).isEqualByComparingTo("10000.00");
         for (RevenueFact row : rows) {
-            assertThat(row.getRevenueType()).isEqualTo("MEDICINE");
+            assertThat(row.getRevenueType()).isEqualTo(RevenueType.MEDICINE);
             assertThat(row.getAmountBeforeVat().add(row.getVatAmount()).subtract(row.getDiscountAmount())).isEqualByComparingTo(row.getNetAmount());
             assertThat(row.getDoctorName()).isEqualTo("BS Tiến");
         }

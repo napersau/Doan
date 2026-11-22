@@ -1,6 +1,10 @@
 package com.vetclinic.clinical.entity;
 
 import jakarta.persistence.CollectionTable;
+import com.vetclinic.clinical.constant.QueueType;
+import com.vetclinic.clinical.constant.TicketStatus;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
@@ -46,8 +50,9 @@ public class QueueTicketHistory {
     @Column(name = "ticket_id", nullable = false, unique = true)
     private UUID ticketId;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "queue_type", nullable = false, length = 20)
-    private String queueType;
+    private QueueType queueType;
 
     @Column(name = "service_date", nullable = false)
     private LocalDate serviceDate;
@@ -65,9 +70,10 @@ public class QueueTicketHistory {
     @Column(name = "priority", nullable = false)
     private int priority;
 
-    /** DONE | CANCELLED. */
+    /** DONE | CANCELLED (giá trị cuối của {@link TicketStatus}). */
+    @Enumerated(EnumType.STRING)
     @Column(name = "final_status", nullable = false, length = 20)
-    private String finalStatus;
+    private TicketStatus finalStatus;
 
     @Column(name = "issued_at", nullable = false)
     private Instant issuedAt;

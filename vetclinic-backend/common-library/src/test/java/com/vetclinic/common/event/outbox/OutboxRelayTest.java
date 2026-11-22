@@ -48,7 +48,7 @@ class OutboxRelayTest {
     }
 
     private static OutboxEvent row(String type, String routingKey, String payload) {
-        return OutboxEvent.builder().eventId(UUID.randomUUID()).aggregateType("VISIT").aggregateId("1")
+        return OutboxEvent.builder().eventId(UUID.randomUUID()).aggregateType("VISIT").aggregateId(UUID.randomUUID())
                 .eventType(type).routingKey(routingKey).payload(payload).status(OutboxStatus.PENDING)
                 .nextAttemptAt(NOW).createdAt(NOW).build();
     }

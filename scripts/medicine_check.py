@@ -161,7 +161,7 @@ final = int(sql(f"SELECT quantity_on_hand FROM {DB}.medicine_stocks WHERE medici
 check("8 lần cân chỉnh -50 đồng thời trên tồn 130: đúng 2 lần thành công, tồn cuối 30 (không âm, không lệch)",
       results.count(200) == 2 and final == 30 and sql(f"SELECT SUM(quantity) FROM {DB}.inventory_transactions WHERE medicine_id={b(mid)}") == "30", (results, final))
 check("tồn 30 <= ngưỡng 50 -> có cảnh báo tồn kho trong outbox (aggregate_id là UUID)",
-      int(sql(f"SELECT COUNT(*) FROM {DB}.outbox_events WHERE event_type='MedicineLowStockEvent' AND aggregate_id='{mid}'") or 0) >= 1)
+      int(sql(f"SELECT COUNT(*) FROM {DB}.outbox_events WHERE event_type='MedicineLowStockEvent' AND aggregate_id = UNHEX(REPLACE('{mid}','-',''))") or 0) >= 1)
 
 # ------------------------------------------------------------------ ngừng kinh doanh + endpoint nội bộ
 st, res = call("GET", f"/internal/medicines/{mid}")
