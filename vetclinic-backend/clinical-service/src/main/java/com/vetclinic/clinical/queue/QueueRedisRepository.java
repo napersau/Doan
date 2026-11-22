@@ -43,6 +43,7 @@ public class QueueRedisRepository {
     private static final RedisScript<List> CALL = script("call_ticket.lua", List.class);
     private static final RedisScript<String> START = script("start_ticket.lua", String.class);
     private static final RedisScript<Long> FINISH = script("finish_ticket.lua", Long.class);
+    private static final RedisScript<Long> ENSURE_SEQ = script("ensure_seq.lua", Long.class);
 
     private final StringRedisTemplate redis;
     private final Clock clock;
@@ -102,6 +103,29 @@ public class QueueRedisRepository {
     public boolean finish(UUID ticketId) {
         Long deleted = guard(() -> redis.execute(FINISH, List.of(QueueKeys.ticket(ticketId)), ticketId.toString()));
         return deleted != null && deleted == 1L;
+    }
+
+    /** Bộ đếm số phiếu của ngày / loại hàng đợi đã tồn tại chưa (mất khi Redis bị xóa). */
+    public boolean seqExists(LocalDate date, QueueType type) {
+        return Boolean.TRUE.equals(guard(() -> redis.hasKey(QueueKeys.seq(date, type))));
+    }
+
+    /** Nâng bộ đếm số phiếu lên ít nhất {@code minimum} (số lớn nhất đã dùng trong lịch sử): chỉ tăng, không giảm. */
+    public void ensureSeqAtLeast(LocalDate date, QueueType type, int minimum) {
+        guard(() -> redis.execute(ENSURE_SEQ, List.of(QueueKeys.seq(date, type)), String.valueOf(minimum), String.valueOf(DEDUPE_TTL_SECONDS)));
+    }
+
+    /** Hàng đợi của ngày còn nguyên (khóa queue:meta tồn tại)? Mất khóa = Redis đã bị xóa, cần dựng lại từ MySQL. */
+    public boolean metaPresent(LocalDate date) {
+        return Boolean.TRUE.equals(guard(() -> redis.hasKey(QueueKeys.meta(date))));
+    }
+
+    /** Ghi dấu hàng đợi của ngày đã được dựng (giá trị = mốc thời gian dựng, hết hạn sau 48 giờ). */
+    public void markMeta(LocalDate date, Instant at) {
+        guard(() -> {
+            redis.opsForValue().set(QueueKeys.meta(date), String.valueOf(at.toEpochMilli()), java.time.Duration.ofSeconds(DEDUPE_TTL_SECONDS));
+            return Boolean.TRUE;
+        });
     }
 
     // ================================================================== đọc

@@ -143,12 +143,13 @@ try:
         if "Server startup complete" in sh("docker", "logs", RABBIT):
             break
     time.sleep(3)
-    for module in ("clinical-service", "auth-service"):
-        start_jar(module)
-
+    # dọn dữ liệu của lần chạy trước TRƯỚC khi bật service (job khởi động dựng lại phiếu cho mọi ca còn dở trong MySQL)
     sql("DELETE FROM pet_clinic_clinical_db.queue_ticket_histories")   # Redis tạm đếm số phiếu lại từ 1: bỏ lịch sử của lần chạy trước (UNIQUE loại + ngày + số)
     # chạy lại được: đóng các ca còn dở của hai Bác sĩ thử
     sql(f"UPDATE {CDB}.pet_visits SET status = 'CANCELLED' WHERE doctor_id IN ({b(TIEN)}, {b(AN)}) AND status IN ('IN_PROGRESS', 'WAITING', 'RESULTS_READY', 'WAITING_RESULTS')")
+    for module in ("clinical-service", "auth-service"):
+        start_jar(module)
+
     rec, tien, an, lan, lab = login("letan_hoa"), login("bs_tien"), login("bs_an"), login("khach_lan"), login("ktv_lab_minh")
     CBC = uuid_of(sql(f"SELECT HEX(id) FROM {CDB}.services WHERE code = 'LAB_CBC'"))
     XRAY = uuid_of(sql(f"SELECT HEX(id) FROM {CDB}.services WHERE code = 'IMG_XRAY'"))

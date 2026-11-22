@@ -476,7 +476,7 @@ public class VisitServiceImpl implements VisitService {
             byRoom.computeIfAbsent(d.getService().getCategory().queueTypeOrNull(), k -> new ArrayList<>()).add(d.getId());
         }
         byRoom.forEach((room, detailIds) -> queue.issueAfterCommit(visit, room, visit.isEmergency() ? 2 : 0, clock.instant(), detailIds,
-                "order:" + detailIds.get(0)));   // phát sau commit; dedupe theo dòng chỉ định đầu tiên
+                QueueCoordinator.roomKey(visit.getId(), room, detailIds)));   // phát sau commit; khóa dedupe chung với listener / dựng lại
         return assembler.detail(visit);
     }
 

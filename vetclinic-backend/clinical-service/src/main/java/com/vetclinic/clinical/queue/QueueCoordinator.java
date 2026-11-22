@@ -53,6 +53,22 @@ public class QueueCoordinator {
         this.clock = clock;
     }
 
+    // ================================================================== khóa chống phát trùng (dùng chung cho listener, ca cấp cứu và dựng lại)
+
+    /**
+     * Một đợt khám có tối đa một phiếu DOCTOR cho mỗi giai đoạn: lần đầu (đã nộp phí / cấp cứu) và lần quay lại với kết quả CLS ({@code results = true}).
+     * Cùng một khóa cho sự kiện, ca cấp cứu và việc dựng lại / đối soát, nên một phiếu không bao giờ bị phát hai lần dù được nhiều đường cùng kích hoạt.
+     */
+    public static String doctorKey(UUID visitId, boolean results) {
+        return "visit:" + visitId + ":DOCTOR:" + (results ? "RESULTS" : "FIRST");
+    }
+
+    /** Phiếu phòng XN / CĐHA: khóa theo đợt khám + phòng + dịch vụ có id nhỏ nhất của nhóm (nhóm khác nhau của cùng phòng có khóa khác nhau). */
+    public static String roomKey(UUID visitId, QueueType type, java.util.Collection<UUID> detailIds) {
+        UUID first = detailIds.stream().min(UUID::compareTo).orElseThrow();
+        return "visit:" + visitId + ":" + type.name() + ":" + first;
+    }
+
     // ================================================================== đọc
 
     /** Phiếu đang mở (chờ hoặc đang phục vụ) của một đợt khám. */
@@ -95,7 +111,21 @@ public class QueueCoordinator {
                 issuedBy, vsdIds, visit.getPet().getName(), visit.getPet().getOwnerNameSnapshot(), roomNumber);
     }
 
+    /**
+     * Bộ đếm số phiếu bị mất (Redis bị xóa) thì khởi tạo lại từ số lớn nhất đã dùng trong lịch sử của ngày: đếm lại từ 1 sẽ trùng UNIQUE
+     * (queue_type, service_date, ticket_no) của queue_ticket_histories. Bộ đếm còn thì chỉ tốn một lệnh EXISTS.
+     */
+    void ensureSequence(LocalDate date, QueueType type) {
+        if (!redis.seqExists(date, type)) {
+            Integer max = histories.findMaxTicketNo(type.name(), date);
+            if (max != null && max > 0) {
+                redis.ensureSeqAtLeast(date, type, max);
+            }
+        }
+    }
+
     private IssuedTicket doIssue(IssueTicketRequest request, String visitCode, UUID petId) {
+        ensureSequence(request.serviceDate(), request.queueType());
         IssuedTicket ticket = redis.issue(request);
         if (!ticket.duplicate()) {
             // Gửi thẳng sau khi phát (D9): làm mới hàng đợi, báo số phiếu cho chủ nuôi; mất sự kiện này thì màn hình vẫn đúng ở lần tải lại

@@ -51,6 +51,11 @@ public final class QueueKeys {
         return "queue:visit:" + visitId;
     }
 
+    /** Dấu "hàng đợi của ngày này đã được dựng / còn nguyên": mất khóa này (Redis bị xóa) thì QueueRebuildJob / QueueReconcileJob dựng lại từ MySQL. */
+    public static String meta(LocalDate date) {
+        return "queue:meta:" + day(date);
+    }
+
     public static String ticket(UUID ticketId) {
         return "ticket:" + ticketId;
     }

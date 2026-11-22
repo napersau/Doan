@@ -2,6 +2,7 @@ package com.vetclinic.clinical.controller;
 
 import com.vetclinic.clinical.constant.QueueType;
 import com.vetclinic.clinical.dto.response.QueueTicketResponse;
+import com.vetclinic.clinical.queue.QueueRebuildService;
 import com.vetclinic.clinical.service.QueueTicketService;
 import com.vetclinic.common.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ import java.util.UUID;
 public class QueueTicketController {
 
     private final QueueTicketService queueTicketService;
+    private final QueueRebuildService rebuildService;
 
     /** "Gọi số tiếp theo": phiếu đứng đầu hàng đợi của người đang thao tác (CLIN_1303 nếu trống, CLIN_1302 nếu Bác sĩ đang khám dở). */
     @PostMapping("/call-next")
@@ -38,6 +40,17 @@ public class QueueTicketController {
     @PreAuthorize("hasAnyRole('VETERINARIAN','LAB_TECHNICIAN','IMAGING_TECHNICIAN')")
     public ResponseEntity<ApiResponse<QueueTicketResponse>> call(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success("Đã gọi bệnh nhân", queueTicketService.call(id)));
+    }
+
+    /**
+     * Quản trị viên dựng lại hàng đợi trên Redis từ MySQL (sau khi Redis bị xóa / mất dữ liệu / sự kiện vào DLQ): phát các phiếu còn thiếu theo thứ tự giờ thu
+     * tiền, idempotent (không phát trùng phiếu đã có). Redis không truy cập được -> CLIN_1318.
+     */
+    @PostMapping("/rebuild")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<QueueRebuildService.Result>> rebuild() {
+        QueueRebuildService.Result result = rebuildService.rebuild(java.time.Duration.ZERO);
+        return ResponseEntity.ok(ApiResponse.success(result.ran() ? "Đã dựng lại hàng đợi từ MySQL" : "Đang có lần dựng khác chạy, bỏ qua", result));
     }
 
     /** Phòng XN / CĐHA: thú cưng đã vào phòng, bắt đầu mọi dịch vụ của phiếu. */

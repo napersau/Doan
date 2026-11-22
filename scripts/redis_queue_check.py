@@ -49,10 +49,10 @@ try:
     run = subprocess.run([mvn, "-o", "-pl", "clinical-service", "test", "-Dtest=QueueRedisRepositoryLiveTest", "-Dsurefire.failIfNoSpecifiedTests=false"],
                          cwd=BACKEND, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
     out = run.stdout
-    summary = [line for line in out.splitlines() if "Tests run:" in line and "QueueRedisRepositoryLiveTest" in line]
+    summary = [line for line in out.splitlines() if "Tests run:" in line and "-- in " in line and "QueueRedisRepositoryLiveTest" in line]
     print("  " + (summary[-1].strip() if summary else "(không thấy dòng tổng kết của test)"))
-    skipped = any("Skipped: 13" in line for line in summary)
-    check("QueueRedisRepositoryLiveTest: 13 ca chạy thật (không bị bỏ qua), 0 lỗi", run.returncode == 0 and not skipped and any("Tests run: 13, Failures: 0, Errors: 0" in line for line in summary),
+    skipped = any("Skipped: 0" not in line for line in summary)
+    check("QueueRedisRepositoryLiveTest: 15 ca chạy thật (không bị bỏ qua), 0 lỗi", run.returncode == 0 and not skipped and any("Tests run: 15, Failures: 0, Errors: 0" in line for line in summary),
           "\n".join(out.splitlines()[-40:]))
 
     # AOF: dữ liệu sống sót qua khởi động lại

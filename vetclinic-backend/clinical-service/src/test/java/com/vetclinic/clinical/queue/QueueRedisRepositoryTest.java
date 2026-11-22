@@ -153,7 +153,9 @@ class QueueRedisRepositoryTest {
         for (Runnable call : List.<Runnable>of(() -> repo.issue(request(0, DOCTOR)), () -> repo.start(ticket), () -> repo.move(ticket, DOCTOR),
                 () -> repo.call(ticket), () -> repo.finish(ticket), () -> repo.waiting(LocalDate.of(2026, 11, 21), QueueType.DOCTOR, DOCTOR),
                 () -> repo.waitingCount(LocalDate.of(2026, 11, 21), QueueType.DOCTOR, DOCTOR), () -> repo.ticket(ticket),
-                () -> repo.openTicketsOf(VISIT), () -> repo.isDoctorBusy(DOCTOR))) {
+                () -> repo.openTicketsOf(VISIT), () -> repo.isDoctorBusy(DOCTOR),
+                () -> repo.seqExists(LocalDate.of(2026, 11, 21), QueueType.DOCTOR), () -> repo.ensureSeqAtLeast(LocalDate.of(2026, 11, 21), QueueType.DOCTOR, 5),
+                () -> repo.metaPresent(LocalDate.of(2026, 11, 21)), () -> repo.markMeta(LocalDate.of(2026, 11, 21), PAID_AT))) {
             assertThatThrownBy(call::run).isInstanceOf(AppException.class)
                     .extracting(e -> ((AppException) e).getErrorCode()).isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
         }

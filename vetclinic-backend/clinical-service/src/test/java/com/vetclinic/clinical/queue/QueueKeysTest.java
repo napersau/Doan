@@ -27,6 +27,7 @@ class QueueKeysTest {
         assertThat(QueueKeys.visit(VISIT)).isEqualTo("queue:visit:" + VISIT);
         assertThat(QueueKeys.ticket(VISIT)).isEqualTo("ticket:" + VISIT);
         assertThat(QueueKeys.busy(DOCTOR)).isEqualTo("queue:busy:" + DOCTOR);
+        assertThat(QueueKeys.meta(DAY)).isEqualTo("queue:meta:20261121");
     }
 
     @Test

@@ -331,6 +331,44 @@ class QueueCoordinatorTest {
         verify(publisher, never()).publishEvent(any(Object.class));
     }
 
+    // ================================================================== bộ đếm số phiếu mất -> khởi tạo lại từ lịch sử
+
+    @Test
+    void issue_whenTheSequenceKeyIsGone_raisesItToTheLargestNumberInTheHistory_beforeIssuing() {
+        when(redis.seqExists(java.time.LocalDate.of(2026, 10, 30), QueueType.DOCTOR)).thenReturn(false);
+        when(histories.findMaxTicketNo("DOCTOR", java.time.LocalDate.of(2026, 10, 30))).thenReturn(7);
+        when(redis.issue(any(IssueTicketRequest.class))).thenReturn(new IssuedTicket(tid(60L), 8, false));
+
+        queue.issue(petVisit(), QueueType.DOCTOR, DOCTOR, 0, CLOCK.instant(), null, List.of(), "k", null);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(redis);
+        order.verify(redis).ensureSeqAtLeast(java.time.LocalDate.of(2026, 10, 30), QueueType.DOCTOR, 7);   // số mới sẽ là 8, không trùng lịch sử
+        order.verify(redis).issue(any(IssueTicketRequest.class));
+    }
+
+    @Test
+    void issue_whenTheSequenceKeyExists_orThereIsNoHistoryYet_doesNotTouchTheSequence() {
+        when(redis.issue(any(IssueTicketRequest.class))).thenReturn(new IssuedTicket(tid(60L), 1, false));
+        when(redis.seqExists(any(), any())).thenReturn(true, false);
+
+        queue.issue(petVisit(), QueueType.DOCTOR, DOCTOR, 0, CLOCK.instant(), null, List.of(), "k1", null);   // bộ đếm còn: không cần tra lịch sử
+        queue.issue(petVisit(), QueueType.DOCTOR, DOCTOR, 0, CLOCK.instant(), null, List.of(), "k2", null);   // mất bộ đếm nhưng chưa có lịch sử trong ngày
+
+        verify(redis, never()).ensureSeqAtLeast(any(), any(), org.mockito.ArgumentMatchers.anyInt());
+        verify(histories, org.mockito.Mockito.times(1)).findMaxTicketNo(any(), any());
+    }
+
+    @Test
+    void doctorAndRoomKeys_areStableSoEventsReconcileAndRebuildNeverIssueTwoTickets() {
+        UUID visit = lid(100L);
+        assertThat(QueueCoordinator.doctorKey(visit, false)).isEqualTo("visit:" + visit + ":DOCTOR:FIRST");
+        assertThat(QueueCoordinator.doctorKey(visit, true)).isEqualTo("visit:" + visit + ":DOCTOR:RESULTS");
+        // khóa phiếu phòng theo dịch vụ có id nhỏ nhất của nhóm, không phụ thuộc thứ tự truyền vào
+        assertThat(QueueCoordinator.roomKey(visit, QueueType.LABORATORY, List.of(lid(3L), lid(2L))))
+                .isEqualTo(QueueCoordinator.roomKey(visit, QueueType.LABORATORY, List.of(lid(2L), lid(3L))))
+                .isEqualTo("visit:" + visit + ":LABORATORY:" + lid(2L));
+    }
+
     @Test
     void startRoomTicketAfterCommit_runsTheStartScript() {
         when(redis.start(tid(70L))).thenReturn(QueueOutcome.NOT_WAITING);   // chỉ ghi log, MySQL đã đúng

@@ -101,7 +101,7 @@ class QueueIssuerListenerTest {
 
         listener.onInvoicePaid(paid(line(1L, "EXAM_GEN", "EXAMINATION", "DOCTOR")));
 
-        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(0), eq(PAID_AT), eq(RECEPTIONIST), eq(List.of(lid(1L))), eq(EVENT + ":DOCTOR"), isNull());
+        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(0), eq(PAID_AT), eq(RECEPTIONIST), eq(List.of(lid(1L))), eq(QueueCoordinator.doctorKey(VISIT, false)), isNull());
     }
 
     @Test
@@ -131,8 +131,8 @@ class QueueIssuerListenerTest {
         listener.onInvoicePaid(paid(line(2L, "LAB_CBC", "LABORATORY", "LABORATORY"), line(3L, "IMG_XRAY", "IMAGING", "IMAGING"),
                 line(4L, "IMG_US", "IMAGING", "IMAGING")));
 
-        verify(queue).issue(eq(v), eq(QueueType.LABORATORY), isNull(), eq(0), eq(PAID_AT), eq(RECEPTIONIST), eq(List.of(lid(2L))), eq(EVENT + ":LABORATORY"), isNull());
-        verify(queue).issue(eq(v), eq(QueueType.IMAGING), isNull(), eq(0), eq(PAID_AT), eq(RECEPTIONIST), eq(List.of(lid(3L), lid(4L))), eq(EVENT + ":IMAGING"), isNull());
+        verify(queue).issue(eq(v), eq(QueueType.LABORATORY), isNull(), eq(0), eq(PAID_AT), eq(RECEPTIONIST), eq(List.of(lid(2L))), eq(QueueCoordinator.roomKey(VISIT, QueueType.LABORATORY, List.of(lid(2L)))), isNull());
+        verify(queue).issue(eq(v), eq(QueueType.IMAGING), isNull(), eq(0), eq(PAID_AT), eq(RECEPTIONIST), eq(List.of(lid(3L), lid(4L))), eq(QueueCoordinator.roomKey(VISIT, QueueType.IMAGING, List.of(lid(3L), lid(4L)))), isNull());
     }
 
     @Test
@@ -192,7 +192,7 @@ class QueueIssuerListenerTest {
 
         listener.onVisitCheckedIn(checkedIn(true));
 
-        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(2), eq(PAID_AT), isNull(), eq(List.of()), eq(EVENT + ":DOCTOR"), isNull());
+        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(2), eq(PAID_AT), isNull(), eq(List.of()), eq(QueueCoordinator.doctorKey(VISIT, false)), isNull());
     }
 
     @Test
@@ -207,7 +207,7 @@ class QueueIssuerListenerTest {
         ClinicService exam = ClinicService.builder().id(uid(301)).code("EXAM_GEN").name("Khám").category(examNoPrepay).active(true).build();
         when(detailRepository.findByVisitIdOrderByIdAsc(VISIT)).thenReturn(List.of(detail(1L, 100L, exam, ServiceDetailStatus.PENDING)));
         listener.onVisitCheckedIn(checkedIn(false));
-        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(0), eq(PAID_AT), isNull(), eq(List.of()), eq(EVENT + ":DOCTOR"), isNull());
+        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(0), eq(PAID_AT), isNull(), eq(List.of()), eq(QueueCoordinator.doctorKey(VISIT, false)), isNull());
     }
 
     @Test
@@ -235,7 +235,7 @@ class QueueIssuerListenerTest {
 
         listener.onResultsReady(resultsReady());
 
-        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(1), eq(PAID_AT), isNull(), eq(List.of()), eq(EVENT + ":DOCTOR"), isNull());
+        verify(queue).issue(eq(v), eq(QueueType.DOCTOR), eq(DOCTOR), eq(1), eq(PAID_AT), isNull(), eq(List.of()), eq(QueueCoordinator.doctorKey(VISIT, true)), isNull());
     }
 
     @Test

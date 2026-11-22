@@ -34,7 +34,8 @@ import java.util.stream.Collectors;
  *   <li>{@link VisitCheckedInEvent} của ca cấp cứu -> phiếu DOCTOR priority 2 (khám trước, thu sau);</li>
  *   <li>{@link ParaclinicalResultsReadyEvent} (T06) -> phiếu DOCTOR priority 1 cho Bác sĩ khám chính, không thu tiền.</li>
  * </ul>
- * Không cần {@code processed_events}: chống phát trùng bằng khóa {@code queue:dedupe:{eventId:loại}} ngay trong {@code issue_ticket.lua}. Lỗi (Redis không
+ * Không cần {@code processed_events}: chống phát trùng bằng khóa {@code queue:dedupe:visit:{visitId}:...} (chung với việc dựng lại / đối soát, xem
+ * {@link QueueCoordinator#doctorKey}) ngay trong {@code issue_ticket.lua}. Lỗi (Redis không
  * truy cập được -> CLIN_1318) thì ném lên để RabbitMQ thử lại 3 lần rồi đưa vào DLQ; vì sự kiện nằm trong outbox, đã thu tiền thì chắc chắn tới được đây.
  * Trạng thái ca đọc lại từ MySQL lúc xử lý (không tin payload): ca đã hủy / đã rời bước chờ tương ứng thì không phát phiếu.
  */
@@ -82,7 +83,7 @@ public class QueueIssuerListener {
                 boolean hasTicket = open.stream().anyMatch(t -> t.queueType() == QueueType.DOCTOR);
                 if (visit.getStatus() == VisitStatus.WAITING && !hasTicket) {
                     queue.issue(visit, QueueType.DOCTOR, visit.getDoctorId(), priority, e.paidAt(), e.cashierId(), detailIds,
-                            e.eventId() + ":DOCTOR", null);
+                            QueueCoordinator.doctorKey(visit.getId(), false), null);
                 }
             } else {
                 Set<UUID> alreadyTicketed = open.stream().filter(t -> t.queueType() != QueueType.DOCTOR)
@@ -94,7 +95,7 @@ public class QueueIssuerListener {
                         .filter(id -> details.containsKey(id) && details.get(id).getStatus() == ServiceDetailStatus.PENDING
                                 && !alreadyTicketed.contains(id)).toList();
                 if (!ticketable.isEmpty()) {
-                    queue.issue(visit, type, null, priority, e.paidAt(), e.cashierId(), ticketable, e.eventId() + ":" + type.name(), null);
+                    queue.issue(visit, type, null, priority, e.paidAt(), e.cashierId(), ticketable, QueueCoordinator.roomKey(visit.getId(), type, ticketable), null);
                 }
             }
         }
@@ -114,7 +115,7 @@ public class QueueIssuerListener {
                 return;
             }
             queue.issue(visit, QueueType.DOCTOR, visit.getDoctorId(), event.emergency() ? 2 : 0, event.occurredAt(), null, List.of(),
-                    event.eventId() + ":DOCTOR", null);
+                    QueueCoordinator.doctorKey(visit.getId(), false), null);
         });
     }
 
@@ -126,7 +127,7 @@ public class QueueIssuerListener {
                 return;
             }
             // T06: ca có đủ kết quả CLS -> phiếu ưu tiên 1 cho Bác sĩ khám chính, không thu tiền (đứng đầu hàng đợi, chỉ sau ca cấp cứu)
-            queue.issue(visit, QueueType.DOCTOR, visit.getDoctorId(), 1, event.occurredAt(), null, List.of(), event.eventId() + ":DOCTOR", null);
+            queue.issue(visit, QueueType.DOCTOR, visit.getDoctorId(), 1, event.occurredAt(), null, List.of(), QueueCoordinator.doctorKey(visit.getId(), true), null);
         });
     }
 }

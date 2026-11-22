@@ -134,6 +134,8 @@ export const queueTicketsApi = {
   callNext: (queueType) => api.post(`${CLIN}/queue-tickets/call-next?queueType=${queueType}`),
   call: (ticketId) => api.post(`${CLIN}/queue-tickets/${ticketId}/call`),
   start: (ticketId) => api.post(`${CLIN}/queue-tickets/${ticketId}/start`),
+  // Admin: dựng lại hàng đợi trên Redis từ MySQL (sau khi Redis bị xóa / mất dữ liệu); idempotent. Trả { ran, doctorTickets, roomTickets, alreadyIssued }
+  rebuild: () => api.post(`${CLIN}/queue-tickets/rebuild`),
 };
 
 export const paraclinicApi = {

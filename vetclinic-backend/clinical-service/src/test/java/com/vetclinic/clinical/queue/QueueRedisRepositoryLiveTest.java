@@ -253,6 +253,29 @@ class QueueRedisRepositoryLiveTest {
     }
 
     @Test
+    void ensureSeqAtLeast_raisesTheCounterToTheHistoryMaximum_neverLowersIt_soNewNumbersDoNotCollideWithTheHistory() {
+        assertThat(repo.seqExists(day, QueueType.DOCTOR)).isFalse();
+        repo.ensureSeqAtLeast(day, QueueType.DOCTOR, 7);   // Redis mất bộ đếm; lịch sử đã dùng tới số 7
+        assertThat(repo.seqExists(day, QueueType.DOCTOR)).isTrue();
+        assertThat(redis.getExpire("queue:seq:" + QueueKeys.day(day) + ":DOCTOR")).isBetween(1L, 48L * 3600);
+        assertThat(issue(QueueType.DOCTOR, doctor, 0, Instant.now()).ticketNo()).isEqualTo(8);   // số kế tiếp là 8
+        repo.ensureSeqAtLeast(day, QueueType.DOCTOR, 3);   // số nhỏ hơn bộ đếm hiện tại: không hạ
+        assertThat(issue(QueueType.DOCTOR, doctor, 0, Instant.now()).ticketNo()).isEqualTo(9);
+        repo.ensureSeqAtLeast(day, QueueType.DOCTOR, 20);
+        assertThat(issue(QueueType.DOCTOR, doctor, 0, Instant.now()).ticketNo()).isEqualTo(21);
+    }
+
+    @Test
+    void metaKey_marksTheDayAsBuilt_andDisappearsWhenRedisIsWiped() {
+        assertThat(repo.metaPresent(day)).isFalse();
+        repo.markMeta(day, Instant.now());
+        assertThat(repo.metaPresent(day)).isTrue();
+        assertThat(redis.getExpire(QueueKeys.meta(day))).isBetween(1L, 48L * 3600);
+        redis.delete(QueueKeys.meta(day));   // mô phỏng Redis bị xóa
+        assertThat(repo.metaPresent(day)).isFalse();
+    }
+
+    @Test
     void unreachableRedisFailsFastWithQueueUnavailable_CLIN_1318() {
         RedisStandaloneConfiguration dead = new RedisStandaloneConfiguration("localhost", 1);   // không có gì nghe ở cổng 1
         LettuceConnectionFactory deadFactory = new LettuceConnectionFactory(dead, LettuceClientConfiguration.builder().commandTimeout(Duration.ofSeconds(1)).build());
