@@ -4,7 +4,7 @@
 // Kết quả được cache trong lần chạy; tra cứu dùng token của admin.
 import { AUTH, CLIN, PHARM, call, login } from './api.mjs';
 
-/** Mã ổn định của dữ liệu seed (`db/seed_current.sql`) mà các bộ e2e dùng. */
+/** Mã ổn định của dữ liệu seed (`docs/seed_demo_data.sql`) mà các bộ e2e dùng. */
 export const SEED = {
   users: ['admin', 'bs_tien', 'bs_an', 'bs_mai', 'letan_hoa', 'ktv_lab_minh', 'ktv_cdha_dung', 'khach_lan', 'khach_nam'],
   pets: { lu: 'PET-2026-0001', milo: 'PET-2026-0002' },

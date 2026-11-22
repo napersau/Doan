@@ -2,7 +2,7 @@
 # Kiểm tra NHANH một service với MySQL thật, KHÔNG cần dựng cả hệ thống Docker (quy trình v4: test ở cấp service sau mỗi bước).
 #   bash scripts/service_check.sh auth-service          # hoặc appointment-service | clinical-service | billing-pharmacy-service
 #   bash scripts/service_check.sh auth-service --reset  # nạp lại schema + seed vào MySQL tạm
-# Việc làm: (1) bật MySQL tạm 'vetclinic-check-mysql' (cổng 3399) nạp db/schema_current.sql + db/seed_current.sql nếu chưa có;
+# Việc làm: (1) bật MySQL tạm 'vetclinic-check-mysql' (cổng 3399) nạp docs/schema_init.sql + docs/seed_demo_data.sql nếu chưa có;
 # (2) chạy jar của service với Eureka tắt; Hibernate `ddl-auto: validate` kiểm tra mọi entity khớp lược đồ (việc mà unit test dùng mock
 # KHÔNG kiểm tra được: kiểu cột BINARY(16), tên cột, quan hệ, câu JPQL); (3) chờ "Started", in lỗi nếu có; với auth-service còn đăng nhập
 # thật bằng tài khoản seed và đọc claim JWT.
@@ -24,8 +24,8 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   docker rm -f "$CONTAINER" >/dev/null 2>&1
   # docker create + cp + start (không bind-mount: tránh lỗi mount thư mục máy chủ của Docker Desktop trên Windows)
   docker create --name "$CONTAINER" -p "$MYSQL_PORT:3306" -e MYSQL_ROOT_PASSWORD=check -e TZ=Asia/Ho_Chi_Minh mysql:8.0 >/dev/null || exit 1
-  docker cp db/schema_current.sql "$CONTAINER:/docker-entrypoint-initdb.d/01-schema_init.sql" || exit 1
-  docker cp db/seed_current.sql "$CONTAINER:/docker-entrypoint-initdb.d/02-seed_demo_data.sql" || exit 1
+  docker cp docs/schema_init.sql "$CONTAINER:/docker-entrypoint-initdb.d/01-schema_init.sql" || exit 1
+  docker cp docs/seed_demo_data.sql "$CONTAINER:/docker-entrypoint-initdb.d/02-seed_demo_data.sql" || exit 1
   docker start "$CONTAINER" >/dev/null || exit 1
   echo "đã tạo MySQL tạm, chờ nạp lược đồ + seed..."
   for _ in $(seq 1 60); do

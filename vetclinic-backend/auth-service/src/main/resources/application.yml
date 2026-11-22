@@ -18,7 +18,7 @@ spring:
   jpa:
     open-in-view: false        # Giải phóng connection ngay sau khi Service kết thúc
     hibernate:
-      ddl-auto: validate       # Schema chỉ thay đổi qua db/schema_current.sql (lộ trình v4)
+      ddl-auto: validate       # Schema chỉ thay đổi qua docs/schema_init.sql (lộ trình v4)
     properties:
       hibernate:
         format_sql: true

@@ -1,7 +1,7 @@
 """Đối chiếu 18 enum Java (+ LabEvaluation) với docs/DANH_SACH_KIEU_ENUM_HE_THONG.md (bước 8.1) và rà cột ENUM / khóa Long của thực thể nghiệp vụ.
   python scripts/enum_audit.py
 Mỗi enum phải có ít nhất một lớp Java cùng tên có ĐÚNG tập giá trị trong bảng mục C của docs (PaymentStatus có hai bản: billing không có REFUNDED);
-không còn cột ENUM trong db/schema_current.sql; thực thể dùng khóa Long chỉ là các bảng con / lịch sử / audit mà docs cũng để BIGINT AUTO_INCREMENT."""
+không còn cột ENUM trong docs/schema_init.sql; thực thể dùng khóa Long chỉ là các bảng con / lịch sử / audit mà docs cũng để BIGINT AUTO_INCREMENT."""
 import glob
 import os
 import re
@@ -45,7 +45,7 @@ for name, values in sorted(want.items()):
     detail = f"docs {sorted(values)}; Java {[(m, sorted(c)) for m, c in found]}"
     check(f"{name}: Java khớp docs ({', '.join(m for m, _ in found) or 'THIẾU'})", ok, detail)
 
-schema = open(os.path.join(ROOT, "db", "schema_current.sql"), encoding="utf-8").read()
+schema = open(os.path.join(ROOT, "docs", "schema_init.sql"), encoding="utf-8").read()
 check("không còn cột kiểu ENUM của MySQL", not re.search(r"\bENUM\s*\(", schema, re.I))
 
 # khóa Long của thực thể: chỉ bảng con / lịch sử / audit (docs cũng BIGINT AUTO_INCREMENT)
