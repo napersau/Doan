@@ -46,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -199,6 +200,38 @@ class OutboxMySqlIT {
         assertThat(row.getStatus().name()).isEqualTo("PUBLISHED");
         assertThat(row.getPublishedAt()).isNotNull();
         assertThat(relay.publishBatch()).isZero();   // không gửi lại dòng đã PUBLISHED
+    }
+
+    /**
+     * Hồi quy (bước 8.3, EX-18): relay gửi RabbitMQ TRONG giao dịch đang giữ khóa dòng outbox; khi RabbitMQ treo kết nối, các giao dịch nghiệp vụ khác
+     * (thu tiền, chốt ca...) muốn GHI dòng outbox mới bị chặn bởi khóa khoảng (gap lock) của REPEATABLE READ cho tới lock wait timeout (50 giây) rồi lỗi
+     * 409 SYS_1005. Relay phải chạy READ_COMMITTED (chỉ khóa đúng các dòng đã chọn) để việc ghi dòng mới không bao giờ phải chờ lần gửi.
+     */
+    @Test
+    void aStalledSendDoesNotBlockOtherTransactionsFromWritingNewOutboxRows() throws Exception {
+        tx.executeWithoutResult(s -> writer.write("VISIT", AGGREGATE, event()));
+        java.util.concurrent.CountDownLatch sending = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        doAnswer(inv -> {
+            sending.countDown();
+            release.await(30, java.util.concurrent.TimeUnit.SECONDS);   // RabbitMQ treo kết nối
+            return null;
+        }).when(rabbitTemplate).send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Future<Integer> relayRun = pool.submit(relay::publishBatch);
+            assertThat(sending.await(10, java.util.concurrent.TimeUnit.SECONDS)).as("relay đã vào bước gửi").isTrue();
+
+            java.util.concurrent.Future<?> otherTransaction = pool.submit(() -> tx.executeWithoutResult(s -> writer.write("VISIT", AGGREGATE, event())));
+            otherTransaction.get(8, java.util.concurrent.TimeUnit.SECONDS);   // TimeoutException nếu bị chặn bởi khóa của relay
+
+            release.countDown();
+            assertThat(relayRun.get(10, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(repository.count()).isEqualTo(2);
     }
 
     @Test

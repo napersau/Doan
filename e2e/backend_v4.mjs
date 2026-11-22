@@ -1,6 +1,6 @@
 // Kiểm thử backend v3.0 qua Gateway (HTTP thật): luồng chuẩn Task 5.4 + các luồng dễ lỗi của CLAUDE.md §13.
-// Chạy: node e2e/backend_v3.mjs   (cần: stack đang chạy — `docker compose up -d --build` hoặc 6 service + hạ tầng ở dev — và dữ liệu seed
-//   `db/seed_current.sql` mới nạp (lộ trình v4), id tra theo mã ổn định qua e2e/lib/ids.mjs; luồng chuẩn cần Clavamox tồn ≥ 10 và Lu chưa có đợt khám mở)
+// Chạy: node e2e/backend_v4.mjs   (cần: stack đang chạy — `docker compose up -d --build` hoặc 6 service + hạ tầng ở dev — và dữ liệu seed
+//   `docs/seed_demo_data.sql` mới nạp (lộ trình v4), id tra theo mã ổn định qua e2e/lib/ids.mjs; luồng chuẩn cần Clavamox tồn ≥ 10 và Lu chưa có đợt khám mở)
 // CẢNH BÁO: tạo dữ liệu thật (đợt khám, hóa đơn, lịch hẹn). Chỉ chạy trên môi trường thử nghiệm; muốn chạy lại hãy `docker compose down -v`.
 import { BILL, CLIN, PHARM, REPORTS, brief, call, check, finish, login, redis, run, sleep, sql, step } from './lib/api.mjs';
 import { medicineIdSql, seedIds, uuidSql } from './lib/ids.mjs';

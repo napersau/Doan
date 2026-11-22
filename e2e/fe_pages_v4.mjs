@@ -1,8 +1,8 @@
-// Quét MỌI trang giao diện theo từng vai trò (Chrome headless, qua Gateway) + các thao tác CRUD chưa nằm trong fe_smoke_v3.mjs:
+// Quét MỌI trang giao diện theo từng vai trò (Chrome headless, qua Gateway) + các thao tác CRUD chưa nằm trong fe_smoke_v4.mjs:
 // lễ tân tạo khách hàng, chủ nuôi đổi / hủy lịch, Admin tạo - khóa - mở khóa nhân sự, thêm loài, thêm dịch vụ. Mỗi trang phải tải được,
 // không hiện khung lỗi và không phát sinh lỗi console / HTTP ≥ 400.
-// Chạy: node e2e/fe_pages_v3.mjs   (stack đang chạy, giao diện ở :3000 — image frontend của compose — và dữ liệu seed)
-import { launchChrome, sleep } from './fe_smoke_v3.mjs';
+// Chạy: node e2e/fe_pages_v4.mjs   (stack đang chạy, giao diện ở :3000 — image frontend của compose — và dữ liệu seed)
+import { launchChrome, sleep } from './fe_smoke_v4.mjs';
 import { PASSWORD, RUN, call, check, finish, login, run, step } from './lib/api.mjs';
 import { ids } from './lib/ids.mjs';
 
@@ -18,7 +18,7 @@ async function attempt(name, fn) {
 
 async function main() {
   const alive = await fetch(FE).then(() => true).catch(() => false);
-  if (!alive) throw new Error(`Giao diện chưa chạy ở ${FE}: dùng docker compose up -d (image frontend) hoặc node e2e/fe_smoke_v3.mjs để dựng từ fe/build.`);
+  if (!alive) throw new Error(`Giao diện chưa chạy ở ${FE}: dùng docker compose up -d (image frontend) hoặc node e2e/fe_smoke_v4.mjs để dựng từ fe/build.`);
   const luPetId = await ids.pet('PET-2026-0001');   // thú cưng Lu của khach_lan (seed)
   const { browser: b, child, profile } = await launchChrome();
   const sweep = async (role, username, routes) => {

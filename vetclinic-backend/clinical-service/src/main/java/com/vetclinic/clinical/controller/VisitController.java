@@ -65,7 +65,7 @@ public class VisitController {
     @GetMapping("/my-queue")
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<List<VisitResponse>>> myQueue() {
-        return ResponseEntity.ok(ApiResponse.success(enricher.enrichAll(doctorQueueService.myQueue())));
+        return ResponseEntity.ok(ApiResponse.success(doctorQueueService.myQueue()));
     }
 
     /** Danh sách đợt khám có lọc, phân trang, mới nhất trước (bảng điều phối của lễ tân, lịch sử ca của bác sĩ). */
@@ -79,9 +79,8 @@ public class VisitController {
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var result = visitService.search(status, date, doctorId, petId, keyword, page, size);
-        result.setItems(enricher.enrichAll(result.getItems()));
-        return ResponseEntity.ok(ApiResponse.success(result));
+        // NFR-10: danh sách chỉ dùng cột snapshot (tên Bác sĩ, thú cưng, chủ nuôi), KHÔNG gọi auth-service; nhãn "Đã khóa" (EX-17) và số phòng có ở chi tiết một ca
+        return ResponseEntity.ok(ApiResponse.success(visitService.search(status, date, doctorId, petId, keyword, page, size)));
     }
 
     @GetMapping("/{id}")

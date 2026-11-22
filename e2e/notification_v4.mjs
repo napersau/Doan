@@ -1,5 +1,5 @@
 // Kiểm thử notification-service v3.0 qua Gateway + RabbitMQ thật: 9 sự kiện → thông báo đúng người, POST /{id}/read, bỏ send-email.
-// Chạy: node e2e/notification_v3.mjs   (stack đang chạy, dữ liệu seed). Kiểm tra email chỉ chạy khi Mailpit truy cập được (MAILPIT_URL,
+// Chạy: node e2e/notification_v4.mjs   (stack đang chạy, dữ liệu seed). Kiểm tra email chỉ chạy khi Mailpit truy cập được (MAILPIT_URL,
 // mặc định http://localhost:8025 — chỉ mở khi dùng docker-compose.dev.yml); chủ nuôi khach_lan phải có email (script tự đặt qua API).
 import { BILL, CLIN, NOTI, PHARM, call, check, finish, login as loginSession, run, sleep, step } from './lib/api.mjs';
 import { seedIds } from './lib/ids.mjs';

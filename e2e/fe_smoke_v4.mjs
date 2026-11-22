@@ -1,5 +1,5 @@
 // Kiểm thử giao diện thật v3.0 (FE -> Gateway -> các service) bằng Chrome headless qua Chrome DevTools Protocol.
-// Chạy: node e2e/fe_smoke_v3.mjs   (cần: Gateway :8080 + các service đang chạy, `npm run build` trong fe/ đã có thư mục build/, Chrome cài sẵn)
+// Chạy: node e2e/fe_smoke_v4.mjs   (cần: Gateway :8080 + các service đang chạy, `npm run build` trong fe/ đã có thư mục build/, Chrome cài sẵn)
 // Kịch bản đi trọn một ca khám v3.0 qua 6 vai trò: khách xem khung giờ trống công khai -> chủ nuôi đăng ký + đặt lịch -> lễ tân duyệt +
 // tiếp nhận kèm chọn bác sĩ -> bác sĩ gọi số / đẩy lùi / khám / dịch vụ tại phòng / chỉ định CLS -> KTV Lab, CĐHA gọi số + nhập kết quả ->
 // bác sĩ giai đoạn 2 + kê đơn (cảnh báo tồn) + chốt ca -> lễ tân thu từng phần hóa đơn dịch vụ + bán thuốc -> chủ nuôi xem bệnh án + thông báo ->
@@ -348,15 +348,15 @@ async function main() {
     check('nhận thông báo đã có kết quả', await b.hasText('Đã có kết quả cận lâm sàng', 8000));
     check('nhận thông báo thanh toán thuốc và hoàn tất', await b.hasText('Đã thanh toán thuốc', 8000) && await b.hasText('Thanh toán hoàn tất', 8000));
 
-    step('8. Admin: các trang quản trị tải được, báo cáo hai nguồn');
+    step('8. Admin: các trang quản trị tải được, báo cáo một nguồn (reporting-service)');
     check('admin đăng nhập', await b.login('admin', 'Admin@123'));
     for (const [route, marker] of [['/admin/dashboard', 'Ca khám hôm nay'], ['/admin/users', 'Tài khoản & nhân sự'], ['/admin/visits', 'Đợt khám'], ['/admin/services', 'Khám lâm sàng tổng quát'], ['/admin/lab-config', 'Bạch cầu'], ['/admin/species', 'Chó'], ['/admin/medicines', 'VAT'], ['/admin/reports', 'Doanh thu thực thu']]) {
       await b.goto(route);
       check(`${route} tải được`, await b.hasText(marker, 15000) && !(await b.text()).includes('Thử lại'), (await b.text()).slice(0, 200));
     }
-    check('báo cáo doanh thu có công nợ và hai nguồn', await b.hasText('Công nợ hiện tại') && await b.hasText('Doanh thu thuốc theo kỳ'));
+    check('báo cáo doanh thu một nguồn (reporting-service): tổng thực thu, dịch vụ + thuốc, theo nhóm và theo kỳ', await b.hasText('Doanh thu thực thu') && await b.hasText('Doanh thu theo nhóm') && await b.hasText('Doanh thu theo kỳ') && !(await b.text()).includes('Công nợ hiện tại'), (await b.text()).slice(0, 300));
     await b.click('Vận hành', '[role=tab]');
-    check('báo cáo vận hành', await b.hasText('Tổng số ca'));
+    check('báo cáo vận hành (tổng hợp ca + hiệu suất Bác sĩ)', await b.hasText('Tổng số ca') && await b.hasText('Hiệu suất theo bác sĩ'), (await b.text()).slice(0, 300));
     await b.goto('/admin/medicines'); await b.clickRow('Clavamox', 'Nhật ký');
     check('nhật ký kho có dòng bán thuốc số âm', await b.hasText('Bán thuốc') && await b.hasText('-10'), (await b.text()).slice(0, 400));
 

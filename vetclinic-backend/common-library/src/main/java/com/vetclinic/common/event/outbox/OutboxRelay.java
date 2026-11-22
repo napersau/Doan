@@ -9,6 +9,7 @@ import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -48,13 +49,21 @@ public class OutboxRelay {
 
     @Scheduled(fixedDelayString = "${vetclinic.outbox.fixed-delay-ms:500}",
             initialDelayString = "${vetclinic.outbox.initial-delay-ms:5000}")
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void publishPending() {
         publishBatch();
     }
 
-    /** Gửi một lô; trả về số sự kiện đã gửi thành công (dùng cho kiểm thử và log). */
-    @Transactional
+    /**
+     * Gửi một lô; trả về số sự kiện đã gửi thành công (dùng cho kiểm thử và log).
+     * <p>
+     * READ_COMMITTED là BẮT BUỘC: lô được khóa ({@code FOR UPDATE SKIP LOCKED}) và việc gửi RabbitMQ (chờ xác nhận, có thể treo cả phút khi broker mất kết nối)
+     * diễn ra TRONG giao dịch này. Ở REPEATABLE READ mặc định của MySQL, truy vấn khóa tạo khóa khoảng (gap lock) trên chỉ mục
+     * {@code (status, next_attempt_at, id)}, nên mọi giao dịch nghiệp vụ khác muốn GHI một dòng outbox mới (thu tiền, chốt ca, tiếp đón...) bị chặn tới khi
+     * lock wait timeout (50 giây) rồi lỗi 409 SYS_1005. Ở READ_COMMITTED chỉ khóa đúng các dòng đã chọn, nên ghi dòng mới không bao giờ phải chờ lần gửi.
+     * Tìm ra ở bước 8.3 khi tắt RabbitMQ lúc đang thu tiền (EX-18); có kiểm thử hồi quy ở {@code OutboxMySqlIT}.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public int publishBatch() {
         List<OutboxEvent> batch = repository.lockNextBatch(clock.instant(), properties.getBatchSize());
         int published = 0;

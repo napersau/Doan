@@ -1,6 +1,6 @@
 // Kiểm thử các chức năng NGOÀI luồng khám chính (v3.0) qua Gateway: tài khoản, danh mục, thú cưng, lịch hẹn, quản lý đợt khám,
-// báo cáo, thuốc, WebSocket/STOMP. Bổ sung cho backend_v3.mjs / notification_v3.mjs / fe_smoke_v3.mjs (không lặp lại nội dung của chúng).
-// Chạy: node e2e/features_v3.mjs   (stack đang chạy + dữ liệu seed; chạy SAU backend_v3.mjs vì script này tạo thêm bác sĩ -> đổi sức chứa khung giờ)
+// báo cáo, thuốc, WebSocket/STOMP. Bổ sung cho backend_v4.mjs / notification_v4.mjs / fe_smoke_v4.mjs (không lặp lại nội dung của chúng).
+// Chạy: node e2e/features_v4.mjs   (stack đang chạy + dữ liệu seed; chạy SAU backend_v4.mjs vì script này tạo thêm bác sĩ -> đổi sức chứa khung giờ)
 // CẢNH BÁO: tạo dữ liệu thật, không dọn lại.
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';

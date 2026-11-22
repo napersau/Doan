@@ -3,7 +3,6 @@ package com.vetclinic.clinical.controller;
 import com.vetclinic.clinical.dto.response.DoctorStatusResponse;
 import com.vetclinic.clinical.dto.response.VisitResponse;
 import com.vetclinic.clinical.service.DoctorStatusService;
-import com.vetclinic.clinical.service.VisitEnricher;
 import com.vetclinic.clinical.service.VisitService;
 import com.vetclinic.common.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +21,6 @@ public class DoctorController {
 
     private final DoctorStatusService doctorStatusService;
     private final VisitService visitService;
-    private final VisitEnricher enricher;
 
     /** Bảng điều phối của Lễ tân: trạng thái BUSY / AVAILABLE của từng Bác sĩ. */
     @GetMapping("/status")
@@ -35,6 +33,6 @@ public class DoctorController {
     @GetMapping("/me/visits")
     @PreAuthorize("hasRole('VETERINARIAN')")
     public ResponseEntity<ApiResponse<List<VisitResponse>>> myVisits() {
-        return ResponseEntity.ok(ApiResponse.success(enricher.enrichAll(visitService.myVisits())));
+        return ResponseEntity.ok(ApiResponse.success(visitService.myVisits()));
     }
 }
