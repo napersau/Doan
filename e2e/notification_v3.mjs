@@ -59,6 +59,12 @@ async function main() {
   await call('POST', `${CLIN}/pet-visits/${visit}/paraclinical-orders`, { token: T.doc, body: { serviceIds: [ID.service.LAB_CBC] } });
   const clsInv = (await call('GET', `${CLIN}/pet-visits/${visit}/service-invoices`, { token: T.rec })).data.invoices.filter((i) => i.category === 'LABORATORY').map((i) => i.id);
   await call('POST', `${CLIN}/pet-visits/${visit}/service-invoices/confirm-payment`, { token: T.rec, body: { invoiceIds: clsInv } });
+  // phiếu phòng phát SAU khi thu tiền (sự kiện + Redis); thông báo TICKET_ISSUED cũ của các lần chạy trước có thể làm expectType đạt sớm, nên chờ phiếu thật
+  for (let i = 0; i < 60; i += 1) {
+    const ts = (await call('GET', `${CLIN}/pet-visits/${visit}/service-invoices`, { token: T.rec })).data.tickets;
+    if (ts.some((t) => t.queueType === 'LABORATORY')) break;
+    await sleep(300);
+  }
   await expectType('nộp tiền XN → KTV Lab nhận phiếu mới (TICKET_ISSUED)', T.lab, 'TICKET_ISSUED', { contains: '"LABORATORY"' });
   await call('POST', `${CLIN}/queue-tickets/call-next?queueType=LABORATORY`, { token: T.lab });
   await expectType('Lab gọi số → chủ nuôi nhận PATIENT_CALLED (LAB)', T.owner, 'PATIENT_CALLED', { contains: '"LAB"' });
@@ -67,6 +73,12 @@ async function main() {
   await call('POST', `${CLIN}/service-details/${detail}/cancel`, { token: T.doc, body: { reason: 'e2e' } });
   await expectType('hết CLS → bác sĩ nhận RESULTS_READY', T.doc, 'RESULTS_READY');
   await expectType('chủ nuôi nhận RESULTS_READY', T.owner, 'RESULTS_READY');
+  // phiếu ưu tiên 1 phát ngay sau đó qua sự kiện (Redis): chờ có thời hạn trước khi bác sĩ bắt đầu Giai đoạn 2
+  for (let i = 0; i < 60; i += 1) {
+    const ts = (await call('GET', `${CLIN}/pet-visits/${visit}/service-invoices`, { token: T.rec })).data.tickets;
+    if (ts.some((t) => t.queueType === 'DOCTOR' && t.priority === 1)) break;
+    await sleep(300);
+  }
   await call('POST', `${CLIN}/queue-tickets/call-next?queueType=DOCTOR`, { token: T.doc }); await call('POST', `${CLIN}/pet-visits/${visit}/start-phase2`, { token: T.doc });
   await call('PUT', `${CLIN}/pet-visits/${visit}/prescription`, { token: T.doc, body: { items: [{ medicineId: AMOX, quantity: 10, dosage: '1', frequency: '2', durationDays: 5 }] } });
   await call('POST', `${CLIN}/pet-visits/${visit}/close-visit`, { token: T.doc, body: { finalDiagnosis: 'Viêm da' } });

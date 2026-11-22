@@ -37,7 +37,9 @@ import java.util.stream.Collectors;
  * Không cần {@code processed_events}: chống phát trùng bằng khóa {@code queue:dedupe:visit:{visitId}:...} (chung với việc dựng lại / đối soát, xem
  * {@link QueueCoordinator#doctorKey}) ngay trong {@code issue_ticket.lua}. Lỗi (Redis không
  * truy cập được -> CLIN_1318) thì ném lên để RabbitMQ thử lại 3 lần rồi đưa vào DLQ; vì sự kiện nằm trong outbox, đã thu tiền thì chắc chắn tới được đây.
- * Trạng thái ca đọc lại từ MySQL lúc xử lý (không tin payload): ca đã hủy / đã rời bước chờ tương ứng thì không phát phiếu.
+ * Trạng thái ca đọc lại từ MySQL lúc xử lý (không tin payload): ca đã hủy / đã rời bước chờ tương ứng thì không phát phiếu. Dòng đợt khám được KHÓA (FOR UPDATE)
+ * suốt lúc kiểm tra + phát phiếu, cùng khóa với mọi chuyển trạng thái (VisitSupport.lock): hủy / đóng ca xảy ra trước thì listener thấy trạng thái mới và bỏ qua,
+ * xảy ra sau thì thấy phiếu vừa phát và hủy nó - không còn phiếu mồ côi của ca đã đóng.
  */
 @Slf4j
 @Component
@@ -46,24 +48,23 @@ public class QueueIssuerListener {
     private final QueueCoordinator queue;
     private final PetVisitRepository visitRepository;
     private final VisitServiceDetailRepository detailRepository;
-    private final TransactionTemplate readTx;
+    private final TransactionTemplate tx;
 
     public QueueIssuerListener(QueueCoordinator queue, PetVisitRepository visitRepository, VisitServiceDetailRepository detailRepository,
                                PlatformTransactionManager transactionManager) {
         this.queue = queue;
         this.visitRepository = visitRepository;
         this.detailRepository = detailRepository;
-        this.readTx = new TransactionTemplate(transactionManager);
-        this.readTx.setReadOnly(true);
+        this.tx = new TransactionTemplate(transactionManager);   // giao dịch ghi (không readOnly): khóa dòng đợt khám FOR UPDATE trong lúc phát phiếu
     }
 
     @RabbitListener(queues = ClinicalRabbitConfig.INVOICE_PAID_QUEUE)
     public void onInvoicePaid(ServiceInvoicePaidEvent event) {
-        readTx.executeWithoutResult(s -> issueForPaidInvoices(event));
+        tx.executeWithoutResult(s -> issueForPaidInvoices(event));
     }
 
     private void issueForPaidInvoices(ServiceInvoicePaidEvent e) {
-        PetVisit visit = visitRepository.findWithPetById(e.visitId()).orElse(null);
+        PetVisit visit = visitRepository.findByIdForUpdate(e.visitId()).orElse(null);
         if (visit == null || visit.getStatus() == VisitStatus.CANCELLED) {
             return;
         }
@@ -103,8 +104,8 @@ public class QueueIssuerListener {
 
     @RabbitListener(queues = ClinicalRabbitConfig.VISIT_CHECKED_IN_QUEUE)
     public void onVisitCheckedIn(VisitCheckedInEvent event) {
-        readTx.executeWithoutResult(s -> {
-            PetVisit visit = visitRepository.findWithPetById(event.visitId()).orElse(null);
+        tx.executeWithoutResult(s -> {
+            PetVisit visit = visitRepository.findByIdForUpdate(event.visitId()).orElse(null);
             if (visit == null || visit.getStatus() != VisitStatus.WAITING || queue.activeDoctorTicket(visit.getId()).isPresent()) {
                 return;
             }
@@ -121,8 +122,8 @@ public class QueueIssuerListener {
 
     @RabbitListener(queues = ClinicalRabbitConfig.RESULTS_READY_QUEUE)
     public void onResultsReady(ParaclinicalResultsReadyEvent event) {
-        readTx.executeWithoutResult(s -> {
-            PetVisit visit = visitRepository.findWithPetById(event.visitId()).orElse(null);
+        tx.executeWithoutResult(s -> {
+            PetVisit visit = visitRepository.findByIdForUpdate(event.visitId()).orElse(null);
             if (visit == null || visit.getStatus() != VisitStatus.RESULTS_READY || queue.activeDoctorTicket(visit.getId()).isPresent()) {
                 return;
             }

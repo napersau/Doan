@@ -74,7 +74,7 @@ class QueueIssuerListenerTest {
     private PetVisit visitIn(VisitStatus status, boolean emergency) {
         PetVisit v = visit(100L, status, DOCTOR);
         v.setEmergency(emergency);
-        lenient().when(visitRepository.findWithPetById(VISIT)).thenReturn(Optional.of(v));
+        lenient().when(visitRepository.findByIdForUpdate(VISIT)).thenReturn(Optional.of(v));
         return v;
     }
 
@@ -172,7 +172,7 @@ class QueueIssuerListenerTest {
         visitIn(VisitStatus.CANCELLED, false);
         listener.onInvoicePaid(paid(line(1L, "EXAM_GEN", "EXAMINATION", "DOCTOR")));   // ca đã hủy
 
-        lenient().when(visitRepository.findWithPetById(VISIT)).thenReturn(Optional.empty());
+        lenient().when(visitRepository.findByIdForUpdate(VISIT)).thenReturn(Optional.empty());
         listener.onInvoicePaid(paid(line(1L, "EXAM_GEN", "EXAMINATION", "DOCTOR")));   // ca không còn
 
         verify(queue, never()).issue(any(), any(), any(), anyInt(), any(), any(), anyList(), anyString(), any());
