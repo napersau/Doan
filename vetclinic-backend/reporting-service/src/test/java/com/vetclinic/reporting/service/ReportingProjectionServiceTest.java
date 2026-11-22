@@ -214,6 +214,21 @@ class ReportingProjectionServiceTest {
     }
 
     @Test
+    void servicePaidUsesDoctorNameFromTheEventEvenWhenCheckInHasNotBeenProcessedYet() {
+        when(visitFacts.findById(visitId)).thenReturn(Optional.empty());   // queue tiếp đón chậm hơn queue thu tiền
+        var line = new ServiceInvoicePaidEvent.Line(UUID.randomUUID(), "SINV-3", UUID.randomUUID(), UUID.randomUUID(), "EXAM_GEN", "Khám", "EXAMINATION",
+                "Khám bệnh", "EXAMINATION", 1, new BigDecimal("100000.00"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("100000.00"));
+
+        service.onServiceInvoicePaid(new ServiceInvoicePaidEvent(UUID.randomUUID(), lateEvening, cashierId, visitId, "VIS-1", petId, "Lu", "Lan", doctorId, "BS Tiến",
+                false, cashierId, lateEvening, List.of(line)));
+
+        ArgumentCaptor<RevenueFact> captor = ArgumentCaptor.forClass(RevenueFact.class);
+        verify(revenueFacts).save(captor.capture());
+        assertThat(captor.getValue().getDoctorName()).isEqualTo("BS Tiến");
+        verify(performances).accumulate(eq(LocalDate.of(2026, 11, 21)), any(byte[].class), eq("BS Tiến"), eq(0), eq(0), eq(0), eq(new BigDecimal("100000.00")));
+    }
+
+    @Test
     void servicePaidSkipsLinesAlreadyRecorded() {
         UUID invoiceId = UUID.randomUUID();
         UUID serviceId = UUID.randomUUID();

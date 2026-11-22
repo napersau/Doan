@@ -189,6 +189,8 @@ export const reportsApi = {
   revenueByCategory: (query) => api.get(`${REPORTS}/revenue/by-category`, query),
   doctorPerformance: (query) => api.get(`${REPORTS}/doctors/performance`, query),
   visitsSummary: (query) => api.get(`${REPORTS}/visits/summary`, query),
+  // Công cụ quản trị (Task 4.5.4): dựng lại báo cáo của `days` ngày gần nhất từ outbox của các service nguồn
+  rebuild: (days) => api.post(`${REPORTS}/rebuild`, undefined, { query: { days } }),
 };
 
 export const notificationsApi = {

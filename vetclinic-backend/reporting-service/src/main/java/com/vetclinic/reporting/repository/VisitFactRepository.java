@@ -27,6 +27,19 @@ public interface VisitFactRepository extends JpaRepository<VisitFact, UUID> {
             group by v.doctorId order by count(v) desc""")
     List<DoctorLoadRow> doctorLoads(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
+    /** Dựng lại báo cáo: xóa các ca tiếp đón từ ngày {@code from} trở đi (check-in sẽ phát lại từ outbox). */
+    @Modifying
+    @Query("DELETE FROM VisitFact v WHERE v.businessDate >= :from")
+    int deleteFromDate(@Param("from") LocalDate from);
+
+    /**
+     * Dựng lại báo cáo: ca tiếp đón TRƯỚC cửa sổ nhưng hoàn tất / hủy TRONG cửa sổ được đưa về WAITING để sự kiện hoàn tất / hủy phát lại
+     * cộng lại đúng (nếu không, ca đã COMPLETED sẽ bị bỏ qua và hiệu suất Bác sĩ của ngày đó bị thiếu).
+     */
+    @Modifying
+    @Query("UPDATE VisitFact v SET v.currentStatus = 'WAITING', v.completedAt = NULL WHERE v.visitId IN :ids AND v.businessDate < :from")
+    int reopenBefore(@Param("ids") java.util.Collection<UUID> ids, @Param("from") LocalDate from);
+
     @Modifying
     @Query("UPDATE VisitFact v SET v.doctorName = :name WHERE v.doctorId = :userId")
     int renameDoctor(@Param("userId") UUID userId, @Param("name") String name);

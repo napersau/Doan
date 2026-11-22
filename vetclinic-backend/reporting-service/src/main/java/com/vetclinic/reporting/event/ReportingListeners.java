@@ -8,19 +8,16 @@ import com.vetclinic.common.event.UserProfileUpdatedEvent;
 import com.vetclinic.common.event.VisitCancelledEvent;
 import com.vetclinic.common.event.VisitCheckedInEvent;
 import com.vetclinic.common.event.VisitCompletedEvent;
-import com.vetclinic.common.event.processed.IdempotentConsumer;
-import com.vetclinic.reporting.service.ReportingProjectionService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 /**
- * 8 listener dựng mô hình đọc báo cáo, mỗi listener một queue + DLQ ({@link ReportingRabbitConfig}). Mỗi listener bọc việc xử lý trong
- * {@link IdempotentConsumer}: dòng {@code processed_events}, các dòng fact và bảng tổng hợp cùng một giao dịch; nhận trùng (eventId + tên
- * listener) thì bỏ qua; lỗi thì RabbitMQ thử lại 3 lần (1s, 2s, 4s) rồi chuyển vào DLQ.
+ * 8 listener dựng mô hình đọc báo cáo, mỗi listener một queue + DLQ ({@link ReportingRabbitConfig}). Việc xử lý nằm ở
+ * {@link ReportingEventProcessor} (idempotent: dòng {@code processed_events}, dòng fact và bảng tổng hợp cùng một giao dịch; nhận trùng
+ * eventId + tên listener thì bỏ qua), dùng chung với job dựng lại báo cáo. Lỗi thì RabbitMQ thử lại 3 lần (1s, 2s, 4s) rồi chuyển vào DLQ.
+ * Phương thức để {@code void}: giá trị trả về của {@code @RabbitListener} sẽ bị coi là phản hồi RPC.
  */
-@Slf4j
 @Component
 @RequiredArgsConstructor
 public class ReportingListeners {
@@ -34,46 +31,45 @@ public class ReportingListeners {
     public static final String USER_PROFILE_UPDATED = "reporting.user-profile-updated";
     public static final String PET_UPDATED = "reporting.pet-updated";
 
-    private final ReportingProjectionService projection;
-    private final IdempotentConsumer idempotentConsumer;
+    private final ReportingEventProcessor processor;
 
     @RabbitListener(queues = ReportingRabbitConfig.VISIT_CHECKED_IN_QUEUE)
     public void onVisitCheckedIn(VisitCheckedInEvent event) {
-        idempotentConsumer.run(event.eventId(), VISIT_CHECKED_IN, () -> projection.onVisitCheckedIn(event));
+        processor.visitCheckedIn(event);
     }
 
     @RabbitListener(queues = ReportingRabbitConfig.VISIT_COMPLETED_QUEUE)
     public void onVisitCompleted(VisitCompletedEvent event) {
-        idempotentConsumer.run(event.eventId(), VISIT_COMPLETED, () -> projection.onVisitCompleted(event));
+        processor.visitCompleted(event);
     }
 
     @RabbitListener(queues = ReportingRabbitConfig.VISIT_CANCELLED_QUEUE)
     public void onVisitCancelled(VisitCancelledEvent event) {
-        idempotentConsumer.run(event.eventId(), VISIT_CANCELLED, () -> projection.onVisitCancelled(event));
+        processor.visitCancelled(event);
     }
 
     @RabbitListener(queues = ReportingRabbitConfig.INVOICE_SERVICE_PAID_QUEUE)
     public void onServiceInvoicePaid(ServiceInvoicePaidEvent event) {
-        idempotentConsumer.run(event.eventId(), INVOICE_SERVICE_PAID, () -> projection.onServiceInvoicePaid(event));
+        processor.serviceInvoicePaid(event);
     }
 
     @RabbitListener(queues = ReportingRabbitConfig.INVOICE_SERVICE_REFUNDED_QUEUE)
     public void onServiceInvoiceRefunded(ServiceInvoiceRefundedEvent event) {
-        idempotentConsumer.run(event.eventId(), INVOICE_SERVICE_REFUNDED, () -> projection.onServiceInvoiceRefunded(event));
+        processor.serviceInvoiceRefunded(event);
     }
 
     @RabbitListener(queues = ReportingRabbitConfig.MEDICINE_INVOICE_PAID_QUEUE)
     public void onMedicineInvoicePaid(MedicineInvoicePaidEvent event) {
-        idempotentConsumer.run(event.eventId(), MEDICINE_INVOICE_PAID, () -> projection.onMedicineInvoicePaid(event));
+        processor.medicineInvoicePaid(event);
     }
 
     @RabbitListener(queues = ReportingRabbitConfig.USER_PROFILE_UPDATED_QUEUE)
     public void onUserProfileUpdated(UserProfileUpdatedEvent event) {
-        idempotentConsumer.run(event.eventId(), USER_PROFILE_UPDATED, () -> projection.onUserProfileUpdated(event));
+        processor.userProfileUpdated(event);
     }
 
     @RabbitListener(queues = ReportingRabbitConfig.PET_UPDATED_QUEUE)
     public void onPetUpdated(PetUpdatedEvent event) {
-        idempotentConsumer.run(event.eventId(), PET_UPDATED, () -> projection.onPetUpdated(event));
+        processor.petUpdated(event);
     }
 }

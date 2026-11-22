@@ -42,6 +42,14 @@ spring:
           initial-interval: 1000ms
           multiplier: 2
 
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 3000
+            read-timeout: 15000     # trang outbox tối đa 1000 dòng
+
 eureka:
   client:
     service-url:

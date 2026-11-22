@@ -25,6 +25,14 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
             """, nativeQuery = true)
     List<OutboxEvent> lockNextBatch(@Param("now") Instant now, @Param("limit") int limit);
 
+    /**
+     * Dựng lại báo cáo (Task 4.5.4): các dòng từ {@code since} có routing key trong danh sách, MỌI trạng thái (PENDING / FAILED cũng là sự thật nghiệp vụ),
+     * theo khóa tăng dần, phân trang bằng {@code afterId}.
+     */
+    @Query("SELECT e FROM OutboxEvent e WHERE e.id > :afterId AND e.createdAt >= :since AND e.routingKey IN :routingKeys ORDER BY e.id")
+    List<OutboxEvent> findForReplay(@Param("afterId") long afterId, @Param("since") Instant since,
+                                    @Param("routingKeys") java.util.Collection<String> routingKeys, org.springframework.data.domain.Pageable pageable);
+
     Optional<OutboxEvent> findByEventId(UUID eventId);
 
     long countByStatus(OutboxStatus status);

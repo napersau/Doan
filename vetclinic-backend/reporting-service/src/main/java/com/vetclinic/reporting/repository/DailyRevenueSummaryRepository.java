@@ -13,6 +13,10 @@ import java.util.List;
 
 public interface DailyRevenueSummaryRepository extends JpaRepository<DailyRevenueSummary, DailyRevenueSummaryId> {
 
+    @Modifying
+    @Query("DELETE FROM DailyRevenueSummary s WHERE s.businessDate >= :from")
+    int deleteFromDate(@Param("from") LocalDate from);
+
     /** Các dòng tổng hợp trong khoảng ngày (cả hai đầu), thứ tự ổn định để giao diện vẽ biểu đồ. */
     List<DailyRevenueSummary> findByBusinessDateBetweenOrderByBusinessDateAscRevenueTypeAscCategoryCodeAsc(LocalDate from, LocalDate to);
 

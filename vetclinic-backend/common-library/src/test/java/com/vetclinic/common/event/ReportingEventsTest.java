@@ -61,6 +61,11 @@ class ReportingEventsTest {
 
         assertThat(parsed).isEqualTo(event);
         assertThat(parsed.lines().get(0).categoryName()).isEqualTo("Chẩn đoán hình ảnh");
+        assertThat(parsed.doctorName()).isNull();   // dạng cũ không có tên Bác sĩ
+
+        var named = new ServiceInvoicePaidEvent(UuidV7.generate(), NOW, UuidV7.generate(), UuidV7.generate(), "VIS-1", UuidV7.generate(), "Lu", "Lan",
+                UuidV7.generate(), "BS Tiến", false, UuidV7.generate(), NOW, List.of(line));
+        assertThat(mapper.readValue(mapper.writeValueAsString(named), ServiceInvoicePaidEvent.class)).isEqualTo(named);
     }
 
     @Test

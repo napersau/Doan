@@ -7,6 +7,7 @@ clinical-service / billing-pharmacy-service / reporting-service trong <module>/t
 Dọn bảng báo cáo ở ĐẦU mỗi lần chạy (chạy lại nhiều lần được); trả lại tên Bác sĩ / chủ nuôi và tồn kho ở cuối (kể cả khi lỗi)."""
 import base64
 import json
+import uuid
 import os
 import subprocess
 import sys
@@ -154,9 +155,9 @@ try:
     # bảng báo cáo dọn trước khi chạy: mọi dòng sau đây đều do chính lần chạy này sinh ra
     for table in ("visit_facts", "revenue_facts", "daily_revenue_summaries", "doctor_daily_performances", "processed_events"):
         sql(f"DELETE FROM {RDB}.{table}")
-    # sự kiện còn PENDING do các script kiểm tra khác để lại (chạy service không có RabbitMQ) sẽ đổ vào báo cáo và làm lệch số đếm: coi như đã gửi
+    # outbox còn tồn của các script kiểm tra khác (sự kiện PENDING sẽ đổ vào báo cáo; sự kiện cũ sẽ bị job dựng lại 7.3 phát lại) làm lệch số đếm: xóa sạch
     for db in ("pet_clinic_auth_db", "pet_clinic_appointment_db", CDB, BDB):
-        sql(f"UPDATE {db}.outbox_events SET status = 'PUBLISHED' WHERE status <> 'PUBLISHED'")
+        sql(f"DELETE FROM {db}.outbox_events")
     sql(f"DELETE FROM {CDB}.queue_ticket_histories")   # Redis tạm đếm số phiếu lại từ 1 (UNIQUE loại + ngày + số)
     sql(f"UPDATE {CDB}.pet_visits SET status = 'CANCELLED' WHERE doctor_id = {b(TIEN)} AND status IN ('IN_PROGRESS', 'WAITING', 'RESULTS_READY')")
     for module in ("reporting-service", "billing-pharmacy-service", "clinical-service", "auth-service"):   # reporting khai báo queue trước khi service khác phát sự kiện
@@ -353,6 +354,96 @@ try:
     check("EX-19: giao lại 4 loại sự kiện thu / hoàn / hoàn tất / thuốc -> tổng hợp, số dòng fact và số ca hoàn tất KHÔNG đổi", totals_before == totals_after and totals_before != "", (totals_before, totals_after))
     dup = sql(f"SELECT COUNT(*) FROM (SELECT event_id, consumer FROM {RDB}.processed_events GROUP BY event_id, consumer HAVING COUNT(*) > 1) x")
     check("processed_events: mỗi (sự kiện, listener) đúng một dòng", dup == "0" and sql(f"SELECT COUNT(DISTINCT consumer) FROM {RDB}.processed_events") == "6", sql(f"SELECT consumer, COUNT(*) FROM {RDB}.processed_events GROUP BY consumer"))
+
+    # ================================================================== bước 7.3: dựng lại báo cáo từ outbox của các service nguồn
+    def dump():
+        """Dấu vân tay (MD5) của cả bốn bảng báo cáo, không kể khóa tự tăng và cột updated_at."""
+        return sql(
+            "SET SESSION group_concat_max_len = 100000000; SELECT CONCAT_WS('|', "
+            f"(SELECT MD5(IFNULL(GROUP_CONCAT(CONCAT_WS(',', HEX(visit_id), visit_code, business_date, checked_in_at, IFNULL(completed_at, ''), current_status, is_emergency, HEX(pet_id), pet_name, species_code, HEX(owner_id), owner_name, IFNULL(HEX(doctor_id), ''), IFNULL(doctor_name, '')) ORDER BY visit_id), '')) FROM {RDB}.visit_facts), "
+            f"(SELECT MD5(IFNULL(GROUP_CONCAT(CONCAT_WS(',', revenue_type, entry_type, HEX(source_invoice_id), invoice_code, HEX(item_id), item_code, item_name, category_code, category_name, HEX(visit_id), IFNULL(HEX(doctor_id), ''), IFNULL(doctor_name, ''), IFNULL(HEX(cashier_id), ''), business_date, occurred_at, quantity, amount_before_vat, vat_amount, discount_amount, net_amount) ORDER BY source_invoice_id, item_id, entry_type), '')) FROM {RDB}.revenue_facts), "
+            f"(SELECT MD5(IFNULL(GROUP_CONCAT(CONCAT_WS(',', business_date, revenue_type, category_code, category_name, line_count, amount_before_vat, vat_amount, discount_amount, net_amount) ORDER BY business_date, revenue_type, category_code), '')) FROM {RDB}.daily_revenue_summaries), "
+            f"(SELECT MD5(IFNULL(GROUP_CONCAT(CONCAT_WS(',', business_date, HEX(doctor_id), doctor_name, completed_visits, cancelled_visits, emergency_visits, service_net_revenue) ORDER BY business_date, doctor_id), '')) FROM {RDB}.doctor_daily_performances))")
+
+    def rebuild(days=1, token=admin):
+        return call("reporting-service", "POST", f"/api/v1/reports/rebuild?days={days}", token)
+
+    # dữ liệu CŨ hơn cửa sổ phải được giữ nguyên: một dòng tổng hợp, một hiệu suất Bác sĩ và một ca của ngày 01/01/2026
+    OLD_DAY = "2026-01-01"
+    OLD_VISIT = "019a9442-d810-7000-8000-0000000000a1"
+    sql(f"INSERT INTO {RDB}.daily_revenue_summaries (business_date, revenue_type, category_code, category_name, line_count, amount_before_vat, vat_amount, discount_amount, net_amount) VALUES ('{OLD_DAY}', 'SERVICE', 'OLD', 'Nhóm cũ', 7, 700000, 0, 0, 700000)")
+    sql(f"INSERT INTO {RDB}.doctor_daily_performances (business_date, doctor_id, doctor_name, completed_visits, cancelled_visits, emergency_visits, service_net_revenue) VALUES ('{OLD_DAY}', {b(TIEN)}, 'BS cũ', 9, 0, 0, 900000)")
+    sql(f"INSERT INTO {RDB}.visit_facts (visit_id, visit_code, business_date, checked_in_at, current_status, is_emergency, pet_id, pet_name, species_code, owner_id, owner_name, doctor_id, doctor_name) VALUES ({b(OLD_VISIT)}, 'VIS-OLD', '{OLD_DAY}', '2026-01-01 03:00:00', 'WAITING', 0, {b(pets[v1][0])}, 'Cũ', 'CAT', {b(lan_id)}, 'Lan', {b(TIEN)}, '{tien_name}')")
+    baseline = dump()
+    check("dựng lại: có dữ liệu để so sánh (dấu vân tay 4 bảng khác rỗng)", baseline.count("|") == 3 and len(baseline) > 100, baseline)
+    st, res = rebuild(1, rec)
+    check("dựng lại: Lễ tân không được chạy -> 403", st == 403, (st, res))
+    check("dựng lại: số ngày 0 hoặc 7 (quá 6) -> 400", rebuild(0)[0] == 400 and rebuild(7)[0] == 400)
+    st, res = rebuild(1, None)
+    check("dựng lại: không danh tính -> 401/403", st in (401, 403))
+
+    # (a) dựng lại khi báo cáo đang ĐÚNG: kết quả giống hệt
+    st, res = rebuild(1)
+    d = res.get("data") or {}
+    check("POST /reports/rebuild?days=1 -> 200, đọc đủ sự kiện của 3 service: 4 tiếp đón, 3 hoàn tất, 1 hủy, 4 thu dịch vụ, 1 hoàn tiền, 1 thu thuốc",
+          st == 200 and d.get("fetchedByType") == {"VisitCheckedInEvent": 4, "VisitCompletedEvent": 3, "VisitCancelledEvent": 1, "ServiceInvoicePaidEvent": 4,
+                                                  "ServiceInvoiceRefundedEvent": 1, "MedicineInvoicePaidEvent": 1}, (st, res))
+    check("dựng lại: áp dụng đủ, không bỏ qua sự kiện nào", d.get("fetched") == d.get("applied") == 14 and d.get("skipped") == 0 and d.get("fromDate") == TODAY, d)
+    check("dựng lại khi báo cáo đang đúng -> 4 bảng giống HỆT trước đó (idempotent)", dump() == baseline, (baseline, dump()))
+    check("processed_events sau dựng lại: mỗi sự kiện phát lại đúng một dòng", sql(f"SELECT COUNT(*) FROM {RDB}.processed_events") == "14")
+
+    # (b) làm hỏng mô hình đọc rồi dựng lại: phải trở về đúng như cũ
+    sql(f"DELETE FROM {RDB}.revenue_facts WHERE business_date = '{TODAY}'")
+    sql(f"DELETE FROM {RDB}.daily_revenue_summaries WHERE business_date = '{TODAY}'")
+    sql(f"DELETE FROM {RDB}.doctor_daily_performances WHERE business_date = '{TODAY}'")
+    sql(f"UPDATE {RDB}.visit_facts SET current_status = 'WAITING', completed_at = NULL, doctor_name = 'HỎNG', pet_name = 'HỎNG' WHERE business_date = '{TODAY}'")
+    sql(f"DELETE FROM {RDB}.processed_events")
+    check("báo cáo đã bị làm hỏng (doanh thu hôm nay biến mất)", dump() != baseline and rep("/revenue/daily?from=" + TODAY + "&to=" + TODAY)[1]["data"]["totals"]["netAmount"] in (0, "0", 0.0, "0.00"))
+    st, res = rebuild(1)
+    check("dựng lại báo cáo đã hỏng -> 200", st == 200 and (res.get("data") or {}).get("skipped") == 0, (st, res))
+    check("sau dựng lại: 4 bảng trở về GIỐNG HỆT bản gốc (kể cả trạng thái ca, doanh thu, hiệu suất)", dump() == baseline, (baseline, dump()))
+    st, res = rep(f"/revenue/daily?from={TODAY}&to={TODAY}")
+    check("API doanh thu hôm nay đúng trở lại (khớp VIEW của clinical + billing)", st == 200 and dec(res["data"]["totals"]["serviceNetAmount"]) == svc_sum and dec(res["data"]["totals"]["medicineNetAmount"]) == med_sum, (st, res))
+    check("dữ liệu cũ hơn cửa sổ được GIỮ NGUYÊN (dòng tổng hợp, hiệu suất, ca của 01/01/2026)",
+          sql(f"SELECT net_amount FROM {RDB}.daily_revenue_summaries WHERE business_date = '{OLD_DAY}' AND category_code = 'OLD'") == "700000.00"
+          and sql(f"SELECT completed_visits FROM {RDB}.doctor_daily_performances WHERE business_date = '{OLD_DAY}' AND doctor_id = {b(TIEN)}") == "9"
+          and sql(f"SELECT current_status FROM {RDB}.visit_facts WHERE visit_id = {b(OLD_VISIT)}") == "WAITING")
+    check("dựng lại KHÔNG gửi lại gì lên RabbitMQ: outbox các service nguồn vẫn không có dòng PENDING / FAILED",
+          sql(f"SELECT (SELECT COUNT(*) FROM {CDB}.outbox_events WHERE status <> 'PUBLISHED') + (SELECT COUNT(*) FROM {BDB}.outbox_events WHERE status <> 'PUBLISHED') + (SELECT COUNT(*) FROM pet_clinic_auth_db.outbox_events WHERE status <> 'PUBLISHED')") == "0")
+    queues_after = {q["name"]: q for q in rabbit_api("GET", "/queues")}
+    check("hàng đợi reporting trống sau dựng lại (không phát lại qua RabbitMQ)", all(queues_after[f"reporting-service.{k}"]["messages"] == 0 for k in expected))
+
+    # (c) ca tiếp đón TRƯỚC cửa sổ nhưng hoàn tất TRONG cửa sổ: ca phải được đưa về WAITING rồi đóng lại, hiệu suất Bác sĩ cộng đủ
+    perf_before = int(sql(f"SELECT completed_visits FROM {RDB}.doctor_daily_performances WHERE business_date = '{TODAY}' AND doctor_id = {b(TIEN)}"))
+    sql(f"UPDATE {RDB}.visit_facts SET current_status = 'COMPLETED', completed_at = '2026-01-01 04:00:00' WHERE visit_id = {b(OLD_VISIT)}")
+    now_ms = int(time.time() * 1000)
+    raw = now_ms.to_bytes(6, "big") + bytes([0x70, 0x00, 0x80, 0, 0, 0, 0, 0, 0, 0xB2])
+    old_event_id = str(uuid.UUID(bytes=raw))
+    payload = json.dumps({"eventId": old_event_id, "occurredAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "actorUserId": None, "visitId": OLD_VISIT,
+                          "visitCode": "VIS-OLD", "petId": pets[v1][0], "abandoned": False, "doctorId": TIEN, "doctorName": tien_name}, ensure_ascii=False)
+    sql(f"INSERT INTO {CDB}.outbox_events (event_id, aggregate_type, aggregate_id, event_type, routing_key, payload, status, published_at) VALUES ({b(old_event_id)}, 'VISIT', '{OLD_VISIT}', 'VisitCompletedEvent', 'visit.completed', '{payload.replace(chr(39), chr(39) * 2)}', 'PUBLISHED', NOW())")
+    st, res = rebuild(1)
+    check("ca cũ đóng trong cửa sổ: dựng lại -> 200, đọc thêm 1 sự kiện hoàn tất, không bỏ qua gì", st == 200 and res["data"]["fetchedByType"]["VisitCompletedEvent"] == 4 and res["data"]["skipped"] == 0, (st, res))
+    check("ca cũ được đóng lại đúng (COMPLETED, giờ đóng = giờ sự kiện, vẫn thuộc ngày 01/01/2026)",
+          sql(f"SELECT current_status, business_date, completed_at > '2026-11-01' FROM {RDB}.visit_facts WHERE visit_id = {b(OLD_VISIT)}") == f"COMPLETED\t{OLD_DAY}\t1")
+    check("hiệu suất Bác sĩ hôm nay cộng thêm đúng 1 ca hoàn tất cho ca cũ (không bị bỏ sót vì ca đã COMPLETED)",
+          int(sql(f"SELECT completed_visits FROM {RDB}.doctor_daily_performances WHERE business_date = '{TODAY}' AND doctor_id = {b(TIEN)}")) == perf_before + 1)
+    st2, res2 = rebuild(1)
+    check("dựng lại lần nữa ngay sau đó cho cùng kết quả (hiệu suất không cộng đôi)",
+          st2 == 200 and int(sql(f"SELECT completed_visits FROM {RDB}.doctor_daily_performances WHERE business_date = '{TODAY}' AND doctor_id = {b(TIEN)}")) == perf_before + 1, (st2, res2))
+
+    # (d) một service nguồn không trả lời: dừng NGAY, báo cáo giữ nguyên
+    sql(f"DELETE FROM {CDB}.outbox_events WHERE event_id = {b(old_event_id)}")
+    sql(f"DELETE FROM {RDB}.visit_facts WHERE visit_id = {b(OLD_VISIT)}")
+    sql(f"DELETE FROM {RDB}.daily_revenue_summaries WHERE business_date = '{OLD_DAY}'")
+    sql(f"DELETE FROM {RDB}.doctor_daily_performances WHERE business_date = '{OLD_DAY}'")
+    sql(f"UPDATE {RDB}.doctor_daily_performances SET completed_visits = completed_visits - 1 WHERE business_date = '{TODAY}' AND doctor_id = {b(TIEN)}")
+    stable = dump()
+    PROCS[1].terminate()   # billing-pharmacy-service (thứ tự khởi động: reporting, billing, clinical, auth)
+    PROCS[1].wait(timeout=30)
+    st, res = rebuild(1)
+    check("billing-pharmacy-service ngừng chạy: dựng lại -> 503 SYS_1004 nêu rõ service, báo cáo CHƯA bị thay đổi", st == 503 and res.get("errorCode") == "SYS_1004" and "billing-pharmacy-service" in (res.get("message") or "") and dump() == stable, (st, res))
+    check("sau lỗi, báo cáo vẫn dùng được (API doanh thu 200)", rep(f"/revenue/daily?from={TODAY}&to={TODAY}")[0] == 200)
 
     # ================================================================== đổi tên lan sang báo cáo
     new_doc, new_owner, new_pet = f"BS Đổi {SUFFIX}", f"Lan Đổi {SUFFIX}", f"Pet Đổi {SUFFIX}"

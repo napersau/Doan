@@ -377,6 +377,12 @@ async function main() {
   await sleep(4000);
   const afterReplay = [reportedService(), reportedMedicine(), Number(sql(`SELECT COUNT(*) FROM ${RDB}.revenue_facts`)), Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`))];
   check('EX-19: giao lại sự kiện thu tiền dịch vụ + thuốc của luồng chuẩn → tổng báo cáo, số dòng fact và bảng tổng hợp KHÔNG đổi', JSON.stringify(beforeReplay) === JSON.stringify(afterReplay), `${beforeReplay} → ${afterReplay}`);
+  // Task 4.5.4: dựng lại báo cáo từ outbox (qua Gateway, chỉ ADMIN) -> báo cáo giống hệt trước đó
+  const rebuilt = await call('POST', `${REPORTS}/rebuild?days=1`, { token: T.admin });
+  check('POST /reports/rebuild?days=1 (Gateway, ADMIN): đọc outbox của 3 service, áp dụng đủ, không bỏ qua sự kiện nào', rebuilt.status === 200 && rebuilt.data.fetched > 0 && rebuilt.data.applied === rebuilt.data.fetched && rebuilt.data.skipped === 0, brief(rebuilt) + JSON.stringify(rebuilt.data).slice(0, 200));
+  const afterRebuild = [reportedService(), reportedMedicine(), Number(sql(`SELECT COUNT(*) FROM ${RDB}.revenue_facts`)), Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`))];
+  check('sau dựng lại: doanh thu dịch vụ / thuốc, số dòng fact và bảng tổng hợp giống HỆT trước đó', JSON.stringify(afterReplay) === JSON.stringify(afterRebuild), `${afterReplay} → ${afterRebuild}`);
+  check('Lễ tân không được dựng lại báo cáo (403)', (await call('POST', `${REPORTS}/rebuild`, { token: T.rec })).status === 403);
   check('bảng tổng hợp theo ngày khớp tổng các dòng fact (cộng dồn nguyên tử)', Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`)) === reportedService() + reportedMedicine());
   check('khoảng ngày đảo ngược → 400 SYS_1001; type sai → 400', (await call('GET', `${REPORTS}/revenue/daily?from=${vnToday}&to=2020-01-01`, { token: T.admin })).code === 'SYS_1001'
     && (await call('GET', `${REPORTS}/revenue/daily?type=FOOD`, { token: T.admin })).status === 400);

@@ -14,6 +14,10 @@ import java.util.UUID;
 
 public interface DoctorDailyPerformanceRepository extends JpaRepository<DoctorDailyPerformance, DoctorDailyPerformanceId> {
 
+    @Modifying
+    @Query("DELETE FROM DoctorDailyPerformance d WHERE d.businessDate >= :from")
+    int deleteFromDate(@Param("from") LocalDate from);
+
     List<DoctorDailyPerformance> findByBusinessDateBetweenOrderByBusinessDateAsc(LocalDate from, LocalDate to);
 
     /**

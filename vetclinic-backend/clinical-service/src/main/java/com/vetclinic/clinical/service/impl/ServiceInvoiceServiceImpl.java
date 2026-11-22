@@ -217,7 +217,7 @@ public class ServiceInvoiceServiceImpl implements ServiceInvoiceService {
             // Q1 (v4.0): thu tiền xong thì sự kiện đi qua outbox CÙNG giao dịch; QueueIssuerListener phát phiếu: phí khám -> DOCTOR; XN / CĐHA -> phiếu phòng
             outboxWriter.write(VisitSupport.OUTBOX_AGGREGATE, visit.getId(), new ServiceInvoicePaidEvent(UuidV7.generate(clock), now, cashierId,
                     visit.getId(), visit.getVisitCode(), visit.getPet().getId(), visit.getPet().getName(), visit.getPet().getOwnerNameSnapshot(),
-                    visit.getDoctorId(), visit.isEmergency(), cashierId, now, paidLines));
+                    visit.getDoctorId(), visit.getDoctorNameSnapshot(), visit.isEmergency(), cashierId, now, paidLines));
         }
 
         boolean anyPending = byInvoiceId.values().stream().anyMatch(i -> i.getPaymentStatus() == PaymentStatus.PENDING);

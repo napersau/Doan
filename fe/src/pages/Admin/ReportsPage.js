@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import StaffLayout from '../../layouts/StaffLayout';
-import { AsyncView, Button, Field, Input, PageHead, Panel, Select, Stats, Table, Tabs } from '../../components/ui';
+import { AsyncView, Button, ConfirmDialog, Field, Input, Notice, PageHead, Panel, Select, Stats, Table, Tabs } from '../../components/ui';
 import { appointmentsApi, reportsApi } from '../../api/endpoints';
 import useAsync from '../../hooks/useAsync';
 import { formatDate, formatMoney, formatNumber, todayIso } from '../../lib/format';
@@ -94,8 +94,13 @@ export default function ReportsPage() {
   const days = (new Date(to) - new Date(from)) / 86400000 + 1;
   const invalid = !from || !to || from > to ? 'Khoảng ngày không hợp lệ: ngày bắt đầu phải trước hoặc bằng ngày kết thúc.' : days > MAX_DAYS ? `Khoảng báo cáo tối đa ${MAX_DAYS} ngày.` : '';
   const [applied, setApplied] = useState({ fromDate: from, toDate: to });
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildDays, setRebuildDays] = useState('3');
+  const [notice, setNotice] = useState(null);
+  const [reload, setReload] = useState(0);   // tăng sau khi dựng lại để các tab nạp lại số liệu
   return <StaffLayout area="admin" title="Báo cáo & thống kê">
-    <PageHead eyebrow="BÁO CÁO" title="Báo cáo & thống kê">Doanh thu (dịch vụ + thuốc, đã trừ hoàn tiền), vận hành phòng khám và hiệu quả đặt lịch theo khoảng ngày (giờ Việt Nam). Mặc định 30 ngày gần nhất.</PageHead>
+    <PageHead eyebrow="BÁO CÁO" title="Báo cáo & thống kê" actions={<Button onClick={() => setRebuilding(true)}>Dựng lại báo cáo</Button>}>Doanh thu (dịch vụ + thuốc, đã trừ hoàn tiền), vận hành phòng khám và hiệu quả đặt lịch theo khoảng ngày (giờ Việt Nam). Mặc định 30 ngày gần nhất. Nút "Dựng lại báo cáo" dùng khi số liệu bị lệch hoặc thiếu so với giao dịch.</PageHead>
+    <Notice notice={notice} onClose={() => setNotice(null)} />
     <Panel>
       <div className="ui-toolbar" style={{ margin: 0, alignItems: 'flex-end' }}>
         <Field label="Từ ngày"><Input type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} /></Field>
@@ -107,8 +112,18 @@ export default function ReportsPage() {
       <p className="ui-muted" style={{ fontSize: 12, marginBottom: 0 }}>Đang xem: {formatDate(applied.fromDate)} – {formatDate(applied.toDate)}</p>
     </Panel>
     <Tabs tabs={[{ key: 'revenue', label: 'Doanh thu' }, { key: 'operations', label: 'Vận hành' }, { key: 'appointments', label: 'Lịch hẹn' }]} value={tab} onChange={setTab} />
-    {tab === 'revenue' && <Revenue range={applied} groupBy={groupBy} />}
-    {tab === 'operations' && <Operations range={applied} />}
+    {tab === 'revenue' && <Revenue key={reload} range={applied} groupBy={groupBy} />}
+    {tab === 'operations' && <Operations key={reload} range={applied} />}
     {tab === 'appointments' && <Appointments range={applied} />}
+    {rebuilding && <ConfirmDialog title="Dựng lại báo cáo" confirmLabel="Dựng lại" onClose={() => setRebuilding(false)} onConfirm={async () => {
+      const result = await reportsApi.rebuild(rebuildDays);
+      setRebuilding(false);
+      setReload((value) => value + 1);
+      setNotice({ type: result.skipped ? 'info' : 'success', text: `Đã dựng lại báo cáo từ ${formatDate(result.fromDate)}: đọc ${result.fetched} sự kiện, áp dụng ${result.applied}${result.skipped ? `, bỏ qua ${result.skipped} (${result.skippedReasons[0]})` : ''}.` });
+    }}>
+      Đọc lại các sự kiện trong outbox của các service nguồn và tính lại doanh thu, tổng hợp theo ngày, hiệu suất Bác sĩ của những ngày gần nhất.
+      Dữ liệu của các ngày cũ hơn được giữ nguyên (outbox chỉ giữ 7 ngày). Chạy lại nhiều lần cho cùng kết quả; trong lúc chạy, báo cáo tạm dừng nhận sự kiện mới vài giây.
+      <Field label="Số ngày gần nhất (kể cả hôm nay)"><Select value={rebuildDays} onChange={(event) => setRebuildDays(event.target.value)}>{[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} ngày</option>)}</Select></Field>
+    </ConfirmDialog>}
   </StaffLayout>;
 }

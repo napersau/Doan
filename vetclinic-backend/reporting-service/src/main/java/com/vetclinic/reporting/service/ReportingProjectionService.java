@@ -117,7 +117,8 @@ public class ReportingProjectionService {
     public void onServiceInvoicePaid(ServiceInvoicePaidEvent e) {
         VisitFact visit = visitFacts.findById(e.visitId()).orElse(null);   // chỉ để lấy tên Bác sĩ; thiếu thì để trống
         UUID doctorId = e.doctorId() != null ? e.doctorId() : visit == null ? null : visit.getDoctorId();
-        String doctorName = doctorName(visit, doctorId);
+        // tên Bác sĩ theo sự kiện thu (không phụ thuộc sự kiện tiếp đón có tới trước hay không), thiếu thì lấy ở visit_facts
+        String doctorName = e.doctorName() != null && !e.doctorName().isBlank() ? e.doctorName() : doctorName(visit, doctorId);
         Instant at = e.paidAt() != null ? e.paidAt() : e.occurredAt();
         LocalDate date = businessDate(at);
         for (ServiceInvoicePaidEvent.Line line : e.lines()) {

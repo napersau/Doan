@@ -24,6 +24,11 @@ public interface RevenueFactRepository extends JpaRepository<RevenueFact, Long> 
             group by r.visitId having sum(r.netAmount) > 0""")
     List<UUID> visitsWithPositiveNet(@Param("categories") Collection<String> categories, @Param("from") LocalDate from, @Param("to") LocalDate to);
 
+    /** Dựng lại báo cáo: xóa các dòng từ ngày nghiệp vụ {@code from} trở đi (sẽ dựng lại từ outbox). */
+    @Modifying
+    @Query("DELETE FROM RevenueFact r WHERE r.businessDate >= :from")
+    int deleteFromDate(@Param("from") LocalDate from);
+
     boolean existsBySourceInvoiceIdAndItemIdAndEntryType(UUID sourceInvoiceId, UUID itemId, String entryType);
 
     List<RevenueFact> findBySourceInvoiceIdAndRevenueTypeAndEntryType(UUID sourceInvoiceId, String revenueType, String entryType);

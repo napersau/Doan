@@ -21,11 +21,18 @@ public record ServiceInvoicePaidEvent(
         String petName,
         String ownerName,
         UUID doctorId,           // Bác sĩ phụ trách lúc thu (null = chưa phân công)
+        String doctorName,       // tên Bác sĩ lúc thu: báo cáo không phải chờ sự kiện tiếp đón để biết tên (các queue không bảo đảm thứ tự); null với tin nhắn cũ
         boolean emergency,
         UUID cashierId,
         Instant paidAt,          // mốc tính điểm hàng đợi (score) của các phiếu được phát
         List<Line> lines
 ) implements DomainEvent {
+
+    /** Dạng cũ trước khi có {@code doctorName}. */
+    public ServiceInvoicePaidEvent(UUID eventId, Instant occurredAt, UUID actorUserId, UUID visitId, String visitCode, UUID petId, String petName,
+                                   String ownerName, UUID doctorId, boolean emergency, UUID cashierId, Instant paidAt, List<Line> lines) {
+        this(eventId, occurredAt, actorUserId, visitId, visitCode, petId, petName, ownerName, doctorId, null, emergency, cashierId, paidAt, lines);
+    }
 
     /** Một hóa đơn dịch vụ vừa thu. {@code queueType} = DOCTOR | LABORATORY | IMAGING; null = dịch vụ làm tại phòng (không có phiếu). */
     public record Line(
