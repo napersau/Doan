@@ -6,9 +6,26 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public interface VisitFactRepository extends JpaRepository<VisitFact, UUID> {
+
+    /** Số ca và số ca cấp cứu theo trạng thái, theo ngày tiếp đón trong khoảng. */
+    @Query("""
+            select new com.vetclinic.reporting.repository.StatusCount(v.currentStatus, count(v),
+                   coalesce(sum(case when v.emergency = true then 1L else 0L end), 0L))
+            from VisitFact v where v.businessDate between :from and :to group by v.currentStatus""")
+    List<StatusCount> countByStatus(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** Số ca được giao / hoàn tất của từng Bác sĩ (ca chưa có Bác sĩ không tính). */
+    @Query("""
+            select new com.vetclinic.reporting.repository.DoctorLoadRow(v.doctorId, max(v.doctorName), count(v),
+                   coalesce(sum(case when v.currentStatus = 'COMPLETED' then 1L else 0L end), 0L))
+            from VisitFact v where v.doctorId is not null and v.businessDate between :from and :to
+            group by v.doctorId order by count(v) desc""")
+    List<DoctorLoadRow> doctorLoads(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
     @Modifying
     @Query("UPDATE VisitFact v SET v.doctorName = :name WHERE v.doctorId = :userId")

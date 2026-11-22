@@ -2,7 +2,7 @@
 // Chạy: node e2e/backend_v3.mjs   (cần: stack đang chạy — `docker compose up -d --build` hoặc 6 service + hạ tầng ở dev — và dữ liệu seed
 //   `db/seed_current.sql` mới nạp (lộ trình v4), id tra theo mã ổn định qua e2e/lib/ids.mjs; luồng chuẩn cần Clavamox tồn ≥ 10 và Lu chưa có đợt khám mở)
 // CẢNH BÁO: tạo dữ liệu thật (đợt khám, hóa đơn, lịch hẹn). Chỉ chạy trên môi trường thử nghiệm; muốn chạy lại hãy `docker compose down -v`.
-import { BILL, CLIN, PHARM, brief, call, check, finish, login, redis, run, sleep, sql, step } from './lib/api.mjs';
+import { BILL, CLIN, PHARM, REPORTS, brief, call, check, finish, login, redis, run, sleep, sql, step } from './lib/api.mjs';
 import { medicineIdSql, seedIds, uuidSql } from './lib/ids.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -330,6 +330,59 @@ async function main() {
     expectedTypes.every((type) => outboxTypes.includes(type)), outboxTypes.join(','));
   check('phiếu xếp hàng và gọi số gửi thẳng, không qua outbox (D9)',
     Number(sql("SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE event_type IN ('QueueTicketIssuedEvent', 'PatientCalledEvent')")) === 0);
+
+  step('J. Báo cáo (v4 Phase 7, reporting-service, CQRS): doanh thu luồng chuẩn 530.000 + 157.500, hoàn tiền trừ đúng, nhận trùng sự kiện không cộng hai lần (EX-19)');
+  const RDB = 'pet_clinic_reporting_db';
+  const money = (query) => Number(sql(query) || 0);
+  const servicePaid = () => money("SELECT IFNULL(SUM(payable_amount), 0) FROM pet_clinic_clinical_db.v_service_invoice_amounts WHERE payment_status = 'PAID'");
+  const medicinePaid = () => money("SELECT IFNULL(SUM(payable_amount), 0) FROM pet_clinic_billing_pharmacy_db.v_medicine_invoice_amounts WHERE payment_status = 'PAID'");
+  const reportedService = () => money(`SELECT IFNULL(SUM(net_amount), 0) FROM ${RDB}.revenue_facts WHERE revenue_type = 'SERVICE'`);
+  const reportedMedicine = () => money(`SELECT IFNULL(SUM(net_amount), 0) FROM ${RDB}.revenue_facts WHERE revenue_type = 'MEDICINE'`);
+  for (let i = 0; i < 40 && (reportedService() !== servicePaid() || reportedMedicine() !== medicinePaid()); i += 1) await sleep(1000);   // reporting nhận sự kiện bất đồng bộ
+  check('reporting bắt kịp: doanh thu dịch vụ và thuốc trong báo cáo = tổng hóa đơn PAID của VIEW (dịch vụ trừ phần đã hoàn)',
+    reportedService() === servicePaid() && reportedMedicine() === medicinePaid() && servicePaid() > 0, `${reportedService()}/${servicePaid()} ${reportedMedicine()}/${medicinePaid()}`);
+  check('luồng chuẩn: dịch vụ của ca v1 trong báo cáo = 530.000đ (khám + CBC + X-quang), thuốc = 157.500đ',
+    money(`SELECT SUM(net_amount) FROM ${RDB}.revenue_facts WHERE visit_id = ${uuidSql(v1)} AND revenue_type = 'SERVICE'`) === 530000
+    && money(`SELECT SUM(net_amount) FROM ${RDB}.revenue_facts WHERE source_invoice_id = ${uuidSql(mi.id)}`) === 157500);
+  check('hoàn tiền X-quang (ca vRf): có dòng REFUND âm 180.000, thu − hoàn của nhóm CĐHA = 0, dịch vụ còn lại của ca = 250.000 (CBC khách tự hủy vẫn giữ)',
+    money(`SELECT SUM(net_amount) FROM ${RDB}.revenue_facts WHERE visit_id = ${uuidSql(vRf)} AND entry_type = 'REFUND'`) === -180000
+    && money(`SELECT SUM(net_amount) FROM ${RDB}.revenue_facts WHERE visit_id = ${uuidSql(vRf)} AND category_code = 'IMAGING'`) === 0
+    && money(`SELECT SUM(net_amount) FROM ${RDB}.revenue_facts WHERE visit_id = ${uuidSql(vRf)} AND revenue_type = 'SERVICE'`) >= 250000);
+  const vnToday = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const daily = await call('GET', `${REPORTS}/revenue/daily?from=${vnToday}&to=${vnToday}`, { token: T.admin });
+  check('GET /reports/revenue/daily (qua Gateway): tổng dịch vụ / thuốc khớp hóa đơn PAID, hai loại SERVICE + MEDICINE',
+    daily.status === 200 && Number(daily.data.totals.serviceNetAmount) === servicePaid() && Number(daily.data.totals.medicineNetAmount) === medicinePaid()
+    && daily.data.items.some((i) => i.revenueType === 'SERVICE') && daily.data.items.some((i) => i.revenueType === 'MEDICINE'), brief(daily));
+  const medOnly = await call('GET', `${REPORTS}/revenue/daily?from=${vnToday}&to=${vnToday}&type=MEDICINE`, { token: T.admin });
+  check('type=MEDICINE chỉ trả doanh thu thuốc', medOnly.status === 200 && medOnly.data.items.every((i) => i.revenueType === 'MEDICINE') && Number(medOnly.data.totals.netAmount) === medicinePaid(), brief(medOnly));
+  const byCategory = await call('GET', `${REPORTS}/revenue/by-category?month=${vnToday.slice(0, 7)}`, { token: T.admin });
+  const examCat = byCategory.data?.items?.find((i) => i.revenueType === 'SERVICE' && i.categoryCode === 'EXAMINATION');
+  check('GET /reports/revenue/by-category?month=: có nhóm Khám bệnh (tên hiển thị) và nhóm thuốc, tổng = dịch vụ + thuốc',
+    byCategory.status === 200 && examCat && examCat.categoryName === 'Khám bệnh' && Number(examCat.netAmount) > 0 && byCategory.data.items.some((i) => i.revenueType === 'MEDICINE')
+    && Number(byCategory.data.totals.netAmount) === servicePaid() + medicinePaid(), brief(byCategory));
+  const perfApi = await call('GET', `${REPORTS}/doctors/performance?from=${vnToday}&to=${vnToday}`, { token: T.admin });
+  check('GET /reports/doctors/performance: có Bác sĩ, tổng ca hoàn tất khớp visit_facts, tên từ bảng phẳng',
+    perfApi.status === 200 && perfApi.data.doctors.length > 0 && perfApi.data.doctors.every((d) => d.doctorName)
+    && perfApi.data.doctors.reduce((s, d) => s + d.completedVisits, 0) === Number(sql(`SELECT COUNT(*) FROM ${RDB}.visit_facts WHERE current_status = 'COMPLETED' AND doctor_id IS NOT NULL`)), brief(perfApi));
+  const summaryApi = await call('GET', `${REPORTS}/visits/summary?date=${vnToday}`, { token: T.admin });
+  check('GET /reports/visits/summary?date=: tổng ca = số dòng visit_facts hôm nay, có ca cấp cứu, hoàn tất và hủy',
+    summaryApi.status === 200 && summaryApi.data.totalVisits === Number(sql(`SELECT COUNT(*) FROM ${RDB}.visit_facts WHERE business_date = '${vnToday}'`))
+    && summaryApi.data.emergencyVisits > 0 && summaryApi.data.completedVisits > 0 && summaryApi.data.cancelledVisits > 0
+    && summaryApi.data.totalVisits === summaryApi.data.routineVisits + summaryApi.data.paraclinicalVisits, brief(summaryApi));
+  // EX-19: phát lại sự kiện thu tiền dịch vụ + thu tiền thuốc của luồng chuẩn -> báo cáo không đổi
+  const beforeReplay = [reportedService(), reportedMedicine(), Number(sql(`SELECT COUNT(*) FROM ${RDB}.revenue_facts`)), Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`))];
+  sql(`UPDATE pet_clinic_clinical_db.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'invoice.service_paid' AND aggregate_id = '${v1}'`);
+  sql(`UPDATE pet_clinic_billing_pharmacy_db.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = '${mi.id}'`);
+  for (let i = 0; i < 20 && Number(sql("SELECT COUNT(*) FROM pet_clinic_clinical_db.outbox_events WHERE status <> 'PUBLISHED'")) + Number(sql("SELECT COUNT(*) FROM pet_clinic_billing_pharmacy_db.outbox_events WHERE status <> 'PUBLISHED'")) > 0; i += 1) await sleep(1000);
+  await sleep(4000);
+  const afterReplay = [reportedService(), reportedMedicine(), Number(sql(`SELECT COUNT(*) FROM ${RDB}.revenue_facts`)), Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`))];
+  check('EX-19: giao lại sự kiện thu tiền dịch vụ + thuốc của luồng chuẩn → tổng báo cáo, số dòng fact và bảng tổng hợp KHÔNG đổi', JSON.stringify(beforeReplay) === JSON.stringify(afterReplay), `${beforeReplay} → ${afterReplay}`);
+  check('bảng tổng hợp theo ngày khớp tổng các dòng fact (cộng dồn nguyên tử)', Number(sql(`SELECT SUM(net_amount) FROM ${RDB}.daily_revenue_summaries`)) === reportedService() + reportedMedicine());
+  check('khoảng ngày đảo ngược → 400 SYS_1001; type sai → 400', (await call('GET', `${REPORTS}/revenue/daily?from=${vnToday}&to=2020-01-01`, { token: T.admin })).code === 'SYS_1001'
+    && (await call('GET', `${REPORTS}/revenue/daily?type=FOOD`, { token: T.admin })).status === 400);
+  check('chỉ ADMIN xem báo cáo: Lễ tân, Bác sĩ → 403; không token → 401', (await call('GET', `${REPORTS}/revenue/daily`, { token: T.rec })).status === 403
+    && (await call('GET', `${REPORTS}/visits/summary`, { token: T.doc3 })).status === 403 && (await call('GET', `${REPORTS}/revenue/daily`)).status === 401);
+  check('báo cáo cũ ở clinical / billing đã bị xóa (404)', (await call('GET', `${CLIN}/reports/revenue`, { token: T.admin })).status === 404 && (await call('GET', `${BILL}/reports/revenue`, { token: T.admin })).status === 404);
 
   finish();
 }

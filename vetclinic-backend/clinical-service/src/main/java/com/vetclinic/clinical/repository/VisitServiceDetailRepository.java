@@ -5,7 +5,6 @@ import com.vetclinic.clinical.constant.ServiceKind;
 import com.vetclinic.clinical.constant.ServiceDetailStatus;
 import com.vetclinic.clinical.entity.VisitServiceDetail;
 import jakarta.persistence.LockModeType;
-import java.time.Instant;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -53,11 +52,4 @@ public interface VisitServiceDetailRepository extends JpaRepository<VisitService
 
     @Query("select count(d) > 0 from VisitServiceDetail d where d.visitId = :visitId and d.service.code = :code")
     boolean existsByVisitAndServiceCode(@Param("visitId") UUID visitId, @Param("code") String code);
-
-    /** Báo cáo vận hành: số đợt khám (check-in trong [start, end)) có ít nhất một chỉ định cận lâm sàng chưa bị hủy. */
-    @Query("select count(distinct d.visitId) from VisitServiceDetail d, PetVisit v where v.id = d.visitId "
-            + "and d.service.category.queueType in ('LABORATORY', 'IMAGING') "
-            + "and d.status <> com.vetclinic.clinical.constant.ServiceDetailStatus.CANCELLED "
-            + "and v.checkedInAt >= :start and v.checkedInAt < :end")
-    long countVisitsWithParaclinicalBetween(@Param("start") Instant start, @Param("end") Instant end);
 }

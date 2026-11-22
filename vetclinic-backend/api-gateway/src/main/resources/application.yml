@@ -26,6 +26,10 @@ spring:
               uri: lb://billing-pharmacy-service
               predicates:
                 - Path=/api/v1/billing/**,/api/v1/pharmacy/**
+            - id: reporting-service
+              uri: lb://reporting-service
+              predicates:
+                - Path=/api/v1/reports/**
             - id: notification-service
               uri: lb://notification-service
               predicates:

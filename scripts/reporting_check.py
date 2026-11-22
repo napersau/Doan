@@ -1,6 +1,6 @@
-"""Kiểm tra THẬT bước 7.1 (MySQL thật + RabbitMQ thật + Redis thật, không cần dựng cả hệ thống Docker): reporting-service dựng mô hình đọc
+"""Kiểm tra THẬT bước 7.1 + 7.2 (MySQL thật + RabbitMQ thật + Redis thật, không cần dựng cả hệ thống Docker): reporting-service dựng mô hình đọc
 báo cáo (CQRS) từ sự kiện: visit_facts, revenue_facts (SALE / REFUND âm), daily_revenue_summaries (cộng dồn nguyên tử), doctor_daily_performances,
-idempotent (giao lại không cộng đôi), đổi tên Bác sĩ / chủ nuôi / thú cưng lan sang báo cáo, sự kiện không xử lý được -> thử lại 3 lần -> DLQ.
+idempotent (giao lại không cộng đôi), API báo cáo (7.2: doanh thu theo ngày / nhóm, hiệu suất Bác sĩ, tổng hợp ca; chỉ ADMIN), đổi tên Bác sĩ / chủ nuôi / thú cưng lan sang báo cáo, sự kiện không xử lý được -> thử lại 3 lần -> DLQ.
   python scripts/reporting_check.py
 Cần: container MySQL 'vetclinic-check-mysql' (bash scripts/service_check.sh reporting-service --reset), Docker, JDK 21 và jar của auth-service /
 clinical-service / billing-pharmacy-service / reporting-service trong <module>/target (mvn -o -pl ... install -DskipTests).
@@ -154,6 +154,9 @@ try:
     # bảng báo cáo dọn trước khi chạy: mọi dòng sau đây đều do chính lần chạy này sinh ra
     for table in ("visit_facts", "revenue_facts", "daily_revenue_summaries", "doctor_daily_performances", "processed_events"):
         sql(f"DELETE FROM {RDB}.{table}")
+    # sự kiện còn PENDING do các script kiểm tra khác để lại (chạy service không có RabbitMQ) sẽ đổ vào báo cáo và làm lệch số đếm: coi như đã gửi
+    for db in ("pet_clinic_auth_db", "pet_clinic_appointment_db", CDB, BDB):
+        sql(f"UPDATE {db}.outbox_events SET status = 'PUBLISHED' WHERE status <> 'PUBLISHED'")
     sql(f"DELETE FROM {CDB}.queue_ticket_histories")   # Redis tạm đếm số phiếu lại từ 1 (UNIQUE loại + ngày + số)
     sql(f"UPDATE {CDB}.pet_visits SET status = 'CANCELLED' WHERE doctor_id = {b(TIEN)} AND status IN ('IN_PROGRESS', 'WAITING', 'RESULTS_READY')")
     for module in ("reporting-service", "billing-pharmacy-service", "clinical-service", "auth-service"):   # reporting khai báo queue trước khi service khác phát sự kiện
@@ -295,11 +298,53 @@ try:
     check("hiệu suất Bác sĩ hôm nay: 3 ca hoàn tất (thường, cấp cứu, bỏ về), 1 ca hủy, 1 ca cấp cứu", perf[:3] == ["3", "1", "1"], perf)
     check("hiệu suất Bác sĩ: doanh thu dịch vụ = tổng revenue_facts SERVICE của Bác sĩ (đã trừ hoàn tiền)", dec(perf[3]) == doc_rev and doc_rev > 0, (perf, doc_rev))
 
+    # ================================================================== bước 7.2: API báo cáo (chỉ ADMIN, chỉ đọc reporting_db)
+    def rep(path, token=admin):
+        return call("reporting-service", "GET", f"/api/v1/reports{path}", token)
+
+    svc_sum = dec(sql(f"SELECT IFNULL(SUM(net_amount), 0) FROM {RDB}.revenue_facts WHERE revenue_type = 'SERVICE'"))
+    med_sum = dec(sql(f"SELECT IFNULL(SUM(net_amount), 0) FROM {RDB}.revenue_facts WHERE revenue_type = 'MEDICINE'"))
+    st, res = rep(f"/revenue/daily?from={TODAY}&to={TODAY}")
+    d = res.get("data") or {}
+    check("GET /revenue/daily: 200, tổng dịch vụ / thuốc khớp revenue_facts (đã trừ hoàn tiền), thuốc = 157.500",
+          st == 200 and dec(d["totals"]["serviceNetAmount"]) == svc_sum and dec(d["totals"]["medicineNetAmount"]) == med_sum == Decimal("157500")
+          and dec(d["totals"]["netAmount"]) == svc_sum + med_sum, (st, d.get("totals"), svc_sum, med_sum))
+    check("/revenue/daily: một dòng cho mỗi (ngày, loại) = SERVICE và MEDICINE hôm nay",
+          sorted((i["businessDate"], i["revenueType"]) for i in d["items"]) == [(TODAY, "MEDICINE"), (TODAY, "SERVICE")], d.get("items"))
+    st, res = rep(f"/revenue/daily?from={TODAY}&to={TODAY}&type=MEDICINE")
+    d = res.get("data") or {}
+    check("/revenue/daily?type=MEDICINE chỉ trả dòng thuốc", st == 200 and [i["revenueType"] for i in d["items"]] == ["MEDICINE"] and dec(d["totals"]["netAmount"]) == med_sum, (st, d))
+    st, res = rep(f"/revenue/by-category?month={TODAY[:7]}")
+    d = res.get("data") or {}
+    cats = {(i["revenueType"], i["categoryCode"]): i for i in d.get("items", [])}
+    check("GET /revenue/by-category?month=: nhóm Khám bệnh có doanh thu, X-quang (thu rồi hoàn) ròng = 0, có nhóm thuốc",
+          st == 200 and d["month"] == TODAY[:7] and dec(cats[("SERVICE", "EXAMINATION")]["netAmount"]) > 0 and dec(cats[("SERVICE", "IMAGING")]["netAmount"]) == 0
+          and cats[("SERVICE", "IMAGING")]["lineCount"] == 0 and any(k[0] == "MEDICINE" for k in cats) and dec(d["totals"]["netAmount"]) == svc_sum + med_sum, (st, d))
+    check("tên nhóm trả về là tên hiển thị (Khám bệnh), không phải mã", cats[("SERVICE", "EXAMINATION")]["categoryName"] == sql(f"SELECT name FROM {CDB}.service_categories WHERE code = 'EXAMINATION'"))
+    st, res = rep(f"/doctors/performance?from={TODAY}&to={TODAY}")
+    docs = {x["doctorId"]: x for x in (res.get("data") or {}).get("doctors", [])}
+    t_row = docs.get(TIEN, {})
+    check("GET /doctors/performance: Bác sĩ Tiến 3 ca hoàn tất, 1 hủy, 1 cấp cứu, doanh thu dịch vụ đúng, tên từ bảng phẳng",
+          st == 200 and [t_row.get("completedVisits"), t_row.get("cancelledVisits"), t_row.get("emergencyVisits")] == [3, 1, 1] and dec(t_row.get("serviceNetRevenue")) == doc_rev
+          and t_row.get("doctorName") == tien_name, (st, t_row))
+    st, res = rep(f"/visits/summary?date={TODAY}")
+    d = res.get("data") or {}
+    check("GET /visits/summary?date=: 4 ca (3 hoàn tất, 1 hủy, 1 cấp cứu); X-quang đã hoàn nên không có ca cận lâm sàng",
+          st == 200 and [d["totalVisits"], d["completedVisits"], d["cancelledVisits"], d["emergencyVisits"], d["paraclinicalVisits"], d["routineVisits"]] == [4, 3, 1, 1, 0, 4]
+          and d["byStatus"] == {"WAITING": 0, "COMPLETED": 3, "CANCELLED": 1}, (st, d))
+    check("/visits/summary: khối lượng Bác sĩ Tiến được giao 4 ca, hoàn tất 3",
+          any(x["doctorId"] == TIEN and x["assignedVisits"] == 4 and x["completedVisits"] == 3 for x in d.get("doctors", [])), d.get("doctors"))
+    check("khoảng ngày đảo ngược -> 400 SYS_1001", (lambda r: r[0] == 400 and r[1].get("errorCode") == "SYS_1001")(rep(f"/revenue/daily?from={TODAY}&to=2020-01-01")))
+    check("khoảng quá 366 ngày -> 400", rep(f"/doctors/performance?from=2024-01-01&to={TODAY}")[0] == 400)
+    check("type không hợp lệ -> 400", rep("/revenue/daily?type=FOOD")[0] == 400)
+    check("Lễ tân và Bác sĩ không xem được báo cáo -> 403", rep("/revenue/daily", rec)[0] == 403 and rep("/visits/summary", tien)[0] == 403 and rep("/doctors/performance", lan)[0] == 403)
+    check("không có danh tính -> 401", rep("/revenue/daily", None)[0] in (401, 403))
+
     # ================================================================== EX-19: giao lại sự kiện -> không cộng đôi
     totals_before = sql(f"SELECT (SELECT SUM(net_amount) FROM {RDB}.daily_revenue_summaries), (SELECT COUNT(*) FROM {RDB}.revenue_facts), "
                         f"(SELECT SUM(completed_visits) FROM {RDB}.doctor_daily_performances)")
     sql(f"UPDATE {CDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE aggregate_id IN ('{v1}', '{v2}', '{v4}') AND routing_key IN ('invoice.service_paid', 'visit.completed', 'invoice.service_refunded')")
-    sql(f"UPDATE {BDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'pharmacy.medicine_invoice_paid'")
+    sql(f"UPDATE {BDB}.outbox_events SET status = 'PENDING', published_at = NULL, next_attempt_at = UTC_TIMESTAMP() WHERE routing_key = 'pharmacy.medicine_invoice_paid' AND aggregate_id = '{draft['id']}'")
     wait_for(lambda: sql(f"SELECT COUNT(*) FROM {CDB}.outbox_events WHERE status = 'PENDING' AND routing_key IN ('invoice.service_paid', 'visit.completed', 'invoice.service_refunded')") == "0"
              and sql(f"SELECT COUNT(*) FROM {BDB}.outbox_events WHERE status = 'PENDING' AND routing_key = 'pharmacy.medicine_invoice_paid'") == "0", 40)
     time.sleep(4)

@@ -9,8 +9,12 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 public interface DailyRevenueSummaryRepository extends JpaRepository<DailyRevenueSummary, DailyRevenueSummaryId> {
+
+    /** Các dòng tổng hợp trong khoảng ngày (cả hai đầu), thứ tự ổn định để giao diện vẽ biểu đồ. */
+    List<DailyRevenueSummary> findByBusinessDateBetweenOrderByBusinessDateAscRevenueTypeAscCategoryCodeAsc(LocalDate from, LocalDate to);
 
     /**
      * Cộng dồn nguyên tử (một câu lệnh, không đọc rồi ghi): dòng chưa có thì chèn, đã có thì cộng. Số âm (hoàn tiền) trừ đi.

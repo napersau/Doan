@@ -10,7 +10,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,18 +35,4 @@ public interface MedicineInvoiceRepository extends JpaRepository<MedicineInvoice
 
     Optional<MedicineInvoice> findByPrescriptionId(UUID prescriptionId);
 
-    /** Hóa đơn PAID có ngày thu tiền trong [start, end): nguồn của báo cáo doanh thu thuốc (FR-69). */
-    @Query("select new com.vetclinic.billing.repository.MedicineRevenueRow(mi.paidAt, mi.discountAmount, "
-            + "sum(mii.quantity * mii.unitPrice), sum(mii.quantity * mii.unitPrice * mii.vatRate), "
-            + "sum(mii.quantity * mii.unitPrice * (1 + mii.vatRate))) "
-            + "from MedicineInvoice mi join mi.items mii "
-            + "where mi.paymentStatus = com.vetclinic.billing.constant.PaymentStatus.PAID "
-            + "and mi.paidAt >= :start and mi.paidAt < :end "
-            + "group by mi.id, mi.paidAt, mi.discountAmount")
-    List<MedicineRevenueRow> findPaidRevenueRows(@Param("start") Instant start, @Param("end") Instant end);
-
-    /** Số hóa đơn theo trạng thái cho các hóa đơn LẬP trong [start, end). */
-    @Query("select mi.paymentStatus, count(mi) from MedicineInvoice mi "
-            + "where mi.createdAt >= :start and mi.createdAt < :end group by mi.paymentStatus")
-    List<Object[]> countByStatus(@Param("start") Instant start, @Param("end") Instant end);
 }

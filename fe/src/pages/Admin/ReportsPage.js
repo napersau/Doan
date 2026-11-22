@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import StaffLayout from '../../layouts/StaffLayout';
 import { AsyncView, Button, Field, Input, PageHead, Panel, Select, Stats, Table, Tabs } from '../../components/ui';
-import { appointmentsApi, billingApi, reportsApi } from '../../api/endpoints';
+import { appointmentsApi, reportsApi } from '../../api/endpoints';
 import useAsync from '../../hooks/useAsync';
 import { formatDate, formatMoney, formatNumber, todayIso } from '../../lib/format';
-import { APPOINTMENT_STATUS, BOOKING_CHANNEL, PAYMENT_STATUS, serviceCategoryLabel, VISIT_STATUS } from '../../lib/labels';
+import { groupRevenue } from '../../lib/reportPeriods';
+import { APPOINTMENT_STATUS, BOOKING_CHANNEL, serviceCategoryLabel } from '../../lib/labels';
 
 const percent = (value) => `${formatNumber((value || 0) * 100, 1)}%`;
 const MAX_DAYS = 366;
@@ -20,51 +21,58 @@ function Bars({ rows, label, value, format }) {
   </div>;
 }
 
-/** Doanh thu v3.0 có HAI nguồn ở hai service: dịch vụ + công nợ (clinical) và thuốc (billing-pharmacy); trang này cộng hai nguồn. */
+const REVENUE_TYPE = { SERVICE: 'Dịch vụ', MEDICINE: 'Thuốc' };
+const REPORT_VISIT_STATUS = { WAITING: 'Chưa hoàn tất', COMPLETED: 'Hoàn tất', CANCELLED: 'Đã hủy' };
+
+/** Doanh thu v4.0: MỘT nguồn (reporting-service), đã gộp dịch vụ + thuốc và trừ hoàn tiền (dòng âm). Gom tuần / tháng / quý làm ở giao diện. */
 function Revenue({ range, groupBy }) {
+  const query = { from: range.fromDate, to: range.toDate };
   const report = useAsync(async () => {
-    const [service, medicine] = await Promise.all([reportsApi.serviceRevenue(range), billingApi.medicineRevenue({ ...range, groupBy })]);
-    return { service, medicine };
-  }, [range.fromDate, range.toDate, groupBy]);
-  return <AsyncView state={report}>{({ service, medicine }) => {
-    const serviceTotal = Number(service.totalPaid);
-    const medicineTotal = Number(medicine.totals.payableAmount);
+    const [daily, categories] = await Promise.all([reportsApi.revenueDaily(query), reportsApi.revenueByCategory(query)]);
+    return { daily, categories };
+  }, [range.fromDate, range.toDate]);
+  return <AsyncView state={report}>{({ daily, categories }) => {
+    const totals = daily.totals;
+    const periods = groupRevenue(daily.items, groupBy);
     return <>
-      <Stats items={[['Doanh thu thực thu', formatMoney(serviceTotal + medicineTotal), `${service.paidInvoiceCount + medicine.totals.invoiceCount} hóa đơn đã thanh toán`, 'green'],
-        ['Dịch vụ', formatMoney(serviceTotal), `${service.paidInvoiceCount} hóa đơn dịch vụ`], ['Thuốc', formatMoney(medicineTotal), `${medicine.totals.invoiceCount} hóa đơn thuốc`],
-        ['Công nợ hiện tại', formatMoney(service.debt.amount), `${service.debt.visitCount} ca · ${service.debt.invoiceCount} hóa đơn`, service.debt.invoiceCount ? 'amber' : '']]} />
-      <div className="ui-cols">
-        <Panel title="Doanh thu dịch vụ theo nhóm" subtitle="Hóa đơn dịch vụ đã thu trong kỳ (giờ Việt Nam)." flush>
-          <Table caption="Doanh thu dịch vụ theo nhóm" rowKey="category" empty="Chưa có doanh thu dịch vụ trong kỳ." rows={service.byCategory} columns={[
-            { title: 'Nhóm dịch vụ', render: (row) => serviceCategoryLabel(row.category) }, { title: 'HĐ', key: 'invoiceCount' },
-            { title: 'Trước VAT', align: 'right', render: (row) => formatMoney(row.amountBeforeVat) }, { title: 'VAT', align: 'right', render: (row) => formatMoney(row.vatAmount) },
-            { title: 'Giảm giá', align: 'right', render: (row) => formatMoney(row.discountAmount) }, { title: 'Thực thu', align: 'right', render: (row) => <strong>{formatMoney(row.payableAmount)}</strong> }]} />
-        </Panel>
-        <Panel title="Hóa đơn thuốc lập trong kỳ" subtitle="“Chờ thanh toán” là hóa đơn thuốc chưa thu." flush>
-          <Table caption="Trạng thái hóa đơn thuốc" rowKey="status" rows={Object.entries(medicine.byStatus).map(([status, count]) => ({ status, count }))} columns={[
-            { title: 'Trạng thái', render: (row) => PAYMENT_STATUS[row.status]?.label || row.status }, { title: 'Số hóa đơn', align: 'right', key: 'count' }]} />
-        </Panel>
-      </div>
-      <Panel title="Doanh thu thuốc theo kỳ" subtitle="Theo ngày thu tiền, chỉ hóa đơn thuốc đã thanh toán (tiền thuốc đã gồm VAT, trừ giảm giá).">
-        <Bars rows={medicine.periods} label="label" value="payableAmount" format={formatMoney} />
+      <Stats items={[['Doanh thu thực thu', formatMoney(totals.netAmount), 'Đã gồm VAT, trừ giảm giá và hoàn tiền', 'green'],
+        ['Dịch vụ', formatMoney(totals.serviceNetAmount)], ['Thuốc', formatMoney(totals.medicineNetAmount)],
+        ['Giảm giá đã cho', formatMoney(totals.discountAmount), `${formatNumber(totals.lineCount)} dòng thu (đã trừ dòng hoàn)`]]} />
+      <Panel title="Doanh thu theo nhóm" subtitle="Nhóm dịch vụ và nhóm thuốc trong kỳ; dòng hoàn tiền đã trừ vào nhóm tương ứng (giờ Việt Nam)." flush>
+        <Table caption="Doanh thu theo nhóm" rowKey="rowId" empty="Chưa có doanh thu trong kỳ." rows={categories.items.map((row) => ({ ...row, rowId: `${row.revenueType}-${row.categoryCode}` }))} columns={[
+          { title: 'Loại', render: (row) => REVENUE_TYPE[row.revenueType] || row.revenueType }, { title: 'Nhóm', render: (row) => row.categoryName || serviceCategoryLabel(row.categoryCode) }, { title: 'Dòng', align: 'right', key: 'lineCount' },
+          { title: 'Trước VAT', align: 'right', render: (row) => formatMoney(row.amountBeforeVat) }, { title: 'VAT', align: 'right', render: (row) => formatMoney(row.vatAmount) },
+          { title: 'Giảm giá', align: 'right', render: (row) => formatMoney(row.discountAmount) }, { title: 'Thực thu', align: 'right', render: (row) => <strong>{formatMoney(row.netAmount)}</strong> }]} />
       </Panel>
-      <Panel title="Chi tiết doanh thu thuốc theo kỳ" flush><Table caption="Doanh thu thuốc theo kỳ" rowKey="label" rows={medicine.periods} columns={[
-        { title: 'Kỳ', key: 'label' }, { title: 'HĐ', key: 'invoiceCount' }, { title: 'Trước VAT', align: 'right', render: (row) => formatMoney(row.amountBeforeVat) },
-        { title: 'VAT', align: 'right', render: (row) => formatMoney(row.vatAmount) }, { title: 'Giảm giá', align: 'right', render: (row) => formatMoney(row.discountAmount) },
-        { title: 'Thực thu', align: 'right', render: (row) => <strong>{formatMoney(row.payableAmount)}</strong> }]} /></Panel>
+      <Panel title="Doanh thu theo kỳ" subtitle="Theo ngày thu tiền (dịch vụ + thuốc, đã trừ hoàn tiền).">
+        {periods.length ? <Bars rows={periods} label="label" value="netAmount" format={formatMoney} /> : <p className="ui-muted">Chưa có doanh thu trong kỳ.</p>}
+      </Panel>
+      <Panel title="Chi tiết doanh thu theo kỳ" flush><Table caption="Doanh thu theo kỳ" rowKey="key" empty="Chưa có doanh thu trong kỳ." rows={periods} columns={[
+        { title: 'Kỳ', key: 'label' }, { title: 'Dịch vụ', align: 'right', render: (row) => formatMoney(row.serviceNet) }, { title: 'Thuốc', align: 'right', render: (row) => formatMoney(row.medicineNet) },
+        { title: 'Giảm giá', align: 'right', render: (row) => formatMoney(row.discountAmount) }, { title: 'Thực thu', align: 'right', render: (row) => <strong>{formatMoney(row.netAmount)}</strong> }]} /></Panel>
     </>;
   }}</AsyncView>;
 }
 
 function Operations({ range }) {
-  const report = useAsync(() => reportsApi.operations(range), [range.fromDate, range.toDate]);
-  return <AsyncView state={report}>{(r) => <>
-    <Stats items={[['Tổng số ca', r.totalVisits], ['Hoàn tất', r.completedVisits, undefined, 'green'], ['Đã hủy', r.cancelledVisits], ['Cấp cứu', r.emergencyVisits, undefined, r.emergencyVisits ? 'red' : ''], ['Ca thường', r.routineVisits], ['Ca có cận lâm sàng', r.paraclinicalVisits]]} />
-    <div className="ui-cols">
-      <Panel title="Ca khám theo trạng thái" flush><Table caption="Ca theo trạng thái" rowKey="status" rows={Object.entries(r.byStatus).map(([status, count]) => ({ status, count }))} columns={[{ title: 'Trạng thái', render: (row) => VISIT_STATUS[row.status]?.label || row.status }, { title: 'Số ca', align: 'right', key: 'count' }]} /></Panel>
-      <Panel title="Khối lượng theo bác sĩ" flush><Table caption="Bác sĩ" rowKey="doctorId" rows={r.doctors} columns={[{ title: 'Bác sĩ', render: (row) => row.doctorName || `#${row.doctorId}` }, { title: 'Được giao', align: 'right', key: 'assignedVisits' }, { title: 'Hoàn tất', align: 'right', key: 'completedVisits' }]} empty="Chưa có ca nào được giao." /></Panel>
-    </div>
-  </>}</AsyncView>;
+  const query = { from: range.fromDate, to: range.toDate };
+  const report = useAsync(async () => {
+    const [summary, performance] = await Promise.all([reportsApi.visitsSummary(query), reportsApi.doctorPerformance(query)]);
+    return { summary, performance };
+  }, [range.fromDate, range.toDate]);
+  return <AsyncView state={report}>{({ summary: r, performance }) => {
+    const assigned = Object.fromEntries(r.doctors.map((d) => [d.doctorId, d.assignedVisits]));
+    const doctors = performance.doctors.map((d) => ({ ...d, assignedVisits: assigned[d.doctorId] ?? 0 }));
+    return <>
+      <Stats items={[['Tổng số ca', r.totalVisits], ['Hoàn tất', r.completedVisits, undefined, 'green'], ['Đã hủy', r.cancelledVisits], ['Cấp cứu', r.emergencyVisits, undefined, r.emergencyVisits ? 'red' : ''], ['Ca thường', r.routineVisits], ['Ca có cận lâm sàng', r.paraclinicalVisits]]} />
+      <div className="ui-cols">
+        <Panel title="Ca khám theo trạng thái" subtitle="Theo ngày tiếp đón." flush><Table caption="Ca theo trạng thái" rowKey="status" rows={Object.entries(r.byStatus).map(([status, count]) => ({ status, count }))} columns={[{ title: 'Trạng thái', render: (row) => REPORT_VISIT_STATUS[row.status] || row.status }, { title: 'Số ca', align: 'right', key: 'count' }]} /></Panel>
+        <Panel title="Hiệu suất theo bác sĩ" subtitle="Hoàn tất / hủy / cấp cứu tính theo ngày xảy ra; doanh thu là dịch vụ đã thu (trừ hoàn tiền)." flush><Table caption="Bác sĩ" rowKey="doctorId" rows={doctors} columns={[
+          { title: 'Bác sĩ', render: (row) => row.doctorName || `#${row.doctorId}` }, { title: 'Được giao', align: 'right', key: 'assignedVisits' }, { title: 'Hoàn tất', align: 'right', key: 'completedVisits' },
+          { title: 'Hủy', align: 'right', key: 'cancelledVisits' }, { title: 'Cấp cứu', align: 'right', key: 'emergencyVisits' }, { title: 'Doanh thu dịch vụ', align: 'right', render: (row) => <strong>{formatMoney(row.serviceNetRevenue)}</strong> }]} empty="Chưa có ca nào được ghi nhận." /></Panel>
+      </div>
+    </>;
+  }}</AsyncView>;
 }
 
 function Appointments({ range }) {
@@ -87,7 +95,7 @@ export default function ReportsPage() {
   const invalid = !from || !to || from > to ? 'Khoảng ngày không hợp lệ: ngày bắt đầu phải trước hoặc bằng ngày kết thúc.' : days > MAX_DAYS ? `Khoảng báo cáo tối đa ${MAX_DAYS} ngày.` : '';
   const [applied, setApplied] = useState({ fromDate: from, toDate: to });
   return <StaffLayout area="admin" title="Báo cáo & thống kê">
-    <PageHead eyebrow="BÁO CÁO" title="Báo cáo & thống kê">Doanh thu, vận hành phòng khám và hiệu quả đặt lịch theo khoảng ngày (giờ Việt Nam). Mặc định 30 ngày gần nhất.</PageHead>
+    <PageHead eyebrow="BÁO CÁO" title="Báo cáo & thống kê">Doanh thu (dịch vụ + thuốc, đã trừ hoàn tiền), vận hành phòng khám và hiệu quả đặt lịch theo khoảng ngày (giờ Việt Nam). Mặc định 30 ngày gần nhất.</PageHead>
     <Panel>
       <div className="ui-toolbar" style={{ margin: 0, alignItems: 'flex-end' }}>
         <Field label="Từ ngày"><Input type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} /></Field>

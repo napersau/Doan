@@ -9,9 +9,12 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public interface DoctorDailyPerformanceRepository extends JpaRepository<DoctorDailyPerformance, DoctorDailyPerformanceId> {
+
+    List<DoctorDailyPerformance> findByBusinessDateBetweenOrderByBusinessDateAsc(LocalDate from, LocalDate to);
 
     /**
      * Cộng dồn nguyên tử số ca / doanh thu dịch vụ của một Bác sĩ trong ngày (upsert một câu lệnh). {@code doctorId} truyền dạng 16 byte

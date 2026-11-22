@@ -179,13 +179,16 @@ export const billingApi = {
   updateMedicineInvoiceItems: (id, body) => api.put(`${BILL}/medicine-invoices/${id}/items`, body),
   cancelMedicineInvoice: (id) => api.post(`${BILL}/medicine-invoices/${id}/cancel`),
   confirmMedicinePayment: (id) => api.post(`${BILL}/medicine-invoices/${id}/confirm-payment`),
-  // Doanh thu THUỐC; doanh thu dịch vụ + công nợ ở reportsApi.serviceRevenue (Admin cộng hai nguồn)
-  medicineRevenue: (query) => api.get(`${BILL}/reports/revenue`, query),
 };
 
+// Báo cáo (chỉ ADMIN): MỘT nguồn là reporting-service (mô hình đọc dựng từ sự kiện), đã gộp dịch vụ + thuốc và trừ hoàn tiền.
+// Tham số ngày là from / to (yyyy-MM-dd, giờ phòng khám); visitsSummary còn nhận date=.
+const REPORTS = '/api/v1/reports';
 export const reportsApi = {
-  operations: (query) => api.get(`${CLIN}/reports/operations`, query),
-  serviceRevenue: (query) => api.get(`${CLIN}/reports/revenue`, query),
+  revenueDaily: (query) => api.get(`${REPORTS}/revenue/daily`, query),
+  revenueByCategory: (query) => api.get(`${REPORTS}/revenue/by-category`, query),
+  doctorPerformance: (query) => api.get(`${REPORTS}/doctors/performance`, query),
+  visitsSummary: (query) => api.get(`${REPORTS}/visits/summary`, query),
 };
 
 export const notificationsApi = {

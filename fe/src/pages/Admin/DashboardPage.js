@@ -1,11 +1,11 @@
 import { Link } from 'react-router-dom';
 import StaffLayout from '../../layouts/StaffLayout';
 import { AsyncView, Badge, PageHead, Panel, Stats, Table } from '../../components/ui';
-import { billingApi, pharmacyApi, reportsApi, usersApi, visitsApi } from '../../api/endpoints';
+import { pharmacyApi, reportsApi, usersApi, visitsApi } from '../../api/endpoints';
 import { ROLES } from '../../constants/accessPolicy';
 import { useAuth } from '../../contexts/AuthContext';
 import useAsync from '../../hooks/useAsync';
-import { formatMoney, todayIso } from '../../lib/format';
+import { formatMoney, formatNumber, todayIso } from '../../lib/format';
 
 const ROLE_KEYS = Object.keys(ROLES);
 
@@ -13,7 +13,7 @@ async function loadOverview() {
   const today = todayIso();
   const [doctors, lowStock, operations, revenue, ...counts] = await Promise.all([
     visitsApi.doctorsStatus(), pharmacyApi.medicines({ lowStock: true, active: true, size: 5 }),
-    reportsApi.operations({ fromDate: today, toDate: today }), Promise.all([reportsApi.serviceRevenue({ fromDate: today, toDate: today }), billingApi.medicineRevenue({ fromDate: today, toDate: today, groupBy: 'DAY' })]),
+    reportsApi.visitsSummary({ date: today }), reportsApi.revenueDaily({ from: today, to: today }),
     ...ROLE_KEYS.map((role) => usersApi.list({ role, size: 1 })),
   ]);
   return { doctors, lowStock, operations, revenue, counts: Object.fromEntries(ROLE_KEYS.map((role, index) => [role, counts[index].totalElements])) };
@@ -26,7 +26,7 @@ export default function DashboardPage() {
     <PageHead eyebrow="PAWCARE ADMIN" title={`Xin chào, ${user.fullName}`}>Tình hình phòng khám hôm nay và các cảnh báo cần xử lý.</PageHead>
     <AsyncView state={overview}>
       {(d) => <>
-        <Stats items={[['Ca khám hôm nay', d.operations.totalVisits, `${d.operations.completedVisits} hoàn tất · ${d.operations.emergencyVisits} cấp cứu`], ['Doanh thu hôm nay', formatMoney(Number(d.revenue[0].totalPaid) + Number(d.revenue[1].totals.payableAmount)), `${d.revenue[0].paidInvoiceCount + d.revenue[1].totals.invoiceCount} hóa đơn đã thu (dịch vụ + thuốc)`, 'green'],
+        <Stats items={[['Ca khám hôm nay', d.operations.totalVisits, `${d.operations.completedVisits} hoàn tất · ${d.operations.emergencyVisits} cấp cứu`], ['Doanh thu hôm nay', formatMoney(d.revenue.totals.netAmount), `${formatNumber(d.revenue.totals.lineCount)} dòng thu (dịch vụ + thuốc, đã trừ hoàn tiền)`, 'green'],
           ['Bác sĩ đang hoạt động', d.doctors.length, `Sức chứa đặt lịch: ${d.doctors.length * 2} lịch / khung giờ`], ['Thuốc sắp hết', d.lowStock.totalElements, 'Tồn kho ≤ ngưỡng cảnh báo', d.lowStock.totalElements ? 'red' : '']]} />
         <div className="ui-cols">
           <Panel title="Cảnh báo tồn kho" actions={<Link className="ui-link" to="/admin/medicines?stock=low">Xem kho →</Link>} flush>

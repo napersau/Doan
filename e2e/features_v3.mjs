@@ -512,14 +512,18 @@ async function main() {
 
   // =====================================================================================================================
   step('F. Báo cáo');
-  const r1 = await call('GET', `${CLIN}/reports/operations?fromDate=${dayOffset(-1)}&toDate=${dayOffset(1)}`, { token: T.admin });
-  check('báo cáo vận hành: tổng ca, hoàn tất, hủy, cấp cứu, theo bác sĩ', r1.status === 200 && r1.data.totalVisits > 5 && r1.data.completedVisits > 0 && r1.data.cancelledVisits > 0 && r1.data.emergencyVisits > 0 && r1.data.doctors.length > 0, JSON.stringify(r1.data).slice(0, 200));
-  const r2 = await call('GET', `${CLIN}/reports/revenue?fromDate=${dayOffset(-1)}&toDate=${dayOffset(1)}`, { token: T.admin });
-  check('doanh thu dịch vụ: có nhóm dịch vụ, tổng thực thu và công nợ', r2.status === 200 && Number(r2.data.totalPaid) > 0 && r2.data.byCategory.length > 0 && r2.data.debt.invoiceCount >= 1, JSON.stringify(r2.data).slice(0, 250));
-  const r3 = await call('GET', `${BILL}/reports/revenue?fromDate=${dayOffset(-1)}&toDate=${dayOffset(1)}&groupBy=MONTH`, { token: T.admin });
-  check('doanh thu thuốc: nhóm theo tháng, có tổng và trạng thái hóa đơn', r3.status === 200 && r3.data.groupBy === 'MONTH' && r3.data.periods.length >= 1 && 'PAID' in r3.data.byStatus);
-  check('khoảng báo cáo đảo ngược / quá dài bị từ chối', (await call('GET', `${BILL}/reports/revenue?fromDate=${dayOffset(5)}&toDate=${dayOffset(1)}`, { token: T.admin })).status === 400 && (await call('GET', `${BILL}/reports/revenue?fromDate=2020-01-01&toDate=2026-11-01`, { token: T.admin })).status === 400);
-  check('lễ tân / bác sĩ không xem báo cáo doanh thu (403)', (await call('GET', `${BILL}/reports/revenue`, { token: T.rec })).status === 403 && (await call('GET', `${CLIN}/reports/revenue`, { token: T.doc4 })).status === 403);
+  const rFrom = dayOffset(-1);
+  const rTo = dayOffset(1);
+  const r1 = await call('GET', `/api/v1/reports/visits/summary?from=${rFrom}&to=${rTo}`, { token: T.admin });
+  check('báo cáo vận hành (reporting-service): tổng ca, hoàn tất, hủy, cấp cứu, theo bác sĩ', r1.status === 200 && r1.data.totalVisits > 5 && r1.data.completedVisits > 0 && r1.data.cancelledVisits > 0 && r1.data.emergencyVisits > 0 && r1.data.doctors.length > 0, JSON.stringify(r1.data).slice(0, 200));
+  const r2 = await call('GET', `/api/v1/reports/revenue/by-category?from=${rFrom}&to=${rTo}`, { token: T.admin });
+  check('doanh thu theo nhóm: có nhóm dịch vụ và nhóm thuốc, tổng thực thu dương', r2.status === 200 && Number(r2.data.totals.netAmount) > 0 && r2.data.items.some((i) => i.revenueType === 'SERVICE') && r2.data.items.some((i) => i.revenueType === 'MEDICINE'), JSON.stringify(r2.data).slice(0, 250));
+  const r3 = await call('GET', `/api/v1/reports/revenue/daily?from=${rFrom}&to=${rTo}&type=SERVICE`, { token: T.admin });
+  check('doanh thu theo ngày: lọc type=SERVICE, mỗi dòng một ngày', r3.status === 200 && r3.data.items.length >= 1 && r3.data.items.every((i) => i.revenueType === 'SERVICE'));
+  const r4 = await call('GET', `/api/v1/reports/doctors/performance?from=${rFrom}&to=${rTo}`, { token: T.admin });
+  check('hiệu suất bác sĩ: có ca hoàn tất và doanh thu dịch vụ', r4.status === 200 && r4.data.doctors.some((d) => d.completedVisits > 0 && Number(d.serviceNetRevenue) > 0), JSON.stringify(r4.data).slice(0, 200));
+  check('khoảng báo cáo đảo ngược / quá dài bị từ chối', (await call('GET', `/api/v1/reports/revenue/daily?from=${dayOffset(5)}&to=${dayOffset(1)}`, { token: T.admin })).status === 400 && (await call('GET', `/api/v1/reports/revenue/daily?from=2020-01-01&to=2026-11-01`, { token: T.admin })).status === 400);
+  check('lễ tân / bác sĩ không xem báo cáo doanh thu (403)', (await call('GET', `/api/v1/reports/revenue/daily`, { token: T.rec })).status === 403 && (await call('GET', `/api/v1/reports/doctors/performance`, { token: T.doc4 })).status === 403);
 
   // =====================================================================================================================
   step('G. Danh mục thuốc và kho');

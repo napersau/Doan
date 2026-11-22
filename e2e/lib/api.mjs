@@ -16,6 +16,7 @@ export const PHARM = '/api/v1/pharmacy';
 export const BILL = '/api/v1/billing';
 export const APPT = '/api/v1/appointments';
 export const NOTI = '/api/v1/notifications';
+export const REPORTS = '/api/v1/reports';   // reporting-service (v4.0, bước 7.2)
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
