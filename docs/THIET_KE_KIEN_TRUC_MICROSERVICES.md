@@ -83,7 +83,7 @@ Hệ thống có **6 service ứng dụng** + **2 service hạ tầng**, **52 b�
 | Service | Cổng | CSDL | Bảng phụ trách | Trách nhiệm chính |
 | :--- | :---: | :--- | :--- | :--- |
 | **`service-registry`** | `8761` | – | – | Eureka Server. Không phụ thuộc `common-library`. |
-| **`api-gateway`** | `8080` | – | – | Điểm vào duy nhất (WebFlux); kiểm tra JWT, trả `401`; xóa rồi gắn lại `X-User-Id`, `X-User-Roles`; chặn `/internal/**`; CORS, Rate Limiting. |
+| **`api-gateway`** | `8080` | – | – | Điểm vào duy nhất (WebFlux); kiểm tra JWT, trả `401`; xóa rồi gắn lại `X-User-Id`, `X-User-Roles`; chặn `/internal/**`; CORS. |
 | **`auth-service`** | `8081` | `pet_clinic_auth_db` | `roles`, `users`, `user_roles`, `user_profiles`, `staff_profiles`, `veterinarian_profiles`, `pet_owner_profiles`, `refresh_tokens`, `outbox_events` (9) | Đăng nhập, BCrypt, JWT (30 phút) + Refresh Token có xoay vòng (7 ngày, lưu giá trị băm); quản lý tài khoản, vai trò (bảng danh mục, nhiều vai trò / tài khoản), hồ sơ cá nhân, hồ sơ nhân sự, hồ sơ chuyên môn Bác sĩ, hồ sơ khách hàng. Phát `UserProfileUpdatedEvent`, `UserStatusChangedEvent`. Không xóa cứng tài khoản. |
 | **`appointment-service`** | `8082` | `pet_clinic_appointment_db` | `appointments`, `appointment_status_histories`, `outbox_events`, `processed_events` (4) | Đặt lịch trực tuyến; sức chứa khung giờ theo số Bác sĩ `ACTIVE`; quét `NO_SHOW`; nhận `VisitCheckedInEvent` để chuyển `CHECKED_IN`; giữ snapshot tên thú cưng / chủ nuôi. |
 | **`clinical-service`** | `8083` | `pet_clinic_clinical_db` + Redis | 24 bảng: danh mục & bảng giá dịch vụ, thú cưng, đợt khám, sinh hiệu, hồ sơ khám, chỉ định, kết quả CLS, ảnh, hóa đơn dịch vụ, đơn thuốc, lịch sử phiếu, outbox, processed | Khám lâm sàng 2 pha; **bảng giá dịch vụ có lịch sử**; lập hóa đơn dịch vụ lúc chỉ định (phí khám lúc tiếp đón), thu tiền, hoàn tất ca trong giao dịch cục bộ; **kê đơn thuốc**; **vận hành hàng đợi trên Redis** (phát phiếu khi nhận `ServiceInvoicePaidEvent`, gọi, bắt đầu, kết thúc bằng Lua script) và ghi lịch sử phiếu về MySQL. |
@@ -123,6 +123,8 @@ Không service nào ghi dữ liệu vào service khác qua Feign; endpoint nội
 | `clinical-service` | `appointment-service` | `GET /internal/appointments/{id}` | Khi check-in: lịch đang `CONFIRMED`, đúng ngày, đúng thú cưng. |
 | `clinical-service` | `billing-pharmacy-service` | `GET /internal/medicines?keyword=&active=true`, `GET /internal/medicines/{id}` | Khi kê đơn: tìm thuốc đang kinh doanh, lấy tên, đơn vị, tồn kho tham khảo để chụp snapshot lên `prescription_items`. |
 | `clinical-service` | `billing-pharmacy-service` | `GET /internal/medicine-invoices/status?prescriptionId=` | Khi mở lại hồ sơ (T14): hóa đơn thuốc của đơn đã `PAID` thì không cho sửa đơn thuốc; còn `PENDING` thì cho sửa, chốt lại sẽ phát `PrescriptionCreatedEvent` mới và billing dựng lại hóa đơn nháp. |
+
+> Ngoại lệ có chủ đích: `reporting-service` gọi `GET /internal/outbox/events` của auth / clinical / billing-pharmacy **chỉ** trong job dựng lại báo cáo (mục 5.7); lúc chạy bình thường reporting không gọi service nào, chỉ nhận sự kiện.
 
 > Đã bỏ so với v3.0: `billing-pharmacy → clinical GET /internal/pet-visits/{id}/summary` (kiểm tra quyền kê đơn). Đơn thuốc nay nằm ở clinical nên quyền kê / sửa đơn được kiểm tra nội bộ; hóa đơn thuốc chỉ được tạo từ sự kiện chốt ca nên không cần kiểm tra trạng thái đợt khám.
 
@@ -245,7 +247,7 @@ sequenceDiagram
 
 - v3.0 làm báo cáo doanh thu tổng bằng cách gọi API của nhiều service rồi cộng ở ứng dụng; báo cáo theo Bác sĩ phải gọi `auth-service` để lấy tên từng người (N+1).
 - v4.0: `reporting-service` nhận các sự kiện đợt khám và thanh toán, ghi vào bảng phẳng đã có sẵn tên, nhóm, số tiền. Báo cáo chỉ là một truy vấn `SELECT ... GROUP BY` trên một CSDL, không ảnh hưởng hiệu năng của các service đang phục vụ khám bệnh.
-- Dữ liệu báo cáo trễ vài giây so với giao dịch (chấp nhận được với báo cáo quản trị). Nếu cần dựng lại, xóa các bảng reporting và phát lại sự kiện từ outbox (giữ 7 ngày) hoặc chạy job đồng bộ ban đầu đọc dữ liệu qua API nội bộ.
+- Dữ liệu báo cáo trễ vài giây so với giao dịch (chấp nhận được với báo cáo quản trị). Nếu cần dựng lại: `POST /api/v1/reports/rebuild?days=` (chỉ `ADMIN`) đọc `outbox_events` (giữ 7 ngày) của auth / clinical / billing-pharmacy qua `GET /internal/outbox/events`, xóa dữ liệu báo cáo từ ngày đầu của cửa sổ (tối đa 6 ngày gần nhất, các ngày cũ hơn giữ nguyên) rồi áp dụng lại từng sự kiện bằng đúng bộ xử lý của listener; **không** phát lại qua RabbitMQ để các consumer khác không nhận trùng. Một service nguồn không trả lời thì dừng trước khi xóa.
 
 ---
 

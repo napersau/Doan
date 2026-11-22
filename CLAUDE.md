@@ -12,7 +12,7 @@ Nhóm: Lưu Minh Hiển (trưởng nhóm, BE), Nguyễn Đức Khởi (BE + DevO
 
 ## 1. Nguồn tài liệu chuẩn (thứ tự ưu tiên khi mâu thuẫn)
 
-Tất cả nằm phẳng trong `docs/` (**bỏ qua mọi file có hậu tố " (1)"**: bản v3.0 cũ, dùng để đối chiếu, nên xóa khỏi `docs/` trước khi nộp).
+Tất cả nằm phẳng trong `docs/` (ba bản v3.0 cũ có hậu tố " (1)" đã xóa khỏi `docs/` ngày 22/11/2026; bản Word của ERD cần xuất lại từ `THIET_KE_CO_SO_DU_LIEU_ERD.md` v4.0 nếu dùng đóng quyển báo cáo).
 
 1. `docs/schema_init.sql` (v4.0: **5 CSDL, 52 bảng**, 0 ENUM MySQL, 4 VIEW, dữ liệu danh mục) — DDL thật; Docker nạp trực tiếp file này + `docs/seed_demo_data.sql`.
 2. `docs/THIET_KE_CO_SO_DU_LIEU_ERD.md`, `docs/DANH_SACH_KIEU_ENUM_HE_THONG.md` (18 enum Java lưu VARCHAR + 4 bảng danh mục + `LabEvaluation`).
@@ -176,8 +176,8 @@ Gateway http://localhost:8080 · (file dev) RabbitMQ UI :15672, Eureka :8761, Ma
 
 ## 9. Việc còn mở và hạn chế đã biết (báo người dùng khi đụng tới)
 
-- **Rate Limiting ở Gateway (D6):** người dùng chọn (22/11/2026) **xóa khỏi tài liệu**, không làm trong code: bỏ cụm "Rate Limiting" ở `docs/THIET_KE_KIEN_TRUC_MICROSERVICES.md` dòng 86 (bảng service `api-gateway`) và "Rate Limit" ở `docs/BANG_TONG_HOP_LICH_TRINH_TOAN_KHOA.md` dòng 50 (Tuần 12, Khởi); đừng ghi như tính năng đã có trong báo cáo.
-- **Việc sửa tài liệu cần người dùng làm** (chi tiết và vị trí ở `DANH_SACH_SUA_TAI_LIEU_V4.md`): file "Giải trình thay đổi thiết kế v4.0" ghi EX-17 là "cảnh báo Lễ tân chuyển phiếu" trong khi EX-17 / SM-07 / Kiến trúc §5.2 ghi clinical **tự chuyển** (D4, code làm theo bản sau); xóa ba bản " (1)"; Quy chuẩn 9.1 mô tả Circuit Breaker bằng `spring.cloud.openfeign.circuitbreaker.enabled` (code dùng `ResilientFeignConfig`); Task 4.5.4 "xóa các bảng reporting" (code dựng lại theo cửa sổ ≤ 6 ngày, giữ dữ liệu cũ hơn); FE Vite / TS / Tailwind / Axios (D8); kênh WebSocket (D7); cột "Tình trạng" trong Bảng tổng hợp / Kế hoạch.
+- **Rate Limiting ở Gateway (D6):** người dùng chọn (22/11/2026) **xóa khỏi tài liệu**, không làm trong code; đã bỏ ở `docs/THIET_KE_KIEN_TRUC_MICROSERVICES.md` (bảng service `api-gateway`) và `docs/BANG_TONG_HOP_LICH_TRINH_TOAN_KHOA.md` (Tuần 12, Khởi). Đừng ghi như tính năng đã có trong báo cáo.
+- **Việc sửa tài liệu:** đã làm 22/11/2026 theo yêu cầu người dùng: Rate Limiting, Quy chuẩn 9.1 (Circuit Breaker), Task 4.5.4 + Kiến trúc §5.7 + Quy chuẩn bảng API reporting (dựng lại báo cáo), xóa ba bản " (1)". **Còn lại:** file "Giải trình thay đổi thiết kế v4.0" (không nằm trong repo: EX-17 phải ghi clinical **tự chuyển** phiếu, D4), các mục A.7–A.11 của `DANH_SACH_SUA_TAI_LIEU_V4.md` (phạm vi NFR-10, FE Vite / Axios, kênh WebSocket, cột "Tình trạng", cách đếm "49 mã lỗi").
 - **Hạn chế đã biết:** hoàn tiền hóa đơn thuốc ngoài phạm vi; báo cáo chỉ phản ánh sự kiện từ lúc reporting chạy (dựng lại được ≤ 6 ngày gần nhất, outbox giữ 7 ngày); khóa Redis chỉ theo ngày hôm nay (phiếu phát sát nửa đêm nằm ở khóa ngày cũ); Lua script dựng khóa hàng đợi từ Hash phiếu (đúng cho Redis một nút, đổi nếu dùng Redis Cluster); Redis sập quá ~3 giây thì sự kiện vào DLQ và `QueueReconcileJob` (60 giây) bù phiếu; bảng điều phối của Lễ tân (`/pet-visits/queue`) và lịch sử bệnh án vẫn cần auth-service (liệt kê Bác sĩ `ACTIVE`, nhãn "Đã khóa"), các danh sách đợt khám / lịch hẹn thì không; `service_categories.queue_type` và `visit_facts.current_status` lưu chuỗi (không enum Java); `fe/legacy-mock` (bản mock cũ, không build) chưa xóa; chưa có màn hình sảnh `/topic/lobby`.
 
 ---

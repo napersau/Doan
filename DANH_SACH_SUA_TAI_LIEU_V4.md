@@ -4,6 +4,8 @@ Lập khi kết thúc bước 8.4 của `LO_TRINH_SUA_CODE_V4.md`. **Tôi không
 
 ## A. Cần SỬA tài liệu trước khi nộp (mâu thuẫn hoặc lỗi thời)
 
+> **Cập nhật 22/11/2026 (theo yêu cầu người dùng):** đã làm **A.1, A.2, A.4, A.5, A.6** (kèm sửa các chỗ liên quan cho khớp: Kiến trúc §5.1 và §5.7, bảng API `reporting-service` ở Quy chuẩn). **A.3** không làm được trong repo (file Giải trình không nằm trong repo): dùng đoạn thay thế ở cuối mục A. **A.7–A.11** còn mở.
+
 | # | Tài liệu / vị trí | Nội dung cần sửa | Vì sao |
 |---|---|---|---|
 | 1 | `docs/THIET_KE_KIEN_TRUC_MICROSERVICES.md` dòng 86 (bảng service, hàng `api-gateway`): "…chặn `/internal/**`; CORS, **Rate Limiting**." | Bỏ cụm ", Rate Limiting" | D6, người dùng chọn xóa khỏi tài liệu (22/11/2026). Code Gateway không có `RequestRateLimiter` và Quy chuẩn / Lộ trình không có task |
@@ -17,6 +19,12 @@ Lập khi kết thúc bước 8.4 của `LO_TRINH_SUA_CODE_V4.md`. **Tôi không
 | 9 | `docs/LICH_TRINH_...` Task 5.1 (kênh WebSocket) | Ghi mô hình thực tế: `/user/queue/notifications` + `/topic/role/<VAI TRÒ>` (JWT trong frame STOMP `CONNECT`, `SEND` bị cấm); bỏ `/topic/lobby`, `/topic/doctor/{id}`, `/topic/lab`, `/topic/imaging`, `/topic/admin` và "màn hình sảnh" | D7: đảm bảo an toàn (mỗi người chỉ nghe kênh của mình); màn hình sảnh ngoài phạm vi |
 | 10 | `docs/BANG_TONG_HOP_*.md`, `docs/KE_HOACH_*.md` cột "Tình trạng" (Tuần 8–11 ghi "ĐÃ XONG" từ thời mã nguồn còn v2) | Cập nhật theo thực tế v4.0 (Phase 0–8 xong, 22/11/2026) trước khi nộp GVHD | Không dùng để suy ra tiến độ; dễ bị hỏi lại |
 | 11 | Các tài liệu nêu "49 mã lỗi" (Quy chuẩn §5.1, Giải trình) | Đối chiếu lại con số: `ErrorCode` trong code hiện có **74 hằng** (kể cả nhóm `SYS_*`, `AUTH_*`); lộ trình v4 giữ nguyên danh mục 49 mã của docs và không thêm mã mới ở bước nào (mã mới dùng `INVALID_INPUT_DATA` hoặc mã sẵn có), nên chênh lệch đến từ cách đếm (có / không tính nhóm hệ thống, xác thực và mã v3 còn dùng). Nên ghi một cách đếm duy nhất vào báo cáo | Tránh bị hỏi vì sao số lượng khác |
+
+**Đoạn thay thế cho file "Giải trình thay đổi thiết kế v4.0" (mục EX-17), để dán vào:**
+
+> EX-17 (Bác sĩ bị khóa / nghỉ việc khi còn ca đang chờ): `auth-service` đổi `users.status` và ghi sự kiện `UserStatusChangedEvent` vào outbox trong cùng giao dịch; `clinical-service` nhận sự kiện (idempotent) và **tự chuyển** các phiếu `WAITING` của Bác sĩ đó sang hàng đợi chờ phân công trên Redis (giữ nguyên số phiếu và thứ tự), đồng thời gỡ `doctor_id` của các đợt khám `WAITING`; sau đó `notification-service` báo Lễ tân phân công lại. Lễ tân không phải tự chuyển từng phiếu. Lần phân công mới luôn kiểm tra trạng thái Bác sĩ ở auth-service tại thời điểm ghi (`CLIN_1316`). Ca đang khám dở (`IN_PROGRESS`) không bị ngắt.
+
+**Ba bản " (1)" đã xóa (A.4):** riêng `THIET_KE_CO_SO_DU_LIEU_ERD (1).docx` là bản Word duy nhất của ERD (nội dung v3.0): nếu cần đóng quyển báo cáo thì xuất lại từ `THIET_KE_CO_SO_DU_LIEU_ERD.md` v4.0 (bản cũ vẫn lấy lại được từ lịch sử git).
 
 ## B. Mã nguồn làm KHÁC tài liệu (nên ghi vào báo cáo như điều chỉnh có chủ đích)
 

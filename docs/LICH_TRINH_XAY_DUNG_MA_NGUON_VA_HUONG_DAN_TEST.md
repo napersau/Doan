@@ -616,13 +616,17 @@
 - [ ] **4.5.1** Module `reporting-service`: kết nối `pet_clinic_reporting_db`, entities `VisitFact`, `RevenueFact`, `DailyRevenueSummary`, `DoctorDailyPerformance`, `ProcessedEvent`.
 - [ ] **4.5.2** Listener (mỗi listener một queue, `IdempotentConsumer`): `VisitCheckedInEvent` (tạo `visit_facts`), `VisitCompletedEvent` / `VisitCancelledEvent` (cập nhật, cộng `doctor_daily_performances`), `ServiceInvoicePaidEvent` / `MedicineInvoicePaidEvent` (ghi `revenue_facts` `SALE`, cộng `daily_revenue_summaries` bằng `INSERT … ON DUPLICATE KEY UPDATE`), `ServiceInvoiceRefundedEvent` (dòng `REFUND` âm), `UserProfileUpdatedEvent` / `PetUpdatedEvent` (cập nhật tên).
 - [ ] **4.5.3** API (`ADMIN`): `GET /api/v1/reports/revenue/daily?from=&to=&type=`, `/revenue/by-category?month=`, `/doctors/performance?from=&to=`, `/visits/summary?date=`; Gateway route `/api/v1/reports/**`.
-- [ ] **4.5.4** Job dựng lại (chạy tay): xóa bảng reporting, đặt lại `processed_events`, phát lại sự kiện từ `outbox_events` (≤ 7 ngày) của các service.
+- [ ] **4.5.4** Job dựng lại (chạy tay, `ADMIN`): `POST /api/v1/reports/rebuild?days=` (mặc định 3, tối đa 6 ngày; outbox chỉ giữ 7 ngày).
+  - Nguồn: mỗi service có outbox (auth, clinical, billing-pharmacy) cung cấp endpoint nội bộ `GET /internal/outbox/events?since=&routingKeys=&afterId=&limit=` (chỉ đọc, phân trang theo khóa `afterId`, Gateway không định tuyến). Reporting đọc **hết** các nguồn **trước khi xóa gì**; một nguồn không trả lời thì dừng với 503 `SYS_1004` và báo cáo giữ nguyên.
+  - Áp dụng: giữ khóa độc quyền để các listener tạm chờ (tin nhắn nằm lại trong queue); xếp mọi sự kiện theo thời điểm phát sinh (`eventId` UUIDv7); trong một giao dịch xóa `revenue_facts`, `daily_revenue_summaries`, `doctor_daily_performances`, `visit_facts` từ **ngày nghiệp vụ đầu của cửa sổ** trở đi, đưa các ca tiếp đón trước cửa sổ nhưng hoàn tất / hủy trong cửa sổ về `WAITING`, và quên `processed_events` của các sự kiện sẽ phát lại; rồi phát lại từng sự kiện bằng **đúng bộ xử lý của listener** (mỗi sự kiện một giao dịch). Sự kiện không áp dụng được được đếm và ghi lý do, không làm hỏng cả job.
+  - **Không phát lại qua RabbitMQ** (các consumer khác như notification sẽ nhận trùng, và thứ tự giữa các queue không được bảo đảm). Dữ liệu của các ngày cũ hơn cửa sổ **được giữ nguyên** (xóa hết sẽ mất lịch sử quá 7 ngày mà outbox không dựng lại được). Chạy lại nhiều lần cho cùng kết quả; mỗi lần chỉ một job (`SYS_1008` nếu trùng).
 
 > **Hướng dẫn Kiểm thử Task 4.5:**
 > 1. Sau khi chạy hết kịch bản Task 3.2 → 4.4: `GET /api/v1/reports/revenue/daily?from=<hôm nay>&to=<hôm nay>` → dòng SERVICE (khám 2 × 100.000 + CBC 250.000 + X-quang 180.000 + tẩy giun 50.000) và dòng MEDICINE 157.500, khớp tổng `v_service_invoice_amounts` / `v_medicine_invoice_amounts` (`PAID`).
 > 2. Hoàn tiền một dịch vụ CĐHA (EX-08 c) → có dòng `REFUND` âm, tổng ngày giảm đúng bằng số tiền hoàn.
 > 3. Phát lại một `ServiceInvoicePaidEvent` (EX-19) → tổng không đổi.
 > 4. `GET /api/v1/reports/doctors/performance` → `bs_tien` có số ca hoàn tất và doanh thu dịch vụ đúng; tên lấy từ bảng phẳng (không có lời gọi tới `auth-service` trong log).
+> 5. Dựng lại: ghi lại tổng doanh thu và số ca của hôm nay, làm hỏng bảng báo cáo (xóa `revenue_facts` hôm nay), `POST /api/v1/reports/rebuild?days=1` bằng tài khoản `admin` → báo cáo trở về đúng như cũ; dữ liệu các ngày cũ hơn không đổi; Lễ tân gọi → 403; tắt một service nguồn rồi gọi → 503 và bảng báo cáo không bị xóa.
 
 ---
 

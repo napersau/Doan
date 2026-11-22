@@ -178,7 +178,7 @@ Nhằm đồng bộ hoàn toàn giữa **Spring Cloud Gateway**, **Controller** 
 | **`clinical-service`** | `/api/v1/clinical/**`<br>`/api/v1/pets/**`<br>`/api/v1/species/**`<br>`/api/v1/catalog/**` | `GET /api/v1/clinical/pet-visits`<br>`GET /api/v1/clinical/pet-visits/queue` (bảng điều phối, đọc Redis)<br>`GET /api/v1/clinical/pet-visits/my-queue` (hàng đợi Bác sĩ, đọc Redis)<br>`GET /api/v1/clinical/lab-queue`, `/imaging-queue`<br>`GET /api/v1/clinical/cashier/pending?section=EXAM_FEE\|PARACLINIC\|FINAL`<br>`GET /api/v1/clinical/doctors/status`<br>`GET /api/v1/clinical/pet-visits/{id}/medical-record`, `/vital-signs`, `/prescription`, `/service-invoices`<br>`GET /api/v1/catalog/services?categoryCode=` (kèm giá đang áp dụng)<br>`GET /api/v1/catalog/services/{id}/prices` (lịch sử giá)<br>`GET /api/v1/clinical/imaging-attachments/{id}/url` (URL ký tạm 1 giờ)<br>`GET /api/v1/pets/{id}` | `POST /api/v1/clinical/pet-visits/check-in`<br>`POST /api/v1/clinical/pet-visits/{id}/assign-doctor`, `/unassign-doctor`<br>`POST /api/v1/clinical/queue-tickets/call-next?queueType=DOCTOR\|LABORATORY\|IMAGING`<br>`POST /api/v1/clinical/queue-tickets/{ticketId}/call` (Redis: tăng `calledCount`)<br>`POST /api/v1/clinical/queue-tickets/{ticketId}/start` (phòng XN / CĐHA)<br>`POST /api/v1/clinical/pet-visits/{id}/start-exam`, `/start-phase2`, `/close-visit`, `/reopen`<br>`POST /api/v1/clinical/pet-visits/{id}/vital-signs` (thêm một lần đo)<br>`PUT /api/v1/clinical/pet-visits/{id}/medical-record` (`@Version`)<br>`PUT /api/v1/clinical/pet-visits/{id}/prescription` (lưu cả đơn; chỉ khi ca `IN_PROGRESS`)<br>`POST /api/v1/clinical/service-details/{id}/cancel`<br>`POST /api/v1/clinical/service-invoices/{id}/discount`<br>`POST /api/v1/clinical/pet-visits/{id}/service-invoices/confirm-payment`<br>`POST /api/v1/catalog/services/{id}/prices` (ADMIN đổi giá: đóng dòng cũ + thêm dòng mới) |
 | **`billing-pharmacy-service`** | `/api/v1/pharmacy/**`<br>`/api/v1/billing/**` | `GET /api/v1/pharmacy/medicines` (kèm thành phần, quy cách, giá hiện hành, tồn)<br>`GET /api/v1/pharmacy/medicines/{id}/prices` (lịch sử giá)<br>`GET /api/v1/billing/medicine-invoices?visitId=` (hóa đơn nháp của ca)<br>`GET /api/v1/billing/medicine-invoices/{id}` | `POST /api/v1/pharmacy/medicines` (thuốc + thành phần + giá đầu + dòng tồn = 0)<br>`POST /api/v1/pharmacy/medicines/{id}/prices` (ADMIN đổi giá)<br>`POST /api/v1/pharmacy/medicines/{id}/import`, `/adjust` (nhập / cân chỉnh kho)<br>`PUT /api/v1/billing/medicine-invoices/{id}/items` (sửa số lượng / bỏ dòng khi `PENDING`)<br>`POST /api/v1/billing/medicine-invoices/{id}/confirm-payment` (thu tiền + trừ kho)<br>`POST /api/v1/billing/medicine-invoices/{id}/cancel` (khách mua ngoài). Hóa đơn thuốc **không có API tạo**: chỉ sinh từ `PrescriptionCreatedEvent`. |
 | **`notification-service`** | `/api/v1/notifications/**`<br>`/ws/**` | `GET /api/v1/notifications` (thông báo của người dùng hiện tại) | `POST /api/v1/notifications/{id}/read`. Không có API gửi email công khai: Email / WebSocket chỉ được kích hoạt bởi sự kiện RabbitMQ. |
-| **`reporting-service`** | `/api/v1/reports/**` | `GET /api/v1/reports/revenue/daily?from=&to=&type=SERVICE\|MEDICINE`<br>`GET /api/v1/reports/revenue/by-category?month=`<br>`GET /api/v1/reports/doctors/performance?from=&to=`<br>`GET /api/v1/reports/visits/summary?date=` | Không có API ghi (chỉ listener sự kiện). Chỉ vai trò `ADMIN`. |
+| **`reporting-service`** | `/api/v1/reports/**` | `GET /api/v1/reports/revenue/daily?from=&to=&type=SERVICE\|MEDICINE`<br>`GET /api/v1/reports/revenue/by-category?month=` (hoặc `from=&to=`)<br>`GET /api/v1/reports/doctors/performance?from=&to=`<br>`GET /api/v1/reports/visits/summary?date=` (hoặc `from=&to=`) | `POST /api/v1/reports/rebuild?days=` (dựng lại báo cáo từ outbox, xem Task 4.5.4). Ngoài ra không có API ghi (dữ liệu vào bằng listener sự kiện). Chỉ vai trò `ADMIN`. |
 
 > [!NOTE]
 > **Quy tắc về Action Endpoint:** Đối với các thao tác chuyển đổi trạng thái nghiệp vụ (bắt đầu khám, chốt ca, mở lại hồ sơ, xác nhận thanh toán, bán thuốc), cho phép dùng động từ ở cuối URI nhưng **bắt buộc dùng phương thức `POST`**, và tầng Service phải chống bấm trùng (kiểm tra trạng thái nguồn + `@Version`).
@@ -851,26 +851,32 @@ public void confirmServicePayment(UUID visitId, List<UUID> invoiceIds, UUID cash
 
 ### 9.1. Giao tiếp Đồng bộ (OpenFeign)
 0. **Chỉ dùng để ĐỌC**, gọi `/internal/**`, đặt ngoài `@Transactional`. Danh mục lời gọi: `THIET_KE_KIEN_TRUC_MICROSERVICES.md` mục 5.1 (v4.0 thêm `clinical → billing-pharmacy` tra thuốc; bỏ `billing → clinical`).
-1. **Timeout + Circuit Breaker:**
+1. **Timeout + Circuit Breaker (bước 8.1; cách làm đã kiểm chứng trên hệ thống chạy thật):**
    ```yaml
    spring:
      cloud:
        openfeign:
-         circuitbreaker:
-           enabled: true
          client:
            config:
              default:
-               connectTimeout: 2000
-               readTimeout: 2000
+               connect-timeout: 2000
+               read-timeout: 2000
    resilience4j:
      circuitbreaker:
        configs:
          default:
-           slidingWindowSize: 20
-           failureRateThreshold: 50
-           waitDurationInOpenState: 10s
+           sliding-window-size: 20
+           minimum-number-of-calls: 10        # mặc định 100 lớn hơn cửa sổ nên mạch gần như không bao giờ mở
+           failure-rate-threshold: 50
+           wait-duration-in-open-state: 10s
+           permitted-number-of-calls-in-half-open-state: 3
+           record-failure-predicate: com.vetclinic.common.feign.FeignFailurePredicate
    ```
+   - **KHÔNG bật `spring.cloud.openfeign.circuitbreaker.enabled`:** bộ Resilience4J của Spring Cloud chạy lời gọi ở một luồng khác và bọc mọi lỗi trong `ExecutionException` rồi `NoFallbackAvailableException`, nên nơi gọi **mất `AppException` nghiệp vụ** do `CustomFeignErrorDecoder` dựng (ví dụ 404 `PET_NOT_FOUND` thành 503, `PHARM_1405` thành 500) và không còn bắt được lỗi theo mã.
+   - `common-library` có `ResilientFeignConfig` (`FeignBuilderCustomizer`): bọc `InvocationHandler` của Feign bằng `CircuitBreakerRegistry` (mỗi phương thức của mỗi client một mạch), gọi **ngay trên luồng hiện tại** (giữ header người dùng) và **ném lại đúng ngoại lệ gốc**. Cấu hình mạch lấy từ khối `resilience4j.circuitbreaker.configs.default` ở trên.
+   - `FeignFailurePredicate`: chỉ timeout, mất kết nối và lỗi **5xx** của service con tính là thất bại; lỗi nghiệp vụ **4xx** (không tìm thấy, dữ liệu sai, không đủ quyền...) cho thấy service con vẫn khỏe nên **không** làm mở mạch.
+   - Mạch mở → `CallNotPermittedException` → `CircuitBreakerExceptionHandler` trả **503 `SYS_1004`** ngay (không chờ timeout).
+   - Ngoại lệ có chủ đích: `reporting-service` chỉ dùng Feign cho job dựng lại báo cáo (mục 4.5.4 của Lộ trình): `read-timeout` 15 giây (trang outbox tối đa 1000 dòng), không có Circuit Breaker.
    Lời gọi chỉ để **hiển thị** (làm giàu tên) dùng fallback trả snapshot; lời gọi để **kiểm tra điều kiện ghi** (Bác sĩ còn `ACTIVE`, thuốc tồn tại) không có fallback: lỗi thì trả `SYS_1004`, không ghi dữ liệu.
 2. **`CustomFeignErrorDecoder`** khôi phục `ErrorCode` từ phản hồi của service con (giữ như v3.0):
    ```java
